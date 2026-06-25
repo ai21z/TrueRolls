@@ -1,0 +1,24 @@
+[package]
+name = "kd-worker-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "wasm-bindgen bindings for the TrueRolls Worker: roll + sign over kd-core + the shared kd-receipt signer (server-side only)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+kd-core = { path = "../kd-core" }
+kd-receipt = { path = "../kd-receipt" }
+wasm-bindgen = "0.2"
+serde_json = { workspace = true }
+hex = { workspace = true }
+rand_chacha = "0.9.0"
+rand_core = "0.9.3"
+# getrandom is transitive (via kd-core / ed25519); on wasm32 it needs the wasm_js
+# backend (paired with the rustflags cfg in .cargo/config.toml). It is unused at
+# runtime — the Worker passes a CSPRNG seed in, so rolling + signing stay
+# deterministic given inputs.
+getrandom = { version = "0.3", features = ["wasm_js"] }

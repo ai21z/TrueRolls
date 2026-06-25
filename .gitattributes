@@ -1,0 +1,20 @@
+* text=auto eol=lf
+
+# LF for Rust & most sources in repo
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.sh    text eol=lf
+*.yml   text eol=lf
+
+# CRLF only for Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Treat binaries as binary
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.pdf -text
+*.zip -text

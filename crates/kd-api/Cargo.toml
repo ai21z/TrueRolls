@@ -1,0 +1,51 @@
+[package]
+name = "kd-api"
+version = "0.1.0"
+edition = "2024"
+license = "Proprietary"
+authors = ["Vissarion Zounarakis <ariszoun@gmail.com>"]
+
+[dependencies]
+thiserror = "1"
+futures = "0.3"
+axum = { version = "0.7", features = ["macros", "json"] }
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+dotenvy = "0.15.7"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0.99"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+deadpool-redis = "0.15.1"
+redis = { version = "0.25.4", features = ["tokio-comp"] }
+aws-config = "1.8.5"
+aws-sdk-s3 = "1.103.0"
+tower-http = { version = "0.6.6", features = ["cors"] }
+tower_governor = "0.4"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+sha2 = "0.10"
+ed25519-dalek = { workspace = true }
+serde_jcs = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
+
+# --- Project crates
+kd-core = { path = "../kd-core", features = ["rand"] }
+kd-receipt = { path = "../kd-receipt" } # SIG-1: the single shared receipt verifier
+
+# --- RNG stack (all 0.9.x and aligned with kd-core)
+rand = "0.9.2"
+rand_core = "0.9.3"     # <-- explicit to ensure the trait type matches kd-core
+rand_chacha = "0.9"   # <-- for ChaCha20Rng (Send)
+
+# --- HKDF for deterministic seed expansion
+hkdf = "0.12"
+
+uuid = { version = "1", features = ["v4", "fast-rng", "serde"] }
+
+[dev-dependencies]
+# Keep dev tokio aligned to avoid multiple versions in the graph
+tokio   = { version = "1.47.1", features = ["macros", "rt-multi-thread", "time"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+tower   = { version = "0.5", features = ["util"] } # ServiceExt::oneshot for rate-limit unit tests

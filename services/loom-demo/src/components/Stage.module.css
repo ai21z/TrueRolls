@@ -1,0 +1,282 @@
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* `safe center` keeps content centred when it fits but falls back to
+     flex-start when taller than the frame, so the face/Roll button are never
+     clipped on short desktop viewports; overflow then scrolls. */
+  justify-content: safe center;
+  gap: 28px;
+  padding: 48px 32px;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 560px) {
+  .stage {
+    padding: 40px 16px;
+    gap: 22px;
+  }
+}
+
+.faceWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── The face readout: the FILLED twin of the trust panel's empty SeedSocket.
+   The same rooting-seed specimen — engraved aura, void socket, ember, roots — but
+   the live result lands in it. Goes broken+red when the die is tampered anywhere. ── */
+.seed {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  overflow: visible;
+}
+
+.seedEyebrow {
+  fill: var(--nec-tip);
+  font-family: var(--kd-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  transition: fill var(--kd-duration) var(--kd-ease);
+}
+
+.seedBroken .seedEyebrow {
+  fill: var(--nec-void);
+  opacity: 0.85;
+}
+
+.seedRim {
+  fill: none;
+  stroke: #1c1611;
+  stroke-width: 2.2;
+  opacity: 0.85;
+  transition: stroke var(--kd-duration-slow) var(--kd-ease), opacity var(--kd-duration) var(--kd-ease);
+}
+
+.seedRolling .seedRim {
+  stroke: var(--kd-accent);
+}
+
+.seedBroken .seedRim {
+  stroke: var(--nec-void);
+  opacity: 0.95;
+}
+
+.seedRoots {
+  transition: opacity var(--kd-duration) var(--kd-ease);
+}
+
+.seedScar {
+  fill: none;
+  stroke: var(--nec-void);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.92;
+  animation: fadeUp 0.4s var(--kd-ease) forwards;
+}
+
+.seedFace {
+  fill: var(--nec-bone);
+  font-family: var(--kd-font-mono);
+  font-size: 58px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  transition: fill var(--kd-duration) var(--kd-ease);
+}
+
+.seedFaceBroken {
+  fill: #d98a8d;
+}
+
+.seedFaceNew {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fadeUp 0.4s var(--kd-ease) forwards;
+}
+
+.seedPlaceholder {
+  fill: var(--kd-text-muted);
+  font-family: var(--kd-font-mono);
+  font-size: 30px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seedFaceNew,
+  .seedScar {
+    animation: none;
+  }
+}
+
+/* ── Metric chips ── */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity var(--kd-duration-slow) var(--kd-ease);
+}
+
+.metaVisible {
+  opacity: 1;
+}
+
+.inkDark {
+  --ink-stroke: rgba(10, 10, 11, 0.55);
+}
+
+.metaItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--kd-surface);
+  border-radius: var(--kd-radius-sm);
+  padding: 8px 14px;
+  min-width: 78px;
+}
+
+.metaLabel {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--kd-text-muted);
+}
+
+.metaValue {
+  font-family: var(--kd-font-mono);
+  font-size: 14px;
+  color: var(--kd-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Fairness pill ── */
+.fairnessBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--kd-duration-slow) var(--kd-ease);
+  min-height: 26px;
+}
+
+.fairnessBadgeVisible {
+  opacity: 1;
+}
+
+.fairnessNeutral,
+.fairnessShaped {
+  padding: 5px 14px;
+  border-radius: var(--kd-radius-sm);
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.fairnessNeutral {
+  color: var(--kd-text-muted);
+  background: transparent;
+}
+
+.fairnessShaped {
+  --ink-stroke: var(--kd-accent);
+  color: var(--kd-accent);
+  background: var(--kd-accent-dim);
+}
+
+/* ── Roll CTA ── */
+.rollBtn {
+  padding: 13px 52px;
+  border: none;
+  border-radius: var(--kd-radius);
+  background: var(--kd-accent);
+  color: var(--kd-bg);
+  font-family: var(--kd-font-body);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: filter var(--kd-duration) var(--kd-ease),
+              transform var(--kd-duration) var(--kd-ease);
+}
+
+.rollBtn:hover {
+  filter: brightness(1.08);
+}
+
+.rollBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.rollBtnRolling {
+  opacity: 0.7;
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Distribution preview bars ── */
+.distBars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 60px;
+  max-width: 340px;
+  width: 100%;
+  padding: 0 4px;
+}
+
+.distBar {
+  flex: 1;
+  min-height: 2px;
+  background: var(--kd-surface-raised);
+  border-radius: 0;
+  transition: height var(--kd-duration-slow) var(--kd-ease),
+              background var(--kd-duration) var(--kd-ease);
+}
+
+.distBarRolled {
+  background: var(--kd-accent);
+}
+
+.rollError {
+  font-size: 12px;
+  color: var(--kd-fail);
+  background: var(--kd-fail-dim);
+  border: 1px solid rgba(181, 71, 77, 0.28);
+  border-radius: var(--kd-radius);
+  padding: 7px 16px;
+  text-align: center;
+  animation: fadeUp 0.3s var(--kd-ease) forwards;
+}

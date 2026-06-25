@@ -1,0 +1,59 @@
+.section {
+  padding: var(--kd-section-py) var(--kd-gutter);
+}
+
+.inner {
+  max-width: var(--kd-maxw);
+  margin: 0 auto;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kd-accent);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--kd-border-accent);
+}
+
+.title {
+  font-size: clamp(26px, 3.4vw, 40px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--kd-text);
+}
+
+.frame {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr) 340px;
+  height: min(72vh, 720px);
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius-lg);
+  overflow: hidden;
+  background: var(--kd-bg);
+}
+
+/* Below desktop: stack rail → stage → transcripts in one column. */
+@media (max-width: 1024px) {
+  .frame {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}

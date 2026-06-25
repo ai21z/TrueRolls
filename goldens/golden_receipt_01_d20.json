@@ -1,0 +1,27 @@
+{
+  "alpha": 0.3213648106902838,
+  "created_at": "2026-01-01T00:00:00Z",
+  "die": "d20",
+  "ev": 11.65325625845831,
+  "face": 10,
+  "id": "00000000-0000-0000-0000-00000000d201",
+  "kappa": 0.6,
+  "kl": 0.02011901380257613,
+  "proof": {
+    "draw_u64": "7618457241228926372",
+    "math_param_version": "roll.math.v1",
+    "rng": {
+      "algo": "HKDF(SHA-256)->ChaCha20Rng",
+      "drbg_key_hex": "4242424242424242424242424242424242424242424242424242424242424242"
+    }
+  },
+  "receipt_hash": "sha256:a1dc5db031880eed1b20ef0042dedfae74df895b2bbe88a12a79221413bb350c",
+  "sig": {
+    "alg": "Ed25519",
+    "canon": "JCS/RFC8785",
+    "kid": "test-kid-1",
+    "signature_b64": "vsBiCDnNYIx0DduzM/rC3ogH9bOXbqN74khtHPMCvHAGr5/JlwgRjgu8kotUUM8fHSYc2TXue/k+TQqmIEuSDg=="
+  },
+  "transcript_url": "/v1/roll/00000000-0000-0000-0000-00000000d201/transcript",
+  "v": "truerolls-1"
+}

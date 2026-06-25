@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO rolls (public_id, die, kappa, seed, idempotency_key, idem_payload_sha256, face, ev, alpha, kl)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING id, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float8",
+        "Text",
+        "Text",
+        "Bytea",
+        "Int4",
+        "Float8",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "cce2a5d20edd7c65fedbb0166e71c9cfe0f75b5d753c57338990fb267b205252"
+}

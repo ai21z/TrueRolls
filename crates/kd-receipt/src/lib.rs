@@ -1,0 +1,657 @@
+//! kd-receipt — the shared offline ReceiptV2 signer + verifier.
+//!
+//! This is the *single* implementation of TrueRolls receipt signing AND
+//! verification. The CLI (`kd verify --receipt`), the browser (via
+//! `kd-core-wasm`), and the server (`kd-api`) all run this same compiled code,
+//! bit-for-bit. A verifier that drifts from the signer is worse than no verifier
+//! (it can bless a forgery), so sign and verify live in one crate and both go
+//! through the single [`canonical_signing_bytes`] — they cannot disagree on what
+//! bytes a signature covers. The signer lives in [`mod@sign`].
+//!
+//! Verification, in order (mirrors the server's `run_receipt_verification`):
+//!   1. **Signature** — Ed25519 over the JCS/RFC8785 canonicalization of the
+//!      receipt body with `sig` and `receipt_hash` removed (soft: a bad/missing
+//!      signature is recorded, not fatal, so the rest of the report still fills).
+//!   2. **Sampling** — reseed `ChaCha20Rng` from `proof.rng.drbg_key_hex`, take
+//!      one `next_u64()`, and compare against `proof.draw_u64`.
+//!   3. **Face** — recompute the guarded distribution from `(die, kappa)` via
+//!      `kd_core`, map the draw with `prefix_cdf_index_from_u64`, compare to
+//!      `face`.
+//!   4. **Metrics** — recompute `alpha`/`kl`/`ev` and compare within `1e-9`.
+//!
+//! All math comes from `kd_core` — this crate adds no math of its own.
+//!
+//! Honest scope: this proves the *published* draw and math were applied
+//! consistently and signed by the key holder. It does **not** prove the server's
+//! seed choice was honest — that is commit-reveal / drand territory, not this.
+
+use kd_core::die::Die;
+use kd_core::distribution::compute_distribution;
+use kd_core::params::default_for_die;
+use kd_core::sample::prefix_cdf_index_from_u64;
+use rand_chacha::ChaCha20Rng;
+use rand_core::{RngCore, SeedableRng};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::fmt;
+
+mod sign;
+pub use sign::{
+    PUBLISHED_TEST_SEED_HEX, PublicKeyEntry, ReceiptSignature, ReceiptSigner, TEST_KIDS,
+    reject_test_signer_in_prod,
+};
+
+/// The only receipt schema version this verifier accepts.
+pub const RECEIPT_VERSION: &str = "truerolls-1";
+
+/// Absolute tolerance for the recomputed `alpha`/`kl`/`ev` comparison.
+pub const METRIC_TOL: f64 = 1e-9;
+
+/// The exact bytes a receipt signature covers: the JCS (RFC 8785) serialization
+/// of the receipt body with `sig` and `receipt_hash` removed (both are attached
+/// *after* signing, so they are not part of the signed bytes). This is the single
+/// canonicalization — both [`ReceiptSigner::sign_receipt`] and signature
+/// verification call it, so the signer and verifier can never disagree on what
+/// was signed. Stripping is defensive: callers that pass a pre-`sig` body get an
+/// identical result, so existing goldens and newly-signed receipts match.
+pub fn canonical_signing_bytes(receipt_body: &Value) -> Result<Vec<u8>, String> {
+    let mut body = receipt_body.clone();
+    if let Some(obj) = body.as_object_mut() {
+        obj.remove("sig");
+        obj.remove("receipt_hash");
+    }
+    serde_jcs::to_vec(&body).map_err(|e| format!("JCS canonicalization failed: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// ReceiptV2 (deserialization mirror of kd-api's dto::ReceiptV2)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct ReceiptV2 {
+    v: String,
+    #[allow(dead_code)]
+    id: String,
+    die: String,
+    kappa: f64,
+    face: i32,
+    alpha: f64,
+    kl: f64,
+    ev: f64,
+    proof: ReceiptProof,
+    sig: Option<ReceiptSig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReceiptProof {
+    math_param_version: String,
+    rng: ReceiptRng,
+    draw_u64: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReceiptRng {
+    drbg_key_hex: String,
+    #[allow(dead_code)]
+    algo: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReceiptSig {
+    #[allow(dead_code)]
+    alg: String,
+    #[allow(dead_code)]
+    kid: String,
+    signature_b64: String,
+    #[allow(dead_code)]
+    canon: String,
+}
+
+// ---------------------------------------------------------------------------
+// Errors — the "cannot even attempt verification" cases (hard failures).
+// Signature problems are NOT here; they are recorded softly in VerifyReport.
+// ---------------------------------------------------------------------------
+
+/// A receipt that is structurally unverifiable (malformed or out-of-scope).
+/// These mirror the CLI's hard-`bail!` paths so behavior is identical.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyError {
+    /// JSON did not deserialize into a ReceiptV2.
+    ParseReceipt(String),
+    /// `v` is not [`RECEIPT_VERSION`].
+    UnsupportedVersion(String),
+    /// `proof.rng.drbg_key_hex` is not valid hex.
+    BadDrbgHex(String),
+    /// `proof.rng.drbg_key_hex` did not decode to exactly 32 bytes.
+    BadDrbgLen(usize),
+    /// `proof.draw_u64` is not a u64.
+    BadDraw,
+    /// `proof.math_param_version` does not match the engine's `PARAM_VERSION`.
+    ParamVersionMismatch { got: String, current: String },
+    /// `die` is not one of d4/d6/d8/d10/d12/d20/d100.
+    UnsupportedDie(String),
+    /// kd-core returned a compute error.
+    Core(String),
+}
+
+impl fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VerifyError::ParseReceipt(e) => write!(f, "failed to parse ReceiptV2: {e}"),
+            VerifyError::UnsupportedVersion(v) => write!(f, "unsupported receipt version: '{v}'"),
+            VerifyError::BadDrbgHex(e) => write!(f, "invalid drbg_key_hex: {e}"),
+            VerifyError::BadDrbgLen(n) => {
+                write!(f, "drbg_key_hex must decode to 32 bytes, got {n}")
+            }
+            VerifyError::BadDraw => write!(f, "draw_u64 is not a valid u64"),
+            VerifyError::ParamVersionMismatch { got, current } => {
+                write!(
+                    f,
+                    "receipt math_param_version '{got}' != current '{current}'"
+                )
+            }
+            VerifyError::UnsupportedDie(d) => write!(
+                f,
+                "unsupported die size: {d}. Supported: d4, d6, d8, d10, d12, d20, d100"
+            ),
+            VerifyError::Core(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
+// ---------------------------------------------------------------------------
+// VerifyReport — the four-check result of a verifiable receipt.
+// ---------------------------------------------------------------------------
+
+/// The outcome of verifying a (structurally valid) signed receipt. `verdict`
+/// is VALID only when all four checks pass.
+#[derive(Debug, Clone)]
+pub struct VerifyReport {
+    pub valid_signature: bool,
+    pub valid_sampling: bool,
+    pub face_ok: bool,
+    pub metrics_ok: bool,
+    pub recomputed_face: u32,
+    pub recomputed_alpha: f64,
+    pub recomputed_kl: f64,
+    pub recomputed_ev: f64,
+    pub tol: f64,
+    /// Human-readable reasons for any failed check (empty when VALID).
+    pub errors: Vec<String>,
+}
+
+impl VerifyReport {
+    /// True only when signature, sampling, face, and metrics all pass.
+    pub fn is_valid(&self) -> bool {
+        self.valid_signature && self.valid_sampling && self.face_ok && self.metrics_ok
+    }
+
+    /// The CLI/`--json` and WASM result shape — one schema everywhere.
+    pub fn to_result_json(&self) -> Value {
+        json!({
+            "verdict": if self.is_valid() { "VALID" } else { "INVALID" },
+            "valid_signature": self.valid_signature,
+            "valid_sampling": self.valid_sampling,
+            "face_ok": self.face_ok,
+            "metrics_ok": self.metrics_ok,
+            "details": {
+                "recomputed_face": self.recomputed_face,
+                "recomputed_alpha": self.recomputed_alpha,
+                "recomputed_kl": self.recomputed_kl,
+                "recomputed_ev": self.recomputed_ev,
+                "tol": self.tol,
+            },
+            "errors": self.errors,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Parse `receipt_json` and verify it against `public_key_b64` (base64 of the
+/// 32-byte Ed25519 verifying key). Convenience wrapper over [`verify_receipt`].
+pub fn verify_receipt_str(
+    receipt_json: &str,
+    public_key_b64: &str,
+) -> Result<VerifyReport, VerifyError> {
+    let value: Value =
+        serde_json::from_str(receipt_json).map_err(|e| VerifyError::ParseReceipt(e.to_string()))?;
+    verify_receipt(&value, public_key_b64)
+}
+
+/// Verify a signed ReceiptV2 (`receipt_value`) against `public_key_b64`.
+///
+/// Returns a [`VerifyReport`] for any *structurally valid* receipt (even if the
+/// signature is missing or wrong — those are recorded in the report). Returns a
+/// [`VerifyError`] only when the receipt cannot be verified at all (malformed,
+/// wrong version, bad DRBG key, unparseable draw, version-gated, unknown die).
+pub fn verify_receipt(
+    receipt_value: &Value,
+    public_key_b64: &str,
+) -> Result<VerifyReport, VerifyError> {
+    let receipt: ReceiptV2 = serde_json::from_value(receipt_value.clone())
+        .map_err(|e| VerifyError::ParseReceipt(e.to_string()))?;
+
+    if receipt.v != RECEIPT_VERSION {
+        return Err(VerifyError::UnsupportedVersion(receipt.v));
+    }
+
+    let mut errors: Vec<String> = Vec::new();
+
+    // ---- 1. Signature (soft) ------------------------------------------------
+    let mut valid_signature = false;
+    match &receipt.sig {
+        Some(sig_block) => {
+            match verify_ed25519_sig(receipt_value, &sig_block.signature_b64, public_key_b64) {
+                Ok(true) => valid_signature = true,
+                Ok(false) => errors.push("Ed25519 signature verification FAILED".to_string()),
+                Err(e) => errors.push(format!("signature error: {e}")),
+            }
+        }
+        None => errors.push("receipt has no signature block".to_string()),
+    }
+
+    // ---- 2. Sampling: drbg_key -> ChaCha20 -> next_u64 ----------------------
+    let drbg_bytes = hex::decode(&receipt.proof.rng.drbg_key_hex)
+        .map_err(|e| VerifyError::BadDrbgHex(e.to_string()))?;
+    if drbg_bytes.len() != 32 {
+        return Err(VerifyError::BadDrbgLen(drbg_bytes.len()));
+    }
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&drbg_bytes);
+    let mut rng = ChaCha20Rng::from_seed(seed);
+    let replayed_draw = rng.next_u64();
+
+    let claimed_draw: u64 = receipt
+        .proof
+        .draw_u64
+        .parse()
+        .map_err(|_| VerifyError::BadDraw)?;
+
+    let valid_sampling = replayed_draw == claimed_draw;
+    if !valid_sampling {
+        errors.push(format!(
+            "draw_u64 mismatch: replayed={replayed_draw}, claimed={claimed_draw}"
+        ));
+    }
+
+    // ---- 3. Version gate + recompute distribution/face ----------------------
+    if receipt.proof.math_param_version != kd_core::PARAM_VERSION {
+        return Err(VerifyError::ParamVersionMismatch {
+            got: receipt.proof.math_param_version.clone(),
+            current: kd_core::PARAM_VERSION.to_string(),
+        });
+    }
+
+    let faces = parse_die(&receipt.die)?;
+    let (recomp_face, recomp_alpha, recomp_kl, recomp_ev) =
+        recompute(faces, receipt.kappa, claimed_draw)?;
+
+    let face_ok = recomp_face as i32 == receipt.face;
+    if !face_ok {
+        errors.push(format!(
+            "face mismatch: recomputed={recomp_face}, receipt={}",
+            receipt.face
+        ));
+    }
+
+    // ---- 4. Metrics ---------------------------------------------------------
+    let tol = METRIC_TOL;
+    let metrics_ok = (recomp_alpha - receipt.alpha).abs() <= tol
+        && (recomp_kl - receipt.kl).abs() <= tol
+        && (recomp_ev - receipt.ev).abs() <= tol;
+    if !metrics_ok {
+        if (recomp_alpha - receipt.alpha).abs() > tol {
+            errors.push(format!(
+                "alpha: recomputed={recomp_alpha}, receipt={}",
+                receipt.alpha
+            ));
+        }
+        if (recomp_kl - receipt.kl).abs() > tol {
+            errors.push(format!(
+                "kl: recomputed={recomp_kl}, receipt={}",
+                receipt.kl
+            ));
+        }
+        if (recomp_ev - receipt.ev).abs() > tol {
+            errors.push(format!(
+                "ev: recomputed={recomp_ev}, receipt={}",
+                receipt.ev
+            ));
+        }
+    }
+
+    Ok(VerifyReport {
+        valid_signature,
+        valid_sampling,
+        face_ok,
+        metrics_ok,
+        recomputed_face: recomp_face,
+        recomputed_alpha: recomp_alpha,
+        recomputed_kl: recomp_kl,
+        recomputed_ev: recomp_ev,
+        tol,
+        errors,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+/// Verify the Ed25519 signature over the JCS-canonicalized receipt body with
+/// `sig` and `receipt_hash` removed. `Err` is a usage error (bad key/sig
+/// encoding); `Ok(false)` is a genuine signature mismatch.
+fn verify_ed25519_sig(
+    receipt_value: &Value,
+    sig_b64: &str,
+    public_key_b64: &str,
+) -> Result<bool, String> {
+    use base64::Engine;
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let pk_bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key_b64)
+        .map_err(|e| format!("public key is not valid base64: {e}"))?;
+    if pk_bytes.len() != 32 {
+        return Err(format!(
+            "public key must be 32 bytes, got {}",
+            pk_bytes.len()
+        ));
+    }
+    let pk_arr: [u8; 32] = pk_bytes.as_slice().try_into().unwrap();
+    let vk = VerifyingKey::from_bytes(&pk_arr)
+        .map_err(|e| format!("invalid Ed25519 public key: {e}"))?;
+
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(sig_b64)
+        .map_err(|e| format!("sig is not valid base64: {e}"))?;
+    if sig_bytes.len() != 64 {
+        return Err(format!("sig must be 64 bytes, got {}", sig_bytes.len()));
+    }
+    let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+    let signature = Signature::from_bytes(&sig_arr);
+
+    // The signature covers the shared canonicalization (body WITHOUT sig and
+    // receipt_hash) — the exact bytes `ReceiptSigner::sign_receipt` signed.
+    let canonical_bytes = canonical_signing_bytes(receipt_value)?;
+
+    match vk.verify(&canonical_bytes, &signature) {
+        Ok(()) => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Parse a die string ("d4".."d100") to its face count.
+fn parse_die(s: &str) -> Result<u32, VerifyError> {
+    let s = s.trim().to_lowercase();
+    let stripped = s.strip_prefix('d').unwrap_or(&s);
+    let n: u32 = stripped
+        .parse()
+        .map_err(|_| VerifyError::UnsupportedDie(format!("d{stripped}")))?;
+    match n {
+        4 | 6 | 8 | 10 | 12 | 20 | 100 => Ok(n),
+        _ => Err(VerifyError::UnsupportedDie(format!("d{n}"))),
+    }
+}
+
+/// Recompute `(face, alpha, kl, ev)` from `kd_core` for the given die.
+fn recompute(faces: u32, kappa: f64, draw: u64) -> Result<(u32, f64, f64, f64), VerifyError> {
+    macro_rules! go {
+        ($n:literal) => {{
+            let params = default_for_die($n);
+            let out = compute_distribution::<$n>(Die::<$n>, kappa, &params)
+                .map_err(|e| VerifyError::Core(e.to_string()))?;
+            let idx = prefix_cdf_index_from_u64::<$n>(&out.probs, draw);
+            Ok(((idx + 1) as u32, out.alpha, out.kl, out.ev))
+        }};
+    }
+    match faces {
+        4 => go!(4),
+        6 => go!(6),
+        8 => go!(8),
+        10 => go!(10),
+        12 => go!(12),
+        20 => go!(20),
+        100 => go!(100),
+        _ => Err(VerifyError::UnsupportedDie(format!("d{faces}"))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — exercised against the committed receipt goldens (bit-for-bit proof).
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+    use std::path::Path;
+
+    fn test_public_key_b64() -> String {
+        // The shared PUBLIC test seed ([`PUBLISHED_TEST_SEED_HEX`]) — one source of
+        // truth across the signer, kd-cli's gen_goldens, and these tests.
+        let seed_bytes = hex::decode(PUBLISHED_TEST_SEED_HEX).unwrap();
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&seed_bytes);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+        base64::engine::general_purpose::STANDARD.encode(signing_key.verifying_key().as_bytes())
+    }
+
+    fn golden(name: &str) -> Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("goldens")
+            .join(name);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        serde_json::from_str(&content).unwrap()
+    }
+
+    #[test]
+    fn clean_receipt_golden_verifies_valid() {
+        let report = verify_receipt(
+            &golden("golden_receipt_01_d20.json"),
+            &test_public_key_b64(),
+        )
+        .expect("clean receipt is verifiable");
+        assert!(report.valid_signature, "signature: {:?}", report.errors);
+        assert!(report.valid_sampling, "sampling: {:?}", report.errors);
+        assert!(report.face_ok, "face: {:?}", report.errors);
+        assert!(report.metrics_ok, "metrics: {:?}", report.errors);
+        assert!(report.is_valid());
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert_eq!(report.to_result_json()["verdict"], "VALID");
+    }
+
+    #[test]
+    fn tampered_face_golden_verifies_invalid() {
+        let report = verify_receipt(
+            &golden("golden_receipt_02_d20_tampered_face.json"),
+            &test_public_key_b64(),
+        )
+        .expect("tampered receipt is still structurally verifiable");
+        // Tampering the face changes the signed body AND the face check.
+        assert!(
+            !report.valid_signature,
+            "tampered body must break the signature"
+        );
+        assert!(
+            !report.face_ok,
+            "recomputed face must not match the tampered face"
+        );
+        assert!(!report.is_valid());
+        assert_eq!(report.to_result_json()["verdict"], "INVALID");
+    }
+
+    #[test]
+    fn tampered_draw_breaks_sampling() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["proof"]["draw_u64"] = json!("123456789");
+        let report = verify_receipt(&receipt, &test_public_key_b64()).unwrap();
+        assert!(
+            !report.valid_sampling,
+            "draw no longer matches the DRBG replay"
+        );
+        // Signature also breaks because draw_u64 is part of the signed body.
+        assert!(!report.valid_signature);
+        assert!(!report.is_valid());
+    }
+
+    #[test]
+    fn tampered_kappa_breaks_metrics() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["kappa"] = json!(-0.9);
+        let report = verify_receipt(&receipt, &test_public_key_b64()).unwrap();
+        assert!(
+            !report.metrics_ok,
+            "recomputed metrics must differ at the new kappa"
+        );
+        assert!(!report.valid_signature, "kappa is part of the signed body");
+        assert!(!report.is_valid());
+    }
+
+    #[test]
+    fn missing_signature_block_is_invalid_not_error() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt.as_object_mut().unwrap().remove("sig");
+        let report = verify_receipt(&receipt, &test_public_key_b64()).unwrap();
+        assert!(!report.valid_signature);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("no signature block"))
+        );
+        // Sampling/face/metrics still verified on the unsigned body.
+        assert!(report.valid_sampling);
+        assert!(report.face_ok);
+        assert!(!report.is_valid());
+    }
+
+    #[test]
+    fn wrong_public_key_fails_signature_softly() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        // A valid but different key (all-zero is a valid Ed25519 point encoding).
+        let wrong_key = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        receipt["kappa"] = receipt["kappa"].clone(); // no body change
+        let report = verify_receipt(&receipt, &wrong_key).unwrap();
+        assert!(
+            !report.valid_signature,
+            "signature must not verify under the wrong key"
+        );
+        // The non-signature checks are independent of the key and still pass.
+        assert!(report.valid_sampling);
+        assert!(report.face_ok);
+        assert!(report.metrics_ok);
+    }
+
+    #[test]
+    fn unsupported_version_is_hard_error() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["v"] = json!("truerolls-0");
+        let err = verify_receipt(&receipt, &test_public_key_b64()).unwrap_err();
+        assert_eq!(
+            err,
+            VerifyError::UnsupportedVersion("truerolls-0".to_string())
+        );
+        assert!(err.to_string().contains("unsupported receipt version"));
+    }
+
+    #[test]
+    fn bad_param_version_is_hard_error() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["proof"]["math_param_version"] = json!("roll.math.v0");
+        let err = verify_receipt(&receipt, &test_public_key_b64()).unwrap_err();
+        assert!(matches!(err, VerifyError::ParamVersionMismatch { .. }));
+    }
+
+    #[test]
+    fn str_wrapper_round_trips() {
+        let json = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("goldens")
+                .join("golden_receipt_01_d20.json"),
+        )
+        .unwrap();
+        let report = verify_receipt_str(&json, &test_public_key_b64()).unwrap();
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn kappa_out_of_range_receipt_is_refused_not_valid() {
+        // A receipt claiming κ outside the [-1, 1] contract must NOT verify VALID.
+        // The verifier recomputes via kd_core, which now rejects out-of-range κ,
+        // so the receipt is structurally unverifiable (a hard error) — the signer
+        // (kd-api) and verifier share this one kd_core check and cannot drift.
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["kappa"] = json!(50.0);
+        let err = verify_receipt(&receipt, &test_public_key_b64()).unwrap_err();
+        assert!(
+            matches!(err, VerifyError::Core(_)),
+            "out-of-range κ must hard-fail recompute; got {err:?}"
+        );
+        assert!(err.to_string().contains("kappa out of range"));
+    }
+
+    #[test]
+    fn tampered_die_breaks_face_and_metrics_independently() {
+        // Swapping the die (a signed field, κ in range) breaks the signature
+        // AND the recomputed face/metrics for the wrong die independently
+        // disagree — three layers reject the swap; verdict INVALID (not a hard
+        // error, since κ stays within the contract).
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["die"] = json!("d6");
+        let report = verify_receipt(&receipt, &test_public_key_b64()).unwrap();
+        assert!(!report.valid_signature, "die is part of the signed body");
+        assert!(!report.face_ok, "a d20 face (10) is unreachable on a d6");
+        assert!(!report.metrics_ok, "d6 caps/metrics differ from d20");
+        assert!(!report.is_valid());
+        assert_eq!(report.to_result_json()["verdict"], "INVALID");
+    }
+
+    #[test]
+    fn structurally_broken_receipts_hard_error_never_valid() {
+        let pk = test_public_key_b64();
+        // (a) non-hex DRBG key
+        let mut bad_hex = golden("golden_receipt_01_d20.json");
+        bad_hex["proof"]["rng"]["drbg_key_hex"] = json!("zz".repeat(32));
+        assert!(matches!(
+            verify_receipt(&bad_hex, &pk),
+            Err(VerifyError::BadDrbgHex(_))
+        ));
+        // (b) wrong-length DRBG key (30 bytes, not 32) — guards a seed-length
+        // mishandling that would change the ChaCha20 replay.
+        let mut bad_len = golden("golden_receipt_01_d20.json");
+        bad_len["proof"]["rng"]["drbg_key_hex"] = json!("ab".repeat(30));
+        assert!(matches!(
+            verify_receipt(&bad_len, &pk),
+            Err(VerifyError::BadDrbgLen(30))
+        ));
+        // (c) non-numeric draw
+        let mut bad_draw = golden("golden_receipt_01_d20.json");
+        bad_draw["proof"]["draw_u64"] = json!("not-a-number");
+        assert!(matches!(
+            verify_receipt(&bad_draw, &pk),
+            Err(VerifyError::BadDraw)
+        ));
+    }
+
+    #[test]
+    fn malformed_die_token_reports_cleanly_without_doubled_d() {
+        // A non-numeric die token hard-errors with a single-'d' label.
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["die"] = json!("dx");
+        let err = verify_receipt(&receipt, &test_public_key_b64()).unwrap_err();
+        assert!(matches!(err, VerifyError::UnsupportedDie(_)));
+        let msg = err.to_string();
+        assert!(msg.contains("dx") && !msg.contains("ddx"), "got: {msg}");
+    }
+}

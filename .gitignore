@@ -1,0 +1,25 @@
+﻿# Rust
+target/
+target-tests/
+**/*.rs.bk
+
+# Node / web
+node_modules/
+dist/
+coverage/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated / local artifacts (logs, run output)
+outputs/

@@ -1,0 +1,64 @@
+/* The author's imprint — centered, quiet, the sigil the one warm focal it carries. */
+.wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.sig {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--kd-font-body);
+  font-size: 13.5px;
+  letter-spacing: 0.02em;
+  color: var(--kd-text-muted);
+}
+
+.lead {
+  opacity: 0.85;
+}
+
+.sep {
+  opacity: 0.4;
+}
+
+.sigilLink {
+  display: inline-flex;
+  line-height: 0;
+  border-radius: 50%;
+  transition: opacity var(--kd-duration), filter var(--kd-duration);
+}
+
+.sigil {
+  height: 2.8em;
+  width: auto;
+  vertical-align: middle;
+  opacity: 0.62;
+  filter: brightness(1.05);
+  transition: opacity var(--kd-duration);
+}
+
+.sigilLink:hover .sigil,
+.sigilLink:focus-visible .sigil {
+  opacity: 0.95;
+}
+
+.name {
+  color: var(--kd-text-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color var(--kd-duration), border-color var(--kd-duration);
+}
+
+.name:hover,
+.name:focus-visible {
+  color: var(--kd-text);
+  border-bottom-color: var(--kd-focal);
+}
+
+.sigilLink:focus-visible,
+.name:focus-visible {
+  outline: 2px solid var(--kd-accent);
+  outline-offset: 3px;
+}

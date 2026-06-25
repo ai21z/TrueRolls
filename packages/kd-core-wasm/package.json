@@ -1,0 +1,20 @@
+{
+  "name": "kd-core-wasm",
+  "type": "module",
+  "collaborators": [
+    "Vissarion Zounarakis <ariszoun@gmail.com>"
+  ],
+  "description": "wasm-bindgen bindings exposing kd-core pure math to JavaScript (no math duplication)",
+  "version": "0.1.0",
+  "license": "Proprietary",
+  "files": [
+    "kd_core_wasm_bg.wasm",
+    "kd_core_wasm.js",
+    "kd_core_wasm.d.ts"
+  ],
+  "main": "kd_core_wasm.js",
+  "types": "kd_core_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

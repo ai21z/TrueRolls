@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    "crates/kd-api",
+    "crates/kd-cli",
+    "crates/kd-core",
+    "crates/kd-core-wasm",
+    "crates/kd-receipt",
+    "crates/kd-worker-wasm",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "Proprietary"
+version = "0.1.0"
+authors = ["Vissarion Zounarakis <ariszoun@gmail.com>"]
+
+[workspace.dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.143"
+ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+serde_jcs = "0.1"
+hex = "0.4"
+base64 = "0.22"

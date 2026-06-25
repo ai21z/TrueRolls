@@ -1,0 +1,198 @@
+.hero {
+  position: relative;
+  padding: clamp(88px, 14vh, 168px) var(--kd-gutter) var(--kd-section-py);
+  overflow: hidden;
+}
+
+.inner {
+  max-width: var(--kd-maxw);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  align-items: center;
+  gap: clamp(32px, 6vw, 72px);
+}
+
+.copy {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kd-accent);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--kd-border-accent);
+}
+
+.title {
+  font-family: var(--kd-font-display);
+  font-size: clamp(40px, 6.4vw, 76px);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: var(--kd-text);
+}
+
+.titleAccent {
+  color: var(--kd-text-muted);
+}
+
+.lead {
+  font-size: clamp(16px, 1.6vw, 19px);
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+  max-width: 30em;
+}
+
+.ctaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* dark ink reads on the filled accent button */
+.inkDark {
+  --ink-stroke: rgba(10, 10, 11, 0.55);
+}
+
+.ctaPrimary {
+  padding: 13px 26px;
+  border-radius: var(--kd-radius);
+  background: var(--kd-accent);
+  color: var(--kd-bg);
+  font-family: var(--kd-font-body);
+  font-size: 15px;
+  font-weight: 500;
+  transition: filter var(--kd-duration);
+}
+
+.ctaPrimary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ctaPrimary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ctaSecondary {
+  padding: 13px 24px;
+  border-radius: var(--kd-radius);
+  background: transparent;
+  color: var(--kd-text);
+  font-family: var(--kd-font-body);
+  font-size: 15px;
+  font-weight: 500;
+  transition: background var(--kd-duration);
+}
+
+.ctaSecondary:hover {
+  background: var(--kd-surface);
+}
+
+.trust {
+  font-family: var(--kd-font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--kd-text-muted);
+  margin-top: 6px;
+}
+
+.visual {
+  width: 100%;
+  max-width: 440px;
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.canvasWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 5 / 4;
+  pointer-events: none;
+}
+
+.visualPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.placeholderDie {
+  width: 46%;
+  aspect-ratio: 1 / 1;
+  border-radius: 22%;
+  border: 1px solid var(--kd-border-accent);
+  background: radial-gradient(120% 120% at 50% 25%, var(--kd-surface-raised) 0%, var(--kd-bg) 72%);
+  transform: rotate(12deg);
+}
+
+.scrollHint {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(16px, 4vh, 40px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--kd-text-muted);
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  transition: color var(--kd-duration);
+}
+
+.scrollHint:hover {
+  color: var(--kd-text-secondary);
+}
+
+.scrollChevron {
+  animation: bob 1.8s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+@media (max-width: 880px) {
+  .inner {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+  .visual {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  .trustBreak {
+    display: none;
+  }
+  .scrollHint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrollChevron {
+    animation: none;
+  }
+}

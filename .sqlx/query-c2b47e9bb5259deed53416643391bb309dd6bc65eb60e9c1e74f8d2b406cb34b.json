@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            rolls.public_id,\n            rolls.die,\n            rolls.kappa,\n            rolls.seed,\n            rolls.face,\n            rolls.ev,\n            rolls.alpha,\n            rolls.kl,\n            rolls.created_at,\n            rolls.idem_payload_sha256 AS \"idem_payload_sha256?\",\n            (SELECT s3_key FROM transcripts_meta WHERE roll_id = rolls.id LIMIT 1) AS \"s3_key?\"\n        FROM rolls\n        WHERE rolls.idempotency_key = $1\n        ORDER BY rolls.id DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "public_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "die",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "kappa",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "seed",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "face",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "ev",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "alpha",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 7,
+        "name": "kl",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "idem_payload_sha256?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 10,
+        "name": "s3_key?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "c2b47e9bb5259deed53416643391bb309dd6bc65eb60e9c1e74f8d2b406cb34b"
+}

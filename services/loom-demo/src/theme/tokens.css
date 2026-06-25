@@ -1,0 +1,82 @@
+/* TrueRolls — NECROGRAPHY tokens (Vissarion's house style).
+   Variable names kept stable so every component re-skins at once; only the values
+   changed: from instrument-grade indigo to forensic/archival blackwork. A textured
+   near-black substrate, ashen-green as the cool structural accent, ONE rare ember
+   focal, dirtied bone ink, and an engraved serif type system. Death as information,
+   not dark SaaS. NOTE: --kd-ember is the legacy *success/verified* token (now a
+   fungal green); the rare WARM focal is --kd-focal. */
+
+:root {
+  /* ── Surfaces: textured near-black, warm-neutral char (never pure #000) ── */
+  --kd-bg:             #0A0A0B;
+  --kd-deep-ink:       #0C0C0C;
+  --kd-surface:        #131311;
+  --kd-surface-raised: #1A1A16;
+  --kd-atmosphere:     #100F0E;
+
+  /* ── Accent: ashen-green — the cool structural glow (one per surface) ── */
+  --kd-indigo:  #181E1A;  /* accent-tinted dark fill (active chips) */
+  --kd-ritual:  #4F5F54;  /* accent, pressed/deep */
+  --kd-void:    #7E9488;  /* PRIMARY ACCENT — focus, active, CTA */
+  --kd-accent:     #7E9488;
+  --kd-accent-dim: rgba(126, 148, 136, 0.16);
+
+  /* ── Ember: the ONE rare warm focal — use sparingly (<10% of a surface) ── */
+  --kd-focal:     #B87242;
+  --kd-focal-dim: rgba(184, 114, 66, 0.16);
+
+  /* ── Ink: dirtied bone on near-black (never pure white) ── */
+  --kd-text:           #E8E2D2;
+  --kd-text-secondary: #B6B0A0;
+  --kd-text-muted:     #8C8676;
+
+  /* ── Semantic (verified = fungal green, tamper/fail = blood red) ── */
+  --kd-ember:      #8FAA8A;  /* success / verified — fungal green, not acid */
+  --kd-ember-dim:  rgba(143, 170, 138, 0.15);
+  --kd-ember-glow: none;
+  --kd-fail:       #B5474D;  /* danger / tampered — blood red */
+  --kd-fail-dim:   rgba(181, 71, 77, 0.15);
+
+  /* ── Necrography engraved layer: the forensic-plate palette, promoted from the
+     RollSigil/SeedSocket modules so every engraved surface draws from one source.
+     --nec-ember aliases the warm focal, --nec-void the tamper red. --nec-ground is a
+     deliberately deeper well-floor, a hair below --kd-bg, for excavated insets. ── */
+  --nec-hypha:  #3c5249;  /* filament / derivation strand */
+  --nec-tip:    #5e7468;  /* filament tip, measure text */
+  --nec-node:   #6e8478;  /* cell stroke, register marks */
+  --nec-bone:   #c9c2b3;  /* carved label ink */
+  --nec-ground: #090a0c;  /* excavated floor (wells, plates) */
+  --nec-ember:  var(--kd-focal);  /* the one warm focal */
+  --nec-void:   var(--kd-fail);   /* severed bond / tamper */
+
+  /* ── No neon glow (the dark is forensic substrate, not a glow blob) ── */
+  --kd-glow-purple: none;
+  --kd-glow-blue:   none;
+  --kd-glow-node:   none;
+
+  /* ── Borders: bone-tinted hairline (not pure white) ── */
+  --kd-border:        rgba(201, 194, 179, 0.10);
+  --kd-border-glow:   rgba(201, 194, 179, 0.20);  /* hover/emphasis (name kept) */
+  --kd-border-accent: rgba(126, 148, 136, 0.45);
+
+  /* ── Typography: engraved serif display, transitional serif body, mono notation ── */
+  --kd-font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --kd-font-body:    'Spectral', 'EB Garamond', Georgia, 'Times New Roman', serif;
+  --kd-font-display: 'IM Fell English', 'Spectral', Georgia, serif;
+
+  /* ── Radius: excavated, squared (not SaaS-round) ── */
+  --kd-radius-sm:   2px;
+  --kd-radius:      4px;
+  --kd-radius-lg:   6px;
+  --kd-radius-pill: 999px;
+
+  /* ── Motion ── */
+  --kd-ease:          cubic-bezier(0.32, 0.72, 0, 1);
+  --kd-duration:      160ms;
+  --kd-duration-slow: 420ms;
+
+  /* ── Layout / landing ── */
+  --kd-maxw:       1180px;
+  --kd-gutter:     clamp(20px, 5vw, 44px);
+  --kd-section-py: clamp(64px, 10vw, 132px);
+}

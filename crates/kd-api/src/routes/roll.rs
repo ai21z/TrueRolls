@@ -1,0 +1,425 @@
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+};
+use serde::Serialize;
+use serde_json::{self};
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
+use std::time::Instant;
+use tracing::{info, info_span, warn};
+use uuid::Uuid;
+
+use crate::error::{AppError, bad_request, conflict, internal, not_found};
+use crate::models::dto::{
+    ReceiptProof, ReceiptRng, ReceiptV2, ReceiptV2Response, RollPayloadCanonical, RollRequest,
+    RollResponse,
+};
+use crate::services::rng::{RngProvenance, rng_for_roll};
+use crate::services::roll_math::compute_roll_with_rng;
+use crate::services::{db, idempotency, s3};
+use crate::state::AppState;
+
+#[derive(Debug, serde::Deserialize)]
+pub struct IdemQuery {
+    pub idem_key: String,
+}
+
+/// GET /v1/roll/:id
+#[tracing::instrument(name = "roll.get_by_id", skip(state), fields(id = %public_id))]
+pub async fn get_roll_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(public_id): Path<Uuid>,
+) -> Result<Json<RollResponse>, AppError> {
+    let row = db::select_roll_by_public_id(&state.pg, public_id)
+        .await
+        .map_err(internal)?;
+
+    match row {
+        Some(row) => {
+            info!(event = "roll.get_by_id.found");
+            Ok(Json(to_api_response(&state.s3_bucket, row)))
+        }
+        None => {
+            warn!(event = "roll.get_by_id.not_found");
+            Err(not_found("roll not found"))
+        }
+    }
+}
+
+/// GET /v1/roll?idem_key=...
+#[tracing::instrument(name = "roll.get_by_idem", skip(state, q), fields(idem_key = %q.idem_key))]
+pub async fn get_roll_by_idem(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<IdemQuery>,
+) -> Result<Json<RollResponse>, AppError> {
+    if q.idem_key.trim().is_empty() {
+        return Err(bad_request("idem_key is required"));
+    }
+
+    let row = db::select_roll_by_idem_key(&state.pg, &q.idem_key)
+        .await
+        .map_err(internal)?;
+
+    match row {
+        Some(row) => {
+            info!(event = "roll.get_by_idem.found");
+            Ok(Json(to_api_response(&state.s3_bucket, row)))
+        }
+        None => {
+            warn!(event = "roll.get_by_idem.not_found");
+            Err(not_found("roll not found"))
+        }
+    }
+}
+
+/// GET /v1/roll/:id/transcript — return transcript JSON via HTTP (not s3://)
+#[tracing::instrument(name = "roll.transcript", skip(state), fields(id = %public_id))]
+pub async fn get_transcript_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(public_id): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let row = db::select_roll_by_public_id(&state.pg, public_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| not_found("roll not found"))?;
+
+    let s3_key = row
+        .s3_key
+        .ok_or_else(|| not_found("transcript not yet uploaded for this roll"))?;
+
+    let transcript_bytes = s3::get_transcript(&state.s3, &state.s3_bucket, &s3_key)
+        .await
+        .map_err(|e| internal(format!("failed to fetch transcript from S3: {e}")))?;
+
+    Ok((
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        transcript_bytes,
+    ))
+}
+
+/// Convert a DB row into the public API response JSON.
+fn to_api_response(bucket: &str, row: crate::models::db::RollRow) -> RollResponse {
+    let transcript_key = row
+        .s3_key
+        .as_ref()
+        .map(|k| s3::s3_uri(bucket, k))
+        .unwrap_or_default();
+
+    RollResponse {
+        id: row.public_id,
+        die: row.die,
+        kappa: row.kappa,
+        seed: row.seed,
+        face: row.face,
+        ev: row.ev,
+        alpha: row.alpha,
+        kl: row.kl,
+        created_at: row.created_at,
+        transcript_key,
+        // For GETs, mark as deduplicated=true to signal “this is an existing roll”
+        deduplicated: true,
+    }
+}
+
+/// POST /v1/roll
+///
+/// Returns:
+/// - 201 + JSON (new roll)
+/// - 200 + JSON (deduplicated result)
+/// - 202 + JSON { status: "processing", idem_key, retry_hint_ms }
+#[axum::debug_handler]
+pub async fn post_roll(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<RollRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    // ---- span & timer -------------------------------------------------------
+    let started = Instant::now();
+    let span = info_span!(
+        "roll.request",
+        die = %req.die,
+        kappa = req.kappa,
+        has_seed = %req.seed.is_some()
+    );
+    let _g = span.enter();
+
+    // ---- validate input -----------------------------------------------------
+    match req.die.as_str() {
+        "d6" | "d20" | "d100" => {}
+        _ => return Err(bad_request("Invalid die; use d6|d20|d100")),
+    }
+    if !req.kappa.is_finite() || req.kappa < -1.0 || req.kappa > 1.0 {
+        return Err(bad_request("Invalid kappa; must be finite and in [-1, 1]"));
+    }
+
+    // ---- idempotency: header preferred; if both present and differ -> 400 ---
+    let header_key = headers
+        .get("Idempotency-Key")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_owned());
+
+    if let (Some(h), Some(b)) = (header_key.as_deref(), req.idempotency_key.as_deref()) {
+        if h != b {
+            return Err(bad_request(
+                "Idempotency-Key header and body.idempotency_key differ",
+            ));
+        }
+    }
+
+    let idem_key = header_key
+        .or(req.idempotency_key.clone())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let redis_key = format!("idem:roll:{idem_key}");
+    let key_hash = short_hash_hex(&redis_key);
+
+    // ---- canonical payload hash (strict binding of key -> body) ------------
+    let canonical = RollPayloadCanonical {
+        die: &req.die,
+        kappa: req.kappa,
+        seed: req.seed.as_deref(),
+    };
+    let payload_bytes = serde_json::to_vec(&canonical).map_err(internal)?;
+    let payload_sha = sha256_bytes(&payload_bytes);
+
+    // ---- acquire lock (SET NX EX) -------------------------------------------
+    let acquired = idempotency::acquire_lock(&state.redis, &redis_key, state.cfg.idem_ttl_secs)
+        .await
+        .map_err(internal)?;
+    info!(event = "idem.lock", acquired, key_hash = %key_hash);
+
+    // ---- dedup path ----------------------------------------------------------
+    if !acquired {
+        let pg_for_poll = state.pg.clone();
+        let key_for_poll = idem_key.clone();
+
+        let row_opt = idempotency::poll_for_row(
+            move || {
+                let pg = pg_for_poll.clone();
+                let key = key_for_poll.clone();
+                Box::pin(async move { db::select_by_idem_key(&pg, &key).await.ok().flatten() })
+            },
+            state.cfg.idem_poll_ms,
+            state.cfg.idem_poll_max,
+        )
+        .await;
+
+        if let Some(row) = row_opt {
+            info!(event = "idem.dedup.hit", key_hash = %key_hash, public_id = %row.public_id);
+
+            if let Some(stored) = row.idem_payload_sha256 {
+                if stored != payload_sha {
+                    warn!(event = "idem.dedup.mismatch", key_hash = %key_hash);
+                    return Err(conflict("Idempotency-Key was used with a different body"));
+                }
+            }
+
+            let full_uri = row
+                .s3_key
+                .as_ref()
+                .map(|k| s3::s3_uri(&state.s3_bucket, k))
+                .unwrap_or_default();
+
+            let resp = RollResponse {
+                id: row.public_id,
+                die: row.die,
+                kappa: row.kappa,
+                seed: row.seed,
+                face: row.face,
+                ev: row.ev,
+                alpha: row.alpha,
+                kl: row.kl,
+                created_at: row.created_at,
+                transcript_key: full_uri,
+                deduplicated: true,
+            };
+
+            info!(
+                event = "roll.done",
+                status = 200u16,
+                dedup = true,
+                ms = started.elapsed().as_millis() as u64
+            );
+            return Ok((StatusCode::OK, Json(resp)).into_response());
+        }
+
+        // 202 Accepted: request with this idempotency key is still being computed
+        #[derive(Serialize)]
+        struct ProcessingResponse<'a> {
+            status: &'static str,
+            idem_key: &'a str,
+            retry_hint_ms: u64,
+        }
+
+        info!(event = "idem.dedup.timeout", key_hash = %key_hash);
+        let processing = ProcessingResponse {
+            status: "processing",
+            idem_key: &idem_key,
+            retry_hint_ms: state.cfg.idem_poll_ms as u64,
+        };
+        return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
+    }
+
+    // ---- compute (RNG must be created and used BEFORE any await) ------------
+    // Build a deterministic, Send RNG from (idem_key, payload_sha, optional seed, optional salt)
+    let (mut rng, rng_prov): (rand_chacha::ChaCha20Rng, RngProvenance) = rng_for_roll(
+        &idem_key,
+        &payload_sha,
+        req.seed.as_deref(),
+        state.cfg.rng_salt.as_deref(),
+    );
+
+    let result = compute_roll_with_rng(&req.die, req.kappa, &mut rng, None).map_err(internal)?;
+    drop(rng); // ensure RNG is dropped before any await below
+
+    // ---- attach RNG provenance into transcript ------------------------------
+    // Ensure both:
+    //  - top-level "rng": { ...full provenance... }
+    //  - "sampling": { method: "prefix_cdf", rng: <actual algo> }  (force overwrite)
+    let mut transcript_json = result.transcript_json; // take ownership
+    let rng_val = serde_json::to_value(&rng_prov).map_err(internal)?;
+
+    use serde_json::Value as JsonValue;
+
+    if let Some(map) = transcript_json.as_object_mut() {
+        // Set/overwrite top-level rng provenance
+        map.insert("rng".to_string(), rng_val);
+
+        // Force sampling to the correct rng label
+        map.insert(
+            "sampling".to_string(),
+            serde_json::json!({
+                "method": "prefix_cdf",
+                "rng": rng_prov.algo,
+            }),
+        );
+    } else {
+        // If transcript isn't an object, wrap it so we can still attach provenance.
+        let inner = std::mem::replace(&mut transcript_json, JsonValue::Null);
+        transcript_json = serde_json::json!({
+            "rng": rng_prov,
+            "sampling": { "method": "prefix_cdf", "rng": rng_prov.algo },
+            "inner": inner
+        });
+    }
+
+    // Map to DB/API types while we're still in this short scope (before awaits)
+    let face: i32 = result.face.try_into().expect("face fits i32 (<= 100)");
+    let ev = result.ev;
+    let alpha = result.alpha;
+    let kl = result.kl;
+
+    // ---- persist roll --------------------------------------------------------
+    let public_id = Uuid::new_v4();
+    let row = db::insert_roll(
+        &state.pg,
+        public_id,
+        &req.die,
+        req.kappa,
+        req.seed.as_deref(), // Option<&str> for nullable TEXT
+        &idem_key,
+        &payload_sha,
+        face,
+        ev,
+        alpha,
+        kl,
+    )
+    .await
+    .map_err(internal)?;
+    info!(event = "roll.inserted", %public_id, key_hash = %key_hash);
+
+    // ---- upload transcript to S3 --------------------------------------------
+    let s3_key = format!("rolls/{public_id}.json");
+    let bytes = serde_json::to_vec(&transcript_json).map_err(internal)?;
+    s3::put_transcript(&state.s3, &state.s3_bucket, &s3_key, bytes.clone())
+        .await
+        .map_err(internal)?;
+    info!(event = "s3.transcript.put", %public_id, bytes = bytes.len(), %s3_key);
+
+    // ---- store transcript meta ----------------------------------------------
+    let sha = {
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        h.finalize().to_vec()
+    };
+    db::insert_transcript_meta(&state.pg, row.id, &s3_key, &sha, bytes.len() as i64)
+        .await
+        .map_err(internal)?;
+
+    // ---- build response ------------------------------------------------------
+    let transcript_url = format!("/v1/roll/{}/transcript", public_id);
+    let transcript_key_s3 = s3::s3_uri(&state.s3_bucket, &s3_key);
+    let drbg_key_hex = hex::encode(rng_prov.drbg_key);
+
+    // Build the receipt body (everything except sig and receipt_hash) for signing
+    let mut receipt = ReceiptV2 {
+        v: "truerolls-1".to_string(),
+        id: public_id,
+        die: req.die,
+        kappa: req.kappa,
+        face,
+        alpha,
+        kl,
+        ev,
+        created_at: row.created_at,
+        transcript_url,
+        transcript_key: Some(transcript_key_s3),
+        proof: ReceiptProof {
+            math_param_version: kd_core::PARAM_VERSION.to_string(),
+            rng: ReceiptRng {
+                drbg_key_hex,
+                algo: rng_prov.algo.to_string(),
+            },
+            draw_u64: result.draw_u64.to_string(),
+        },
+        receipt_hash: None,
+        sig: None,
+    };
+
+    // Sign the receipt (sig covers everything except the sig block itself)
+    if let Some(ref signer) = state.signer {
+        let body_for_signing = serde_json::to_value(&receipt).map_err(internal)?;
+        let (sig_block, receipt_hash) = signer.sign_receipt(&body_for_signing).map_err(internal)?;
+        receipt.receipt_hash = Some(receipt_hash);
+        receipt.sig = Some(sig_block);
+    }
+
+    let resp = ReceiptV2Response {
+        receipt,
+        deduplicated: false,
+    };
+
+    info!(
+        event = "roll.done",
+        status = 201u16,
+        dedup = false,
+        ms = started.elapsed().as_millis() as u64
+    );
+    Ok((StatusCode::CREATED, Json(resp)).into_response())
+}
+
+// -------------------- helpers ----------------------
+
+fn sha256_bytes(data: &[u8]) -> Vec<u8> {
+    let mut h = Sha256::new();
+    h.update(data);
+    h.finalize().to_vec()
+}
+
+/// Short redacted hex hash (12 chars) for logging keys safely.
+fn short_hash_hex(s: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    let digest = h.finalize();
+    // first 6 bytes -> 12 hex chars
+    let mut out = String::with_capacity(12);
+    for b in digest.iter().take(6) {
+        use std::fmt::Write;
+        let _ = write!(&mut out, "{:02x}", b);
+    }
+    out
+}

@@ -1,0 +1,629 @@
+/* TrueRolls docs — premium dark precision, reusing the token set. */
+
+.page {
+  min-height: 100vh;
+  width: 100%;
+  /* `clip` (not `hidden`) keeps horizontal overflow clipped WITHOUT turning
+     .page into a scroll container, which would silently break the sticky TOC
+     and sticky bar nested inside it. */
+  overflow-x: clip;
+  scroll-behavior: smooth;
+}
+
+/* ── Top bar (sticky, like the landing nav) ── */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding: 14px var(--kd-gutter);
+  background: rgba(10, 10, 11, 0.96);
+  border-bottom: 1px solid var(--kd-border);
+}
+
+.brand {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--kd-text);
+}
+
+.brandAccent {
+  color: var(--kd-accent);
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px 7px 11px;
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius);
+  color: var(--kd-text-secondary);
+  font-family: var(--kd-font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  transition: color var(--kd-duration), border-color var(--kd-duration), background var(--kd-duration);
+}
+
+.back:hover {
+  color: var(--kd-text);
+  border-color: var(--kd-border-glow);
+  background: var(--kd-surface);
+}
+
+.backArrow {
+  font-size: 15px;
+  line-height: 1;
+  transition: transform var(--kd-duration);
+}
+
+.back:hover .backArrow {
+  transform: translateX(-2px);
+}
+
+.barLabel {
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: var(--kd-text-muted);
+}
+
+/* ── Two-column shell ── */
+.shell {
+  max-width: var(--kd-maxw);
+  margin: 0 auto;
+  padding: clamp(32px, 5vw, 64px) var(--kd-gutter) 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: clamp(32px, 6vw, 72px);
+  align-items: start;
+}
+
+/* ── Sticky TOC sidebar ── */
+.toc {
+  position: sticky;
+  top: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tocTitle {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kd-text-muted);
+  padding-left: 12px;
+}
+
+.tocList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 1px solid var(--kd-border);
+}
+
+.tocLink,
+.tocLinkActive {
+  display: block;
+  padding: 6px 12px;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--kd-text-muted);
+  transition: color var(--kd-duration), border-color var(--kd-duration);
+}
+
+.tocLink:hover {
+  color: var(--kd-text-secondary);
+}
+
+.tocLinkActive {
+  color: var(--kd-text);
+  border-left-color: var(--kd-accent);
+}
+
+/* ── Main content column ── */
+.content {
+  max-width: 760px;
+  min-width: 0;
+  padding-bottom: clamp(64px, 10vw, 120px);
+}
+
+.section {
+  padding: clamp(28px, 4vw, 44px) 0;
+  border-top: 1px solid var(--kd-border);
+  /* offset for the sticky bar when jumping to an anchor */
+  scroll-margin-top: 88px;
+}
+
+.section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kd-accent);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--kd-border-accent);
+}
+
+.h1 {
+  font-family: var(--kd-font-display);
+  font-size: clamp(30px, 4vw, 44px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  color: var(--kd-text);
+  margin: 10px 0 0;
+}
+
+.h2 {
+  font-family: var(--kd-font-display);
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.012em;
+  color: var(--kd-text);
+  margin: 8px 0 0;
+}
+
+.h3 {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--kd-text);
+  margin: 32px 0 0;
+}
+
+.lead {
+  font-size: clamp(16px, 1.6vw, 19px);
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+  margin: 18px 0 0;
+}
+
+.p {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--kd-text-secondary);
+  margin: 16px 0 0;
+}
+
+.p em,
+.lead em {
+  font-style: italic;
+  color: var(--kd-text);
+}
+
+.note {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--kd-text-muted);
+  margin: 18px 0 0;
+  border-left: 2px solid var(--kd-border-glow);
+  padding-left: 14px;
+}
+
+.inlineLink {
+  color: var(--kd-accent);
+  border-bottom: 1px solid var(--kd-border-accent);
+  transition: border-color var(--kd-duration);
+}
+
+.inlineLink:hover {
+  border-bottom-color: var(--kd-accent);
+}
+
+/* ── Inline code ── */
+.code {
+  font-family: var(--kd-font-mono);
+  font-size: 0.88em;
+  color: var(--kd-text);
+  background: var(--kd-surface-raised);
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius-sm);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* ── Definition list (math breakdown) ── */
+.defList {
+  margin: 28px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.defRow {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 16px;
+  align-items: baseline;
+}
+
+.dt {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--kd-text);
+  font-family: var(--kd-font-mono);
+}
+
+.dd {
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--kd-text-secondary);
+}
+
+.dd em {
+  font-style: italic;
+  color: var(--kd-text);
+}
+
+/* ── Worked example ── */
+.exampleLabel {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kd-text-muted);
+  margin: 28px 0 0;
+}
+
+.example {
+  margin: 10px 0 0;
+  padding: 14px 16px;
+  background: var(--kd-bg);
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius);
+  font-family: var(--kd-font-mono);
+  font-size: 13.5px;
+  color: var(--kd-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Code blocks ── */
+.codeCard {
+  position: relative;
+  margin: 20px 0 0;
+  background: var(--kd-bg);
+  border-radius: var(--kd-radius-sm);
+}
+
+/* grain: the code plate is textured substrate (the codeHead is its register rail) */
+.codeCard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.codeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--kd-border);
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  color: var(--kd-text-muted);
+}
+
+.codeBody {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--kd-font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--kd-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.codeOk {
+  color: var(--kd-ember);
+}
+
+/* ── Verify check list (green pips) ── */
+.checkList {
+  list-style: none;
+  margin: 22px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.checkItem {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.pip {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-ember-dim);
+  color: var(--kd-ember);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pipNo {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-fail-dim);
+  color: var(--kd-fail);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.checkText {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--kd-text-secondary);
+}
+
+.checkText b {
+  color: var(--kd-text);
+  font-weight: 500;
+}
+
+/* ── Ordered-style way lists ── */
+.wayList {
+  margin: 14px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wayItem {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+}
+
+.wayItem b {
+  color: var(--kd-text);
+  font-weight: 500;
+}
+
+.wayItem::marker {
+  color: var(--kd-text-muted);
+}
+
+/* ── Honesty callout (bordered, prominent) ── */
+.callout {
+  position: relative;
+  margin: 28px 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  gap: 24px;
+  padding: 24px;
+  background: var(--kd-surface);
+  border-radius: var(--kd-radius-sm);
+}
+
+/* grain substrate + the record's catalog corner */
+.callout::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.callout::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 9px;
+  height: 9px;
+  border-top: 1px solid var(--kd-border-accent);
+  border-left: 1px solid var(--kd-border-accent);
+  pointer-events: none;
+}
+
+.calloutCol {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.calloutDivider {
+  background: var(--kd-border);
+}
+
+.calloutHeadOk,
+.calloutHeadNo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.calloutHeadOk {
+  color: var(--kd-ember);
+}
+
+.calloutHeadNo {
+  color: var(--kd-fail);
+}
+
+.calloutList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.calloutList li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+}
+
+.calloutList li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--kd-text-muted);
+}
+
+.calloutList li b {
+  color: var(--kd-text);
+  font-weight: 500;
+}
+
+/* ── Roadmap tag ── */
+.roadmapTag {
+  display: inline-block;
+  margin: 12px 0 0;
+  padding: 4px 10px;
+  border: 1px solid var(--kd-border-accent);
+  border-radius: var(--kd-radius-pill);
+  background: var(--kd-accent-dim);
+  font-family: var(--kd-font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  color: var(--kd-accent);
+}
+
+/* ── Footer ── */
+.footer {
+  margin-top: 48px;
+  padding-top: 28px;
+  border-top: 1px solid var(--kd-border);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.footerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.footerSignature {
+  padding-top: 22px;
+  border-top: 1px solid var(--kd-border);
+}
+
+.footerNote {
+  font-size: 13px;
+  color: var(--kd-text-muted);
+}
+
+/* ── Responsive: collapse TOC below 900px ── */
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .toc {
+    position: static;
+    top: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .tocTitle {
+    display: none;
+  }
+  .tocList {
+    flex-direction: row;
+    border-left: none;
+    gap: 6px;
+  }
+  .tocLink,
+  .tocLinkActive {
+    margin-left: 0;
+    border-left: none;
+    border: 1px solid var(--kd-border);
+    border-radius: var(--kd-radius-pill);
+    padding: 6px 12px;
+    white-space: nowrap;
+    font-size: 12.5px;
+  }
+  .tocLinkActive {
+    border-color: var(--kd-border-accent);
+    color: var(--kd-text);
+  }
+  .content {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .callout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .calloutDivider {
+    height: 1px;
+    width: 100%;
+  }
+  .defRow {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

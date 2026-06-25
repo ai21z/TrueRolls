@@ -1,0 +1,12 @@
+filename,seed,die,lambda,kappa,kind,expected_local,expected_server
+golden_01_d6_k06.json,1001,d6,0.5,0.6,clean,OK,200 OK
+golden_02_d20_k06.json,2002,d20,0.5,0.6,clean,OK,200 OK
+golden_03_d100_k06.json,3003,d100,0.5,0.6,clean,OK,200 OK
+golden_04_d6_tampered_face.json,1001,d6,0.5,0.6,tampered_face,MISMATCH,422 MISMATCH
+golden_05_d6_tampered_kappa.json,1001,d6,0.5,-0.9,tampered_kappa,MISMATCH,422 MISMATCH
+golden_06_d6_bad_version.json,1001,d6,0.5,0.6,bad_version,ERROR,400 ERROR
+golden_07_d6_kneg05.json,4004,d6,0.5,-0.5,clean,OK,200 OK
+golden_08_d6_tampered_draw.json,1001,d6,0.5,0.6,tampered_draw,MISMATCH,422 MISMATCH
+golden_09_d6_missing_draw.json,1001,d6,0.5,0.6,missing_draw,MISMATCH (unverifiable),400 (missing draw_u64)
+golden_receipt_01_d20.json,n/a,d20,0.5,0.6,receipt_clean,VALID,200 via POST /v1/verify receipt mode when server kid matches test key
+golden_receipt_02_d20_tampered_face.json,n/a,d20,0.5,0.6,receipt_tampered_face,INVALID,n/a (offline CLI fixture)

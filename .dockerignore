@@ -1,0 +1,26 @@
+# Keep the kd-api build context small. The Rust build needs only: Cargo.toml/Cargo.lock,
+# crates/**, and the committed .sqlx/ cache — everything below is excluded.
+
+# Build artifacts (target/ alone is ~2.4 GB) — never needed in the image.
+target/
+target-tests/
+**/node_modules/
+
+# JS apps (loom-demo / studio) — not part of the kd-api Rust build.
+services/
+
+# Secrets & local env (never bake into an image layer).
+.env
+.env.local
+.env.*.local
+infra/.env
+
+# VCS, IDE, transient outputs, OS cruft.
+.git/
+.gitignore
+.vscode/
+.idea/
+outputs/
+*.log
+**/.DS_Store
+Thumbs.db

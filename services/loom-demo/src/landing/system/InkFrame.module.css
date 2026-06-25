@@ -1,0 +1,48 @@
+/* InkFrame — the hand-drawn border overlay. The wrapper holds the box's own
+   background/padding; the absolutely-positioned SVG inks just the edges. */
+
+.block {
+  position: relative;
+  display: block;
+}
+
+.inline {
+  position: relative;
+  display: inline-block;
+}
+
+.ink {
+  position: absolute;
+  inset: 0;
+  overflow: visible; /* let the corner overshoot spill past the box */
+  pointer-events: none;
+}
+
+.pass1 {
+  fill: none;
+  stroke: var(--ink-stroke, var(--nec-node));
+  stroke-width: 1.6;
+  opacity: 0.66;
+  stroke-linecap: round;
+}
+
+.pass2 {
+  fill: none;
+  stroke: var(--ink-stroke, var(--nec-node));
+  stroke-width: 1.1;
+  opacity: 0.32;
+  stroke-linecap: round;
+}
+
+/* a drawn box leans in when you touch it */
+.block:hover > .ink > .pass1,
+.inline:hover > .ink > .pass1 {
+  opacity: 0.88;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pass1,
+  .pass2 {
+    transition: opacity var(--kd-duration, 160ms);
+  }
+}

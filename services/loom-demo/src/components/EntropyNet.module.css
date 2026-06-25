@@ -1,0 +1,9 @@
+/* Ambient entropy-net background. Fixed to the viewport, below all content
+   (shows through transparent page surfaces), and never interactive. */
+.net {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  display: block;
+}

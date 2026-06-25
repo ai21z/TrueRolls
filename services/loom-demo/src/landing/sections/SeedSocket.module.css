@@ -1,0 +1,290 @@
+/* SeedSocket — an interactive specimen explainer, split in two.
+   Left: the seed in its own inked box, the width of the offline-verify card.
+   Right: the explanation, unboxed, the width of the trust text above it.
+   The grid mirrors .verifyGrid (1.1fr / 0.9fr) so the two stack into clean columns.
+   Every cell, the socket, and the roots are focusable buttons that drive the text.
+   --nec-* palette lives in tokens.css :root. */
+
+.root {
+  margin: 28px 0 0;
+}
+
+/* same column template + gap as .verifyGrid above, so widths line up exactly:
+   left column == the offline-verify card, right column == the trust text */
+.grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 20px;
+  align-items: center;
+}
+
+/* ── Left: the boxed seed specimen (matches the code card's surface + grain) ── */
+.specimen {
+  position: relative;
+  padding: 22px clamp(16px, 2vw, 26px);
+  background: var(--kd-bg);
+  border-radius: var(--kd-radius-sm);
+  display: flex;
+}
+
+.specimen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.svg {
+  position: relative;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* ── Right: the explanation, no box ── */
+.info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.infoEye {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kd-accent);
+}
+
+.infoBody {
+  margin: 0;
+  font-family: var(--kd-font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+  min-height: 140px;
+}
+
+.infoBody b {
+  color: var(--kd-text);
+  font-weight: 500;
+}
+
+.infoHint {
+  margin-top: 4px;
+  font-family: var(--kd-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--kd-text-muted);
+  opacity: 0.7;
+}
+
+/* ── Wires ── */
+.wires path {
+  fill: none;
+  stroke: var(--nec-hypha);
+  stroke-width: 1.3;
+  opacity: 0.45;
+  stroke-linecap: round;
+  transition: stroke var(--kd-duration), opacity var(--kd-duration);
+}
+
+.wireActive {
+  stroke: var(--nec-tip);
+  opacity: 0.85;
+}
+
+/* ── Interactive item groups (cells, socket, roots) ── */
+.item {
+  cursor: pointer;
+}
+
+.item:focus {
+  outline: none;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--kd-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.item path {
+  transition: stroke var(--kd-duration);
+}
+
+/* roots brighten when the roadmap item is active */
+.itemActive path {
+  stroke: var(--nec-tip);
+}
+
+.cell {
+  fill: rgba(110, 132, 120, 0.05);
+  stroke: var(--nec-node);
+  stroke-width: 1.2;
+  opacity: 0.8;
+  transition: stroke var(--kd-duration), fill var(--kd-duration), opacity var(--kd-duration);
+}
+
+.cellMark {
+  fill: var(--nec-node);
+  opacity: 0.45;
+}
+
+.cellLabel {
+  fill: var(--nec-bone);
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.itemActive .cell {
+  stroke: #9fb4a8;
+  fill: rgba(110, 132, 120, 0.13);
+  opacity: 1;
+}
+
+/* ── The empty socket ── */
+.voidRim {
+  fill: none;
+  stroke: #1c1611;
+  stroke-width: 2.2;
+  opacity: 0.85;
+  transition: stroke var(--kd-duration), opacity var(--kd-duration);
+}
+
+.itemActive .voidRim {
+  stroke: var(--nec-ember);
+  opacity: 0.9;
+}
+
+.emberCore {
+  fill: #e6a064;
+  opacity: 0.6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: seed-breath 7s ease-in-out infinite;
+}
+
+@keyframes seed-breath {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+.socketLabel {
+  fill: var(--nec-bone);
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* ── The germinating seed (engraved specimen) ── */
+/* The testa reads as a line engraving: a near-black body whose warm bone-brown
+   outline + hatching carry the form on the dark ground (graphic ≥ 3:1). */
+.testa {
+  fill: #0d0a07;
+  stroke: #8a7052;
+  stroke-width: 2;
+  transition: stroke var(--kd-duration);
+}
+
+.hatch path {
+  fill: none;
+  stroke: #5f4a34;
+  stroke-width: 0.7;
+  opacity: 0.5;
+}
+
+.hilum {
+  fill: #16100a;
+  stroke: #8a7052;
+  stroke-width: 1;
+  opacity: 0.92;
+}
+
+.micropyle {
+  fill: #c98a52;
+  opacity: 0.85;
+}
+
+/* the freshly split coat — slightly warmer/brighter than the testa line */
+.crack path {
+  fill: none;
+  stroke: #a87a4c;
+  stroke-width: 1.3;
+  opacity: 0.85;
+  stroke-linecap: round;
+}
+
+/* ground line at rooting depth */
+.soil {
+  stroke: #2e2a24;
+  stroke-width: 1;
+  stroke-dasharray: 2 7;
+  opacity: 0.55;
+}
+
+/* the MISSING taproot: a faint dotted reach to an unfilled anchor (ungrown) */
+.ghostTap {
+  fill: none;
+  stroke: var(--nec-hypha);
+  stroke-width: 1.6;
+  stroke-dasharray: 1.5 5;
+  opacity: 0.3;
+  stroke-linecap: round;
+  transition: stroke var(--kd-duration), opacity var(--kd-duration);
+}
+
+.ghostTip {
+  fill: none;
+  stroke: var(--nec-hypha);
+  stroke-width: 1;
+  stroke-dasharray: 1.5 3;
+  opacity: 0.4;
+  transition: stroke var(--kd-duration), opacity var(--kd-duration);
+}
+
+/* active 'seed honesty' — warm the coat + the missing taproot (override the generic
+   .itemActive path greening so the seed group stays warm, not nec-tip) */
+.itemActive .testa {
+  stroke: var(--nec-ember);
+}
+.itemActive .hatch path {
+  stroke: #6f5a40;
+}
+.itemActive .crack path {
+  stroke: #c98a52;
+  opacity: 1;
+}
+.itemActive .ghostTap,
+.itemActive .ghostTip {
+  stroke: var(--nec-ember);
+  opacity: 0.72;
+}
+
+@media (max-width: 880px) {
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .info {
+    order: -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emberCore {
+    animation: none;
+    opacity: 0.62;
+  }
+}

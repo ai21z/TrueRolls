@@ -1,0 +1,315 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 48px 24px 32px;
+  background: var(--kd-deep-ink);
+  border-right: 1px solid var(--kd-border);
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+@media (max-width: 1024px) {
+  .rail {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--kd-border);
+    padding: 24px var(--kd-gutter);
+    gap: 22px;
+  }
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kd-text-secondary);
+}
+
+.dieGroup {
+  display: flex;
+  gap: 6px;
+}
+
+.dieBtnWrap {
+  flex: 1;
+}
+
+.dieBtnWrapActive {
+  --ink-stroke: var(--kd-void);
+}
+
+.dieBtn {
+  width: 100%;
+  padding: 10px 0;
+  border-radius: var(--kd-radius);
+  background: var(--kd-surface);
+  color: var(--kd-text-secondary);
+  font-family: var(--kd-font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  transition: background var(--kd-duration) var(--kd-ease), color var(--kd-duration) var(--kd-ease);
+}
+
+.dieBtn:hover {
+  background: var(--kd-atmosphere);
+}
+
+.dieBtnActive {
+  background: var(--kd-indigo);
+  color: var(--kd-text);
+}
+
+.sliderWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sliderRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sliderTrack {
+  flex: 1;
+  position: relative;
+  padding-bottom: 30px;
+}
+
+/* ── Snap ticks ── */
+.ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 15px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.tick {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 1px solid var(--kd-border);
+  border-radius: 50%;
+  background: var(--kd-surface-raised);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background var(--kd-duration) var(--kd-ease),
+              border-color var(--kd-duration) var(--kd-ease),
+              transform var(--kd-duration) var(--kd-ease);
+}
+
+.tick:hover {
+  border-color: var(--kd-accent);
+  background: var(--kd-text-muted);
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+.tickZero {
+  width: 12px;
+  height: 12px;
+  border-color: var(--kd-text-muted);
+}
+
+.tickActive {
+  background: var(--kd-accent);
+  border-color: var(--kd-accent);
+}
+
+.tickLabels {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26px;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--kd-font-mono);
+  font-size: 10px;
+  color: var(--kd-text-muted);
+  pointer-events: none;
+}
+
+.slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--kd-surface);
+  border-radius: 2px;
+  outline: none;
+}
+
+/* Explicit, source-order-independent focus ring on the primary keyboard control
+   (WCAG 2.4.7). Higher specificity than the global :focus-visible. */
+.slider:focus-visible {
+  outline: 2px solid var(--kd-accent);
+  outline-offset: 4px;
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--kd-accent-dim);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--kd-accent-dim);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--kd-void);
+  border: 2px solid var(--kd-ritual);
+  cursor: pointer;
+  box-shadow: var(--kd-glow-purple);
+  transition: all var(--kd-duration) var(--kd-ease);
+}
+
+.slider::-webkit-slider-thumb:hover {
+  background: var(--kd-ritual);
+  transform: scale(1.2);
+}
+
+.slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--kd-accent);
+  border: 2px solid var(--kd-ritual);
+  cursor: pointer;
+}
+
+.kappaValue {
+  font-family: var(--kd-font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--kd-text);
+  min-width: 40px;
+  text-align: right;
+}
+
+.kappaHint {
+  font-size: 11px;
+  color: var(--kd-text-muted);
+  font-style: italic;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--kd-radius);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.badgeLive {
+  --ink-stroke: var(--kd-accent);
+  background: var(--kd-accent-dim);
+  color: var(--kd-accent);
+}
+
+.badgeMock {
+  background: transparent;
+  color: var(--kd-text-muted);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.dotLive {
+  background: var(--kd-accent);
+}
+
+.dotMock {
+  background: var(--kd-text-muted);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.helpBtn {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--kd-radius-sm);
+  background: transparent;
+  color: var(--kd-text-muted);
+  font-family: var(--kd-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  transition: color var(--kd-duration) var(--kd-ease);
+}
+
+.helpBtn:hover {
+  color: var(--kd-text);
+}
+
+.helpText {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--kd-text-muted);
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius);
+  padding: 10px 12px;
+  margin-top: -4px;
+}
+
+.shortcutHint {
+  margin-top: auto;
+  font-size: 10px;
+  color: var(--kd-text-muted);
+  text-align: center;
+  opacity: 0.6;
+  letter-spacing: 0.04em;
+}
+
+.kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--kd-border);
+  border-radius: 3px;
+  background: var(--kd-surface);
+  font-family: var(--kd-font-mono);
+  font-size: 10px;
+  color: var(--kd-text-secondary);
+}
+
