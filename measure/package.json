@@ -1,0 +1,12 @@
+{
+  "name": "truerolls-measure",
+  "private": true,
+  "type": "module",
+  "description": "TrueRolls beacon-skew measurement harness (§3.1–§3.3). Throwaway; isolated from the product workspace.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.2.0"
+  }
+}
