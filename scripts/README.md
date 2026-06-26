@@ -58,7 +58,7 @@ Copy-Item .env.example infra/.env -Force
 docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
 
 # 2. db schema + transcript bucket
-$env:DATABASE_URL = 'postgres://kd:1643@localhost:5432/kd'
+$env:DATABASE_URL = 'postgres://kd:kd_dev_only_pw@localhost:5432/kd'
 sqlx migrate run --source crates/kd-api/migrations
 docker exec kd-minio mc alias set local http://localhost:9000 kdadmin kd_dev_only_123
 docker exec kd-minio mc mb --ignore-existing local/kd-transcripts

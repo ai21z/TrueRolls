@@ -39,7 +39,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
-$DB   = 'postgres://kd:1643@localhost:5432/kd'
+$DB   = 'postgres://kd:kd_dev_only_pw@localhost:5432/kd'
 $compose = @('compose', '-f', 'infra/docker-compose.yml', '--env-file', 'infra/.env')
 
 function Step($n, $msg) { Write-Host "`n[$n] $msg" -ForegroundColor Cyan }

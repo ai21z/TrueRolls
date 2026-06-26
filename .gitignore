@@ -23,3 +23,6 @@ Thumbs.db
 
 # Generated / local artifacts (logs, run output)
 outputs/
+
+# Measurement datasets (raw per-round JSONL — only the hashed report is committed)
+measure/**/*.jsonl

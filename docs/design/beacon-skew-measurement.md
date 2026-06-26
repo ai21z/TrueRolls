@@ -71,7 +71,7 @@ For every drand round `R` in the sample, one record:
 | `server_relay_id` | config | which relay the server used |
 | `t_w(R)` per `w` | each dev witness | frontier-advance time for `w` |
 | `witness_relay_id` per `w` | config | each witness's relay (must differ from the server's and from each other) |
-| `verified` per party | BLS check | σ_R verified under pinned chain (drop unverified samples) |
+| `verified` per party | BLS check (self-consistency only in the §3.1 standalone probe; full BLS in §3.2) | σ_R verified under the pinned chain; drop unverified samples |
 
 Derived per round: `t_quorum_lost(R)`, `window(R)`, `exploitable(R)`, and `server_advantage(R) =
 t_quorum_lost(R) − t_server(R)` (signed; negative = witnesses lead = safe).
@@ -83,10 +83,21 @@ Separately, a **`cosign_cost` sample set** from §3.3 (independent of `R`).
 ## 3. Method
 
 ### 3.1 Server drand view (standalone — measurable now, no witnesses)
-A Worker subscribes to drand quicknet via its chosen relay(s) and timestamps the arrival+BLS-verify
-of each `σ_R`. Run from the **production region/topology** the real server would use, with its
-fastest relay, to capture the **worst case for fairness** (max server advantage). This number alone
-is decisive: if the server has no relay advantage over realistic witnesses, the window is ≤ 0.
+A Worker subscribes to drand quicknet via its chosen relay(s) and timestamps the arrival of each
+`σ_R`. Run from the **production region/topology** the real server would use, with its fastest relay,
+to capture the **worst case for fairness** (max server advantage).
+
+> **Verification scope (current probe).** The standalone probe checks drand **self-consistency only**
+> (`randomness == SHA-256(σ)`); it does **not** BLS-verify `σ` under the quicknet group key. Full BLS
+> verification under the pinned chain + dropping unverified samples is a **§3.2 requirement** (the
+> witnesses must BLS-verify their own frontier) and must be added before any audit-grade number is
+> pinned via `measurement_report_hash`. Until then §3.1 yields timing samples, not authenticated σ.
+>
+> **What §3.1 does and does not bound.** The relay spread bounds skew **across the configured relays
+> only** — an indicative **lower** bound on the server's advantage, **not** an upper bound over real
+> witnesses. A real independent witness (§3.2) may sit on a worse path than any configured relay, so
+> the true server-vs-witness skew can exceed this spread. §3.1 alone cannot conclude the window is
+> ≤ 0; it is necessary-not-sufficient evidence feeding the §3.2/§3.3 decision.
 
 ### 3.2 Witness drand view (needs dev witnesses)
 Stand up **`n` local/dev witnesses**, each:
@@ -128,6 +139,12 @@ And the scalar that decides it:
 
 - **`exploitable_fraction` = P[ window(R) ≥ cosign_cost ]** over the sample (with a Clopper–Pearson
   upper confidence bound, since the safe answer is "≈ 0" and we need an honest bound on the tail).
+
+> **Censored tail.** Any quantity with censored samples (e.g. relay spread when a relay misses the
+> §3.1 deadline) must report its tail as the **combined** order statistic over exact values **and**
+> censored lower bounds — `max(exact pXX, censored-lower-bound pXX)`, treating each censored sample as
+> ≥ its lower bound. Never quote the exact-only percentile as the tail; that silently drops the worst
+> rounds.
 
 ---
 

@@ -2,8 +2,8 @@
 
 Throwaway measurement harness for the **server half** of the beacon-skew gate
 ([../../docs/design/beacon-skew-measurement.md](../../docs/design/beacon-skew-measurement.md) §3.1).
-**No witnesses needed** — this is the decisive standalone number: *how fast does the server see
-`σ_R`, and how much faster is its best relay than a slower path?*
+**No witnesses needed** — it yields the server-half input (indicative, not decisive): *how fast does
+the server see `σ_R`, and how much faster is its best relay than the other configured relays?*
 
 ## Run
 
@@ -25,12 +25,21 @@ more relays miss the deadline, and a `randomness == SHA-256(sig)` consistency fl
 ## How to read it
 
 - **Relay spread** is the headline and is **clock-robust** (one machine clock, common offset cancels).
-  It upper-bounds the advantage a server using the *fastest* relay has over a witness on a *slower*
-  path — i.e. the part of `window(R)` this probe can establish before real witnesses exist. Small,
-  tight spread (p99 ≪ a cosign round-trip) is the early green light for Strict Fast.
+  It is the spread **across the configured relays only** — an **indicative lower bound** on the
+  server's advantage, **not** an upper bound. A real independent witness (§3.2) may sit on a worse
+  path / ASN / region than any relay here, so the true server-vs-witness skew can **exceed** this
+  spread. Real skew is pinned only by §3.2; a small, tight spread here is *necessary-not-sufficient*
+  early evidence for Strict Fast, never the decision.
 - **Censored rounds** are not exact spreads. If a relay misses the deadline, the output records
   `relaySpreadLowerBoundMs`; the actual tail is at least that large and may be worse. Do not mix
   censored lower bounds into exact percentile claims without labeling them.
+- **Combined-tail decision rule.** The gate statistic is the tail over **both** buckets together —
+  `max(exact pXX, censored-lower-bound pXX)`, treating each censored round as ≥ its lower bound.
+  Never read the "EXACT RELAY SPREAD" block alone, or the worst rounds (a relay so slow it was
+  censored) silently drop out and understate the tail.
+- **σ is self-consistency-checked, not BLS-verified** (`badSig` = `randomness != SHA-256(σ)`). Full
+  BLS verification under the quicknet group key + dropping unverified samples is a §3.2 step; until
+  then these are timing samples, not authenticated beacon values.
 - **Per-relay absolute latency** carries the local clock offset; treat it as relative, not absolute,
   unless the host is NTP-synced.
 
