@@ -11,7 +11,7 @@ interface TocItem {
 const TOC: TocItem[] = [
   { id: 'overview', label: 'What is TrueRolls' },
   { id: 'how-it-works', label: 'How it works: the math' },
-  { id: 'receipt', label: 'The receipt (truerolls-1)' },
+  { id: 'receipt', label: 'The receipt (drand)' },
   { id: 'verify', label: 'Verify it yourself' },
   { id: 'threat-model', label: "What's proven. And what isn't" },
   { id: 'api', label: 'API & transparency' },
@@ -234,16 +234,16 @@ export function Docs() {
           {/* ── 3. The receipt ────────────────────────────────────────── */}
           <section id="receipt" className={css.section}>
             <span className={css.eyebrow}>Receipt</span>
-            <h2 className={css.h2}>The receipt (truerolls-1)</h2>
+            <h2 className={css.h2}>The receipt (truerolls-drand-1)</h2>
             <p className={css.p}>
-              Each roll returns a <code className={css.code}>truerolls-1</code> receipt:
-              a JSON object whose math fields are sealed by an Ed25519 signature over
-              the JCS (RFC 8785) canonicalization of the body.
+              Each live roll returns a <code className={css.code}>truerolls-drand-1</code>{' '}
+              receipt: a JSON object whose math fields and drand proof are sealed by an
+              Ed25519 signature over the JCS (RFC 8785) canonicalization of the body.
             </p>
 
-            <CodeBlock label="receipt" right="truerolls-1">
+            <CodeBlock label="receipt" right="truerolls-drand-1">
 {`{
-  "v": "truerolls-1",
+  "v": "truerolls-drand-1",
   "id": "<uuid>",
   "die": "d20", "kappa": 0.6, "face": 14,
   "alpha": 0.321, "kl": 0.0201, "ev": 11.65,
@@ -253,9 +253,17 @@ export function Docs() {
     "math_param_version": "roll.math.v1",
     "rng": {
       "drbg_key_hex": "<32-byte hex>",
-      "algo": "HKDF(SHA-256)->ChaCha20Rng"
+      "algo": "drand-quicknet+HKDF(SHA-256)->ChaCha20Rng"
     },
-    "draw_u64": "<stringified u64>"
+    "draw_u64": "<stringified u64>",
+    "drand": {
+      "chain_hash": "52db9b…e971",
+      "client_nonce": "<32 random bytes, hex>",
+      "client_observed_round": 123,
+      "target_round": 125,
+      "target_signature_hex": "<drand BLS signature>",
+      "target_randomness_hex": "<sha256(signature)>"
+    }
   },
   "sig": {
     "alg": "Ed25519",
@@ -267,10 +275,10 @@ export function Docs() {
             </CodeBlock>
 
             <p className={css.note}>
-              The draw is derived deterministically (HKDF-SHA256 → ChaCha20Rng), and
-              the receipt publishes the drbg key + draw so anyone can replay it. The
-              signature covers everything except the <code className={css.code}>sig</code>{' '}
-              block itself, so changing any field breaks it.
+              The draw is derived from a verified future drand quicknet pulse. The verifier
+              checks the BLS beacon signature, recomputes the HKDF seed, replays the draw,
+              and checks the signature over the receipt body. Changing any field breaks at
+              least one check.
             </p>
           </section>
 
@@ -279,7 +287,7 @@ export function Docs() {
             <span className={css.eyebrow}>Don't trust. Verify.</span>
             <h2 className={css.h2}>Verify it yourself</h2>
             <p className={css.p}>
-              Four independent checks any verifier runs, derived 1:1 from the receipt:
+              Five independent checks any drand receipt verifier runs, derived 1:1 from the receipt:
             </p>
 
             <ul className={css.checkList}>
@@ -293,9 +301,15 @@ export function Docs() {
               <li className={css.checkItem}>
                 <span className={css.pip} aria-hidden="true">✓</span>
                 <span className={css.checkText}>
-                  <b>RNG replay</b>, re-deriving ChaCha20 from{' '}
-                  <code className={css.code}>drbg_key_hex</code> reproduces{' '}
-                  <code className={css.code}>draw_u64</code>.
+                  <b>Drand beacon proof</b>, the target quicknet signature verifies under
+                  the pinned public key and matches the target round.
+                </span>
+              </li>
+              <li className={css.checkItem}>
+                <span className={css.pip} aria-hidden="true">✓</span>
+                <span className={css.checkText}>
+                  <b>Seed replay</b>, re-deriving ChaCha20 from the verified drand beacon
+                  reproduces <code className={css.code}>draw_u64</code>.
                 </span>
               </li>
               <li className={css.checkItem}>
@@ -388,30 +402,30 @@ export function Docs() {
                 </span>
                 <ul className={css.calloutList}>
                   <li>
-                    That the <b>server</b> chose its seed honestly. Because the server
-                    derives the seed, a malicious operator could in principle grind
-                    seeds for favourable outcomes.
+                    That the published outcome was unbiased. The operator can still{' '}
+                    <b>grind</b> — privately fail/suppress unfavorable attempts after seeing
+                    each drand-derived outcome, and publish only a favorable completed receipt.
+                    Per-roll drand fixes the seed source; it does not publicly bind the operator
+                    to a single attempt before the beacon resolves. That needs strict witnessed fairness.
                   </li>
                   <li>
-                    Deterministic replay is <b>not</b> the same as provable fairness,
+                    Drand provenance is <b>not</b> the same as strict witnessed v2 fairness,
                     and we do not claim it is.
                   </li>
                 </ul>
               </div>
             </InkFrame>
 
-            <h3 className={css.h3}>The path to provable fairness</h3>
-            <p className={css.roadmapTag}>Roadmap, not implemented yet</p>
+            <h3 className={css.h3}>The path to strict witnessed fairness</h3>
+            <p className={css.roadmapTag}>Roadmap beyond per-roll drand</p>
             <ul className={css.wayList}>
               <li className={css.wayItem}>
-                A client-supplied seed + commit-reveal: the server commits{' '}
-                <code className={css.code}>hash(seed)</code> before the roll, reveals
-                after, binding it.
+                Public batch manifests plus a witnessed append-only log, so accepted rolls
+                are publicly bound before the target beacon resolves.
               </li>
               <li className={css.wayItem}>
-                Binding rolls to a future public randomness beacon (drand / the League
-                of Entropy) so neither side can predict or bias the outcome and anyone
-                can verify against the public beacon.
+                Independent witness frontier attestations, so the operator cannot claim a
+                late commitment was made before seeing the drand target round.
               </li>
             </ul>
           </section>

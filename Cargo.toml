@@ -4,6 +4,7 @@ members = [
     "crates/kd-cli",
     "crates/kd-core",
     "crates/kd-core-wasm",
+    "crates/kd-drand",
     "crates/kd-receipt",
     "crates/kd-worker-wasm",
 ]

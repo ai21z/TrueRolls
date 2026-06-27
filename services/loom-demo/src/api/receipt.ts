@@ -31,6 +31,12 @@ export function buildReceiptBody(entry: TranscriptEntry): ReceiptBody {
   return body;
 }
 
+export function hasDrandProof(value: { proof?: unknown }): boolean {
+  const proof = value.proof;
+  if (proof === null || typeof proof !== 'object') return false;
+  return (proof as { drand?: unknown }).drand != null;
+}
+
 /**
  * The values a tampered receipt body claims — what every broken-die surface shows
  * (the forged face/κ), so the seed, the credential, the transcript row and the

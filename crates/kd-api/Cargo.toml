@@ -16,7 +16,7 @@ dotenvy = "0.15.7"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1"
 anyhow = "1.0.99"
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 deadpool-redis = "0.15.1"
 redis = { version = "0.25.4", features = ["tokio-comp"] }
 aws-config = "1.8.5"
@@ -29,9 +29,11 @@ ed25519-dalek = { workspace = true }
 serde_jcs = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # --- Project crates
 kd-core = { path = "../kd-core", features = ["rand"] }
+kd-drand = { path = "../kd-drand" }
 kd-receipt = { path = "../kd-receipt" } # SIG-1: the single shared receipt verifier
 
 # --- RNG stack (all 0.9.x and aligned with kd-core)
@@ -47,5 +49,4 @@ uuid = { version = "1", features = ["v4", "fast-rng", "serde"] }
 [dev-dependencies]
 # Keep dev tokio aligned to avoid multiple versions in the graph
 tokio   = { version = "1.47.1", features = ["macros", "rt-multi-thread", "time"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tower   = { version = "0.5", features = ["util"] } # ServiceExt::oneshot for rate-limit unit tests

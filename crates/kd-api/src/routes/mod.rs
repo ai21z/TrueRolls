@@ -9,6 +9,7 @@ use tower_governor::{
     GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
 };
 
+mod drand;
 mod health;
 mod roll;
 pub mod verify;
@@ -52,6 +53,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/healthz", get(health::healthz))
+        .route("/v1/drand/health", get(drand::drand_healthz))
         .route(
             "/v1/roll",
             post(roll::post_roll)

@@ -10,12 +10,18 @@ outcome distribution, and the nudge is hard-capped by KL-divergence and
 expected-value guards. Karma shapes **bounded** risk; it does not secretly pick
 winners.
 
-> **Honest scope.** TrueRolls today proves *tamper-evidence* (signatures),
-> *deterministic replay* (the draw reproduces from the recorded seed), and
-> *bounded math* (the KL/EV caps hold). It is **not yet** an adversarial-fairness
-> protocol: there is no commit/reveal, VRF, transparency-log anchoring, external
-> randomness beacon, or authentication. Deterministic replay is **not** proof
-> that the server chose the seed fairly. See
+> **Honest scope.** Live rolls mint `truerolls-drand-1` receipts. `VALID`
+> proves the roll seed came from a verified public drand quicknet beacon and the
+> outcome replays from that seed; it also proves the receipt was signed and the
+> bounded math replays. `VALID` does **not** prove the published outcome was
+> unbiased: because the operator's attempt is not publicly committed before the
+> target round resolves, the operator can still **grind** — privately fail/suppress
+> unfavorable attempts (other nonces/rounds) and publish only a favorable completed
+> receipt. (Refusing or timing out a roll is the mechanism, so this is outcome-bias,
+> not just availability.) Strict witnessed fairness — binding the operator to one
+> committed attempt — is the v2 protocol, not this per-roll drand receipt. Legacy
+> `truerolls-1` receipts remain verifiable only
+> for saved receipts and goldens. See
 > [docs/threat-model.md](docs/threat-model.md) for the precise limits.
 
 This repository is **proprietary** — see [LICENSE](LICENSE). No license is granted.
@@ -27,8 +33,9 @@ This repository is **proprietary** — see [LICENSE](LICENSE). No license is gra
 ```
 crates/
   kd-core         pure bounded math (no I/O): die defs, softmax, guard solving, KL/EV, prefix-CDF
+  kd-drand        pinned drand quicknet BLS verification + HKDF seed derivation
   kd-receipt      the single shared signer + offline verifier (one canonicalization for both)
-  kd-api          Axum HTTP server: roll, sign, verify, health; Postgres/Redis/S3
+  kd-api          Axum HTTP server: drand-backed roll, sign, verify, health; Postgres/Redis/S3
   kd-cli          local + remote roll and verify; transcript/receipt files
   kd-core-wasm    wasm-bindgen bindings exposing kd-core math + verify to the browser
   kd-worker-wasm  wasm roll+sign over the shared signer (server-side; never shipped to the browser)
@@ -59,6 +66,7 @@ Node ≥ 20.19 with pnpm 10, Docker (for the local API stack), and
 
 ```powershell
 cargo test -p kd-core          # the bounded-math engine
+cargo test -p kd-drand         # drand quicknet proof + HKDF derivation
 cargo test -p kd-receipt       # the signer/verifier (checks the committed goldens)
 cargo test -p kd-cli           # CLI roll + verify against the goldens
 cargo test --workspace         # everything; the kd-api integration tests need the live stack*
@@ -76,7 +84,8 @@ pnpm -C services/loom-demo build
 ```
 
 With no API reachable the demo runs in **demo mode** (receipts are simulated —
-that is *not* cryptographic verification). Start the API for real Ed25519 signing.
+that is *not* cryptographic verification). Start the API for real Ed25519
+signing and drand-backed receipts.
 
 ### The local API stack
 

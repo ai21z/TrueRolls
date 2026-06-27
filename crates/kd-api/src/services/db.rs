@@ -1,7 +1,9 @@
-// insert_roll, select_roll_by_idem_key, insert_transcript_meta
+// insert_roll, select_roll_by_idem_key, select_receipt_by_idem_key, insert_transcript_meta
 
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 use sqlx::PgPool;
+use sqlx::Row;
 use uuid::Uuid;
 
 pub struct RollInsertResult {
@@ -38,48 +40,48 @@ pub async fn insert_roll(
     })
 }
 
-pub struct DedupRow {
-    pub public_id: Uuid,
-    pub die: String,
-    pub kappa: f64,
-    pub seed: Option<String>,
-    pub face: i32,
-    pub ev: f64,
-    pub alpha: f64,
-    pub kl: f64,
-    pub created_at: DateTime<Utc>,
+pub struct DedupReceiptRow {
     pub idem_payload_sha256: Option<Vec<u8>>,
-    pub s3_key: Option<String>,
+    pub receipt_json: Value,
 }
 
-pub async fn select_by_idem_key(pg: &PgPool, key: &str) -> Result<Option<DedupRow>, sqlx::Error> {
-    Ok(sqlx::query!(
+pub async fn select_receipt_by_idem_key(
+    pg: &PgPool,
+    key: &str,
+) -> Result<Option<DedupReceiptRow>, sqlx::Error> {
+    let row = sqlx::query(
         r#"
-        SELECT public_id, die, kappa, seed, face, ev, alpha, kl, created_at,
-               idem_payload_sha256,
-               (SELECT s3_key FROM transcripts_meta WHERE roll_id = rolls.id LIMIT 1) AS "s3_key?"
+        SELECT idem_payload_sha256, receipt_json
         FROM rolls
         WHERE idempotency_key = $1
+          AND receipt_json IS NOT NULL
         ORDER BY id DESC
         LIMIT 1
         "#,
-        key
     )
+    .bind(key)
     .fetch_optional(pg)
-    .await?
-    .map(|row| DedupRow {
-        public_id: row.public_id,
-        die: row.die,
-        kappa: row.kappa,
-        seed: row.seed,
-        face: row.face,
-        ev: row.ev,
-        alpha: row.alpha,
-        kl: row.kl,
-        created_at: row.created_at,
-        idem_payload_sha256: row.idem_payload_sha256,
-        s3_key: row.s3_key,
+    .await?;
+
+    Ok(row.map(|row| DedupReceiptRow {
+        idem_payload_sha256: row.try_get("idem_payload_sha256").ok(),
+        receipt_json: row
+            .try_get("receipt_json")
+            .unwrap_or_else(|_| serde_json::json!({})),
     }))
+}
+
+pub async fn update_roll_receipt_json(
+    pg: &PgPool,
+    roll_id: i64,
+    receipt_json: &Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE rolls SET receipt_json = $1 WHERE id = $2")
+        .bind(receipt_json)
+        .bind(roll_id)
+        .execute(pg)
+        .await?;
+    Ok(())
 }
 
 // Return one roll + optional transcript S3 key by public_id

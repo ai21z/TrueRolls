@@ -68,6 +68,7 @@ function buildBars(probs: number[], rolledFace: number | null): BarData[] {
 interface Props {
   latestRoll: TranscriptEntry | null;
   isRolling: boolean;
+  rollStatus: string | null;
   onRoll: () => void;
   rollError: string | null;
   die: Die;
@@ -78,7 +79,7 @@ interface Props {
   brokenFace: number | null;
 }
 
-export function Stage({ latestRoll, isRolling, onRoll, rollError, die, kappa, broken, brokenFace }: Props) {
+export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, die, kappa, broken, brokenFace }: Props) {
   const [animKey, setAnimKey] = useState(0);
   const uid = useId().replace(/[:]/g, '');
   const voidId = `seed-void-${uid}`;
@@ -260,7 +261,7 @@ export function Stage({ latestRoll, isRolling, onRoll, rollError, die, kappa, br
         onClick={onRoll}
         disabled={isRolling}
       >
-        {isRolling ? 'Rolling…' : 'Roll'}
+        {isRolling ? (rollStatus ?? 'Rolling…') : 'Roll'}
       </InkButton>
 
       {rollError && (
@@ -271,4 +272,3 @@ export function Stage({ latestRoll, isRolling, onRoll, rollError, die, kappa, br
     </section>
   );
 }
-

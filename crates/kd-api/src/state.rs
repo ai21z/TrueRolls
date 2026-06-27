@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::error::{AppError, internal};
+use crate::services::drand::DrandHttpClient;
 use crate::services::signing::ReceiptSigner;
 
 #[derive(Clone)]
@@ -18,6 +19,7 @@ pub struct AppState {
     pub s3_bucket: String,
     pub cfg: Config,
     pub signer: Option<Arc<ReceiptSigner>>,
+    pub drand: DrandHttpClient,
 }
 
 pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
@@ -64,6 +66,8 @@ pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
             None
         }
     };
+    let drand =
+        DrandHttpClient::new(cfg.drand_relays.clone(), cfg.drand_timeout_ms).map_err(internal)?;
 
     Ok(Arc::new(AppState {
         pg,
@@ -72,6 +76,7 @@ pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
         s3_bucket: cfg.s3_bucket.clone(),
         cfg: cfg.clone(),
         signer,
+        drand,
     }))
 }
 
@@ -105,6 +110,10 @@ mod tests {
             env_profile: EnvProfile::Prod,
             roll_rl_period_secs: 1,
             roll_rl_burst: 60,
+            drand_relays: vec!["https://api.drand.sh".to_string()],
+            drand_timeout_ms: 2500,
+            drand_client_max_lag_rounds: 2,
+            drand_target_wait_ms: 12_000,
         }
     }
 

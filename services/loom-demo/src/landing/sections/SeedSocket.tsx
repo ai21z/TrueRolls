@@ -6,13 +6,14 @@ import css from './SeedSocket.module.css';
 /**
  * SeedSocket — the honesty paragraph as an interactive specimen, drawn by hand.
  *
- * TrueRolls proves each roll was computed and signed honestly from a given seed, and you
- * can replay it. The one thing it cannot prove yet is whether the server chose that seed
- * honestly. So six re-derivable facts are carved as labelled cells, wired to a germinating
- * seed where they enter the cracked coat as FEEDER roots — and the seventh fact, seed
- * honesty, is the seed's MISSING taproot: a deep anchor left ungrown (the roadmap toward
- * provability). The seed is a forensic herbarium plate: a hatched reniform testa, an oval
- * hilum scar, the coat split at the rooting pole.
+ * TrueRolls proves each live roll seed came from verified drand and that the outcome
+ * replays from it. The one thing it cannot prove yet is that the published outcome was
+ * unbiased — the operator can still grind by failing/suppressing unfavorable attempts.
+ * So six re-derivable facts are carved as labelled cells,
+ * wired to a germinating seed where they enter the cracked coat as FEEDER roots —
+ * and the seventh fact, strict fairness, is the seed's MISSING taproot: a deep
+ * anchor left ungrown. The seed is a forensic herbarium plate: a hatched reniform
+ * testa, an oval hilum scar, the coat split at the rooting pole.
  *
  * Layout mirrors the verify grid above it: the specimen sits in its own inked box the
  * width of the offline-verify card; the explanation is an unboxed column the width of
@@ -44,10 +45,11 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
     eyebrow: 'Seed honesty',
     body: (
       <>
-        TrueRolls proves each roll was computed and signed honestly from a given seed, and you
-        can replay it yourself. The one thing it cannot prove yet is whether the server chose that
-        seed honestly. The six cells re-derive straight from the receipt and feed the seed as
-        roots. The seventh, <b>seed honesty</b>, is the taproot it has not grown, yet.
+        TrueRolls proves each live roll seed came from a verified public drand beacon, and you
+        can replay the outcome yourself. The one thing it cannot prove yet is whether the
+        published outcome was unbiased — the operator can still grind, failing unfavorable
+        attempts and publishing only favorable ones. The cells re-derive straight from the receipt
+        and feed the seed as roots. The seventh, <b>strict fairness</b>, still waits for witnesses.
       </>
     ),
   },
@@ -79,9 +81,9 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
     eyebrow: 'seed honesty',
     body: (
       <>
-        Did the server pick its seed honestly, without secretly trying many seeds to{' '}
-        <b>grind</b> a favourable result? Replay cannot see that. It is the one fact the proof
-        cannot certify — so it is the seed's <b>missing taproot</b>: a deep anchor left ungrown.
+        Did the operator publicly bind the roll before it could see the outcome, or could it
+        privately fail unfavorable attempts and publish only a favorable one (grinding)? Per-roll
+        drand provenance cannot certify that — so strict witnessed fairness remains the seed's <b>missing taproot</b>.
       </>
     ),
   },
@@ -89,9 +91,9 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
     eyebrow: 'Roadmap, the fix',
     body: (
       <>
-        Not built yet. Let the client add a seed, make the server <b>commit</b> to its own seed
-        before the roll, then bind the result to a public randomness beacon (drand) no one can
-        grind. Until that ships, seed honesty is unproven. These roots reach for it.
+        Per-roll drand is built. The next step is witnessed batching: public manifests,
+        independently cosigned log checkpoints, and an upper-bound rule that proves the commitment
+        existed before the target beacon. These roots reach for that stricter claim.
       </>
     ),
   },

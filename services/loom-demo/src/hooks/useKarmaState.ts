@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow, VerifyStatus } from '../types/kd';
 import { initClient, isMockMode, postRoll, postVerify, postVerifyReceipt } from '../api/client';
-import { buildReceiptBody } from '../api/receipt';
+import { buildReceiptBody, hasDrandProof } from '../api/receipt';
 
 const STORAGE_KEY = 'kd-rolls';
 
@@ -50,6 +50,7 @@ export function useKarmaState() {
   const [kappa, setKappa] = useState(0.6);
   const [rolls, setRolls] = useState<TranscriptEntry[]>(loadRolls);
   const [isRolling, setIsRolling] = useState(false);
+  const [rollStatus, setRollStatus] = useState<string | null>(null);
   const [mock, setMock] = useState(false);
   const [ready, setReady] = useState(false);
   const [rollError, setRollError] = useState<string | null>(null);
@@ -71,8 +72,10 @@ export function useKarmaState() {
   // tamper stays broken (its `tampered` artifact lives on its own entry).
   const roll = useCallback(async () => {
     setIsRolling(true);
+    setRollStatus('Fetching public drand beacon…');
     setRollError(null);
     try {
+      setRollStatus('Waiting for verified drand target round…');
       const res = await postRoll(die, kappa);
       const entry: TranscriptEntry = {
         ...res,
@@ -87,6 +90,7 @@ export function useKarmaState() {
       setTimeout(() => setRollError(null), 3000);
     } finally {
       setIsRolling(false);
+      setRollStatus(null);
     }
   }, [die, kappa]);
 
@@ -106,7 +110,30 @@ export function useKarmaState() {
       let checks: VerifyCheckRow[];
       let detail: string;
 
-      if (!isMock && entry.v === 'truerolls-1' && entry.sig) {
+      if (!isMock && entry.v === 'truerolls-drand-1' && entry.sig) {
+        const entryHasDrandProof = hasDrandProof(entry);
+        const res = await postVerifyReceipt(buildReceiptBody(entry));
+        checks = [
+          { id: 'signature', label: 'Signature (Ed25519)', ok: res.valid_signature },
+          { id: 'rng', label: 'Seed replay (draw_u64)', ok: res.valid_sampling },
+          { id: 'face', label: 'Face recompute', ok: res.face_ok },
+          { id: 'metrics', label: 'Metrics match (α/KL/EV)', ok: res.metrics_ok },
+        ];
+        if (entryHasDrandProof) {
+          checks.splice(1, 0, { id: 'drand', label: 'Drand beacon proof', ok: res.valid_drand });
+        }
+        const allOk =
+          res.valid_signature &&
+          entryHasDrandProof &&
+          res.valid_drand &&
+          res.valid_sampling &&
+          res.face_ok &&
+          res.metrics_ok;
+        status = allOk ? 'verified_server' : 'mismatch';
+        detail = allOk
+          ? 'VALID proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. VALID does not prove the published outcome was unbiased: the operator can still grind — privately fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed fairness is the v2 protocol.'
+          : (res.errors ?? []).join('; ');
+      } else if (!isMock && entry.v === 'truerolls-1' && entry.sig) {
         // Signed live receipt → POST /v1/verify with the full ReceiptV2 body.
         // Check rows are derived 1:1 from the server response — never fabricated.
         const res = await postVerifyReceipt(buildReceiptBody(entry));
@@ -205,6 +232,7 @@ export function useKarmaState() {
     kappa, setKappa,
     rolls,
     isRolling,
+    rollStatus,
     mock: mock || isMockMode(),
     ready,
     roll,

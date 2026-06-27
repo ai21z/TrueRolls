@@ -12,18 +12,22 @@
 //!   1. **Signature** — Ed25519 over the JCS/RFC8785 canonicalization of the
 //!      receipt body with `sig` and `receipt_hash` removed (soft: a bad/missing
 //!      signature is recorded, not fatal, so the rest of the report still fills).
-//!   2. **Sampling** — reseed `ChaCha20Rng` from `proof.rng.drbg_key_hex`, take
+//!   2. **Drand** — for `truerolls-drand-1`, verify pinned quicknet BLS pulses,
+//!      target binding, randomness, and HKDF seed derivation.
+//!   3. **Sampling** — reseed `ChaCha20Rng` from `proof.rng.drbg_key_hex`, take
 //!      one `next_u64()`, and compare against `proof.draw_u64`.
-//!   3. **Face** — recompute the guarded distribution from `(die, kappa)` via
+//!   4. **Face** — recompute the guarded distribution from `(die, kappa)` via
 //!      `kd_core`, map the draw with `prefix_cdf_index_from_u64`, compare to
 //!      `face`.
-//!   4. **Metrics** — recompute `alpha`/`kl`/`ev` and compare within `1e-9`.
+//!   5. **Metrics** — recompute `alpha`/`kl`/`ev` and compare within `1e-9`.
 //!
 //! All math comes from `kd_core` — this crate adds no math of its own.
 //!
-//! Honest scope: this proves the *published* draw and math were applied
-//! consistently and signed by the key holder. It does **not** prove the server's
-//! seed choice was honest — that is commit-reveal / drand territory, not this.
+//! Honest scope: `truerolls-drand-1` proves verified drand seed provenance and
+//! deterministic replay for a completed receipt. It does **not** prove the
+//! published outcome was unbiased: the operator can still grind by failing/
+//! suppressing unfavorable attempts and publishing only favorable completed
+//! receipts. Strict witnessed fairness (one committed attempt per roll) is v2.
 
 use kd_core::die::Die;
 use kd_core::distribution::compute_distribution;
@@ -41,8 +45,10 @@ pub use sign::{
     reject_test_signer_in_prod,
 };
 
-/// The only receipt schema version this verifier accepts.
+/// Legacy receipt schema version.
 pub const RECEIPT_VERSION: &str = "truerolls-1";
+/// Drand-backed receipt schema version.
+pub const DRAND_RECEIPT_VERSION: &str = kd_drand::DRAND_RECEIPT_VERSION;
 
 /// Absolute tolerance for the recomputed `alpha`/`kl`/`ev` comparison.
 pub const METRIC_TOL: f64 = 1e-9;
@@ -53,12 +59,15 @@ pub const METRIC_TOL: f64 = 1e-9;
 /// canonicalization — both [`ReceiptSigner::sign_receipt`] and signature
 /// verification call it, so the signer and verifier can never disagree on what
 /// was signed. Stripping is defensive: callers that pass a pre-`sig` body get an
-/// identical result, so existing goldens and newly-signed receipts match.
+/// identical result, so existing goldens and newly-signed receipts match. The
+/// API may wrap a receipt with envelope-only metadata such as `deduplicated`;
+/// those fields are not signed receipt content and are stripped here too.
 pub fn canonical_signing_bytes(receipt_body: &Value) -> Result<Vec<u8>, String> {
     let mut body = receipt_body.clone();
     if let Some(obj) = body.as_object_mut() {
         obj.remove("sig");
         obj.remove("receipt_hash");
+        obj.remove("deduplicated");
     }
     serde_jcs::to_vec(&body).map_err(|e| format!("JCS canonicalization failed: {e}"))
 }
@@ -87,13 +96,31 @@ struct ReceiptProof {
     math_param_version: String,
     rng: ReceiptRng,
     draw_u64: String,
+    drand: Option<ReceiptDrandProof>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ReceiptRng {
     drbg_key_hex: String,
-    #[allow(dead_code)]
     algo: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReceiptDrandProof {
+    chain_hash: String,
+    scheme: String,
+    public_key: String,
+    period_seconds: u64,
+    genesis_time: u64,
+    target_delay_rounds: u64,
+    client_nonce: String,
+    client_observed_round: u64,
+    client_observed_signature_hex: String,
+    client_observed_randomness_hex: String,
+    target_round: u64,
+    target_signature_hex: String,
+    target_randomness_hex: String,
+    idem_payload_sha256_hex: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,8 +145,10 @@ struct ReceiptSig {
 pub enum VerifyError {
     /// JSON did not deserialize into a ReceiptV2.
     ParseReceipt(String),
-    /// `v` is not [`RECEIPT_VERSION`].
+    /// `v` is not a supported receipt version.
     UnsupportedVersion(String),
+    /// A drand receipt did not carry its required drand proof block.
+    MissingDrandProof,
     /// `proof.rng.drbg_key_hex` is not valid hex.
     BadDrbgHex(String),
     /// `proof.rng.drbg_key_hex` did not decode to exactly 32 bytes.
@@ -139,6 +168,7 @@ impl fmt::Display for VerifyError {
         match self {
             VerifyError::ParseReceipt(e) => write!(f, "failed to parse ReceiptV2: {e}"),
             VerifyError::UnsupportedVersion(v) => write!(f, "unsupported receipt version: '{v}'"),
+            VerifyError::MissingDrandProof => write!(f, "drand receipt is missing proof.drand"),
             VerifyError::BadDrbgHex(e) => write!(f, "invalid drbg_key_hex: {e}"),
             VerifyError::BadDrbgLen(n) => {
                 write!(f, "drbg_key_hex must decode to 32 bytes, got {n}")
@@ -162,14 +192,15 @@ impl fmt::Display for VerifyError {
 impl std::error::Error for VerifyError {}
 
 // ---------------------------------------------------------------------------
-// VerifyReport — the four-check result of a verifiable receipt.
+// VerifyReport — the check result of a verifiable receipt.
 // ---------------------------------------------------------------------------
 
 /// The outcome of verifying a (structurally valid) signed receipt. `verdict`
-/// is VALID only when all four checks pass.
+/// is VALID only when every reported check passes.
 #[derive(Debug, Clone)]
 pub struct VerifyReport {
     pub valid_signature: bool,
+    pub valid_drand: bool,
     pub valid_sampling: bool,
     pub face_ok: bool,
     pub metrics_ok: bool,
@@ -183,9 +214,13 @@ pub struct VerifyReport {
 }
 
 impl VerifyReport {
-    /// True only when signature, sampling, face, and metrics all pass.
+    /// True only when signature, drand, sampling, face, and metrics all pass.
     pub fn is_valid(&self) -> bool {
-        self.valid_signature && self.valid_sampling && self.face_ok && self.metrics_ok
+        self.valid_signature
+            && self.valid_drand
+            && self.valid_sampling
+            && self.face_ok
+            && self.metrics_ok
     }
 
     /// The CLI/`--json` and WASM result shape — one schema everywhere.
@@ -193,6 +228,7 @@ impl VerifyReport {
         json!({
             "verdict": if self.is_valid() { "VALID" } else { "INVALID" },
             "valid_signature": self.valid_signature,
+            "valid_drand": self.valid_drand,
             "valid_sampling": self.valid_sampling,
             "face_ok": self.face_ok,
             "metrics_ok": self.metrics_ok,
@@ -236,7 +272,7 @@ pub fn verify_receipt(
     let receipt: ReceiptV2 = serde_json::from_value(receipt_value.clone())
         .map_err(|e| VerifyError::ParseReceipt(e.to_string()))?;
 
-    if receipt.v != RECEIPT_VERSION {
+    if receipt.v != RECEIPT_VERSION && receipt.v != DRAND_RECEIPT_VERSION {
         return Err(VerifyError::UnsupportedVersion(receipt.v));
     }
 
@@ -255,7 +291,7 @@ pub fn verify_receipt(
         None => errors.push("receipt has no signature block".to_string()),
     }
 
-    // ---- 2. Sampling: drbg_key -> ChaCha20 -> next_u64 ----------------------
+    // ---- 2. Drand proof / sampling seed -------------------------------------
     let drbg_bytes = hex::decode(&receipt.proof.rng.drbg_key_hex)
         .map_err(|e| VerifyError::BadDrbgHex(e.to_string()))?;
     if drbg_bytes.len() != 32 {
@@ -263,6 +299,29 @@ pub fn verify_receipt(
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&drbg_bytes);
+
+    let mut valid_drand = true;
+    if receipt.v == DRAND_RECEIPT_VERSION {
+        match verify_drand_seed(&receipt) {
+            Ok(derived_seed) => {
+                if derived_seed == seed {
+                    seed = derived_seed;
+                } else {
+                    valid_drand = false;
+                    errors.push(
+                        "drand-derived seed does not match proof.rng.drbg_key_hex".to_string(),
+                    );
+                    seed = derived_seed;
+                }
+            }
+            Err(e) => {
+                valid_drand = false;
+                errors.push(format!("drand proof FAILED: {e}"));
+            }
+        }
+    }
+
+    // ---- 3. Sampling: seed -> ChaCha20 -> next_u64 --------------------------
     let mut rng = ChaCha20Rng::from_seed(seed);
     let replayed_draw = rng.next_u64();
 
@@ -279,7 +338,7 @@ pub fn verify_receipt(
         ));
     }
 
-    // ---- 3. Version gate + recompute distribution/face ----------------------
+    // ---- 4. Version gate + recompute distribution/face ----------------------
     if receipt.proof.math_param_version != kd_core::PARAM_VERSION {
         return Err(VerifyError::ParamVersionMismatch {
             got: receipt.proof.math_param_version.clone(),
@@ -299,7 +358,7 @@ pub fn verify_receipt(
         ));
     }
 
-    // ---- 4. Metrics ---------------------------------------------------------
+    // ---- 5. Metrics ---------------------------------------------------------
     let tol = METRIC_TOL;
     let metrics_ok = (recomp_alpha - receipt.alpha).abs() <= tol
         && (recomp_kl - receipt.kl).abs() <= tol
@@ -327,6 +386,7 @@ pub fn verify_receipt(
 
     Ok(VerifyReport {
         valid_signature,
+        valid_drand,
         valid_sampling,
         face_ok,
         metrics_ok,
@@ -384,6 +444,101 @@ fn verify_ed25519_sig(
         Ok(()) => Ok(true),
         Err(_) => Ok(false),
     }
+}
+
+fn verify_drand_seed(receipt: &ReceiptV2) -> Result<[u8; 32], VerifyError> {
+    let proof = receipt
+        .proof
+        .drand
+        .as_ref()
+        .ok_or(VerifyError::MissingDrandProof)?;
+
+    if proof.chain_hash != kd_drand::QUICKNET_CHAIN_HASH {
+        return Err(VerifyError::Core(format!(
+            "drand chain_hash '{}' != pinned '{}'",
+            proof.chain_hash,
+            kd_drand::QUICKNET_CHAIN_HASH
+        )));
+    }
+    if proof.scheme != kd_drand::QUICKNET_SCHEME {
+        return Err(VerifyError::Core(format!(
+            "drand scheme '{}' != pinned '{}'",
+            proof.scheme,
+            kd_drand::QUICKNET_SCHEME
+        )));
+    }
+    if proof.public_key != kd_drand::QUICKNET_PUBLIC_KEY_HEX {
+        return Err(VerifyError::Core(
+            "drand public key does not match pinned quicknet key".to_string(),
+        ));
+    }
+    if proof.period_seconds != kd_drand::QUICKNET_PERIOD_SECONDS {
+        return Err(VerifyError::Core(
+            "drand period_seconds does not match pinned quicknet period".to_string(),
+        ));
+    }
+    if proof.genesis_time != kd_drand::QUICKNET_GENESIS_TIME {
+        return Err(VerifyError::Core(
+            "drand genesis_time does not match pinned quicknet genesis".to_string(),
+        ));
+    }
+    if proof.target_delay_rounds != kd_drand::DEFAULT_TARGET_DELAY_ROUNDS {
+        return Err(VerifyError::Core(format!(
+            "target_delay_rounds {} != {}",
+            proof.target_delay_rounds,
+            kd_drand::DEFAULT_TARGET_DELAY_ROUNDS
+        )));
+    }
+    if receipt.proof.rng.algo != kd_drand::RNG_ALGO {
+        return Err(VerifyError::Core(format!(
+            "rng algo '{}' != '{}'",
+            receipt.proof.rng.algo,
+            kd_drand::RNG_ALGO
+        )));
+    }
+    if proof.client_nonce.len() != 64
+        || !proof
+            .client_nonce
+            .as_bytes()
+            .iter()
+            .all(u8::is_ascii_hexdigit)
+    {
+        return Err(VerifyError::Core(
+            "client_nonce must be 32 random bytes encoded as 64 hex characters".to_string(),
+        ));
+    }
+
+    kd_drand::validate_target_round(proof.client_observed_round, proof.target_round)
+        .map_err(|e| VerifyError::Core(e.to_string()))?;
+
+    let client_observed = kd_drand::DrandPulse {
+        chain_hash: proof.chain_hash.clone(),
+        round: proof.client_observed_round,
+        signature_hex: proof.client_observed_signature_hex.clone(),
+        randomness_hex: proof.client_observed_randomness_hex.clone(),
+    };
+    client_observed
+        .verify_quicknet()
+        .map_err(|e| VerifyError::Core(e.to_string()))?;
+
+    let target = kd_drand::DrandPulse {
+        chain_hash: proof.chain_hash.clone(),
+        round: proof.target_round,
+        signature_hex: proof.target_signature_hex.clone(),
+        randomness_hex: proof.target_randomness_hex.clone(),
+    };
+    target
+        .verify_quicknet()
+        .map_err(|e| VerifyError::Core(e.to_string()))?;
+
+    let input = kd_drand::DrandSeedInput {
+        target_pulse: target,
+        client_nonce: proof.client_nonce.clone(),
+        die: receipt.die.clone(),
+        kappa: receipt.kappa,
+        idem_payload_sha256_hex: proof.idem_payload_sha256_hex.clone(),
+    };
+    kd_drand::derive_roll_seed(&input).map_err(|e| VerifyError::Core(e.to_string()))
 }
 
 /// Parse a die string ("d4".."d100") to its face count.
@@ -653,5 +808,171 @@ mod tests {
         assert!(matches!(err, VerifyError::UnsupportedDie(_)));
         let msg = err.to_string();
         assert!(msg.contains("dx") && !msg.contains("ddx"), "got: {msg}");
+    }
+
+    fn quicknet_pulse(round: u64) -> kd_drand::DrandPulse {
+        match round {
+            121 => kd_drand::DrandPulse {
+                chain_hash: kd_drand::QUICKNET_CHAIN_HASH.to_string(),
+                round,
+                signature_hex: "add0b70bf54c5dacfc7289994e085c3a635442f524088b1734c908a4278b2567188d8fa569752d9b4d68e2ccd0e023bd".to_string(),
+                randomness_hex: "9f041d26fd999c82fabf50a22fc7e0be9b068623df1c00d7c8849cdf5da6d25f".to_string(),
+            },
+            123 => kd_drand::DrandPulse {
+                chain_hash: kd_drand::QUICKNET_CHAIN_HASH.to_string(),
+                round,
+                signature_hex: "b75c69d0b72a5d906e854e808ba7e2accb1542ac355ae486d591aa9d43765482e26cd02df835d3546d23c4b13e0dfc92".to_string(),
+                randomness_hex: "fb8f7bc29bf24db51871ec8c79f3a1e4bd0557bc0dfcee9ed1d924e69d1c60dc".to_string(),
+            },
+            _ => panic!("no fixture for round {round}"),
+        }
+    }
+
+    fn signed_drand_receipt() -> Value {
+        use kd_core::{
+            die::Die, distribution::compute_distribution, params::default_for_die,
+            sample::prefix_cdf_index_from_u64,
+        };
+        use rand_chacha::ChaCha20Rng;
+        use rand_core::{RngCore, SeedableRng};
+
+        let client_observed = quicknet_pulse(121);
+        let target = quicknet_pulse(123);
+        let seed_input = kd_drand::DrandSeedInput {
+            target_pulse: target.clone(),
+            client_nonce: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
+            die: "d20".to_string(),
+            kappa: 0.6,
+            idem_payload_sha256_hex: "11".repeat(32),
+        };
+        let drbg = kd_drand::derive_roll_seed(&seed_input).unwrap();
+        let draw = ChaCha20Rng::from_seed(drbg).next_u64();
+        let params = default_for_die(20);
+        let out = compute_distribution::<20>(Die::<20>, 0.6, &params).unwrap();
+        let face = (prefix_cdf_index_from_u64::<20>(&out.probs, draw) + 1) as u64;
+
+        let body = json!({
+            "v": kd_drand::DRAND_RECEIPT_VERSION,
+            "id": "00000000-0000-0000-0000-00000000d123",
+            "die": "d20",
+            "kappa": 0.6,
+            "face": face,
+            "alpha": out.alpha,
+            "kl": out.kl,
+            "ev": out.ev,
+            "created_at": "2026-01-01T00:00:00Z",
+            "transcript_url": "/v1/roll/x/transcript",
+            "proof": {
+                "math_param_version": kd_core::PARAM_VERSION,
+                "rng": {
+                    "drbg_key_hex": hex::encode(drbg),
+                    "algo": kd_drand::RNG_ALGO
+                },
+                "draw_u64": draw.to_string(),
+                "drand": {
+                    "chain_hash": kd_drand::QUICKNET_CHAIN_HASH,
+                    "scheme": kd_drand::QUICKNET_SCHEME,
+                    "public_key": kd_drand::QUICKNET_PUBLIC_KEY_HEX,
+                    "period_seconds": kd_drand::QUICKNET_PERIOD_SECONDS,
+                    "genesis_time": kd_drand::QUICKNET_GENESIS_TIME,
+                    "target_delay_rounds": kd_drand::DEFAULT_TARGET_DELAY_ROUNDS,
+                    "client_nonce": seed_input.client_nonce,
+                    "client_observed_round": client_observed.round,
+                    "client_observed_signature_hex": client_observed.signature_hex,
+                    "client_observed_randomness_hex": client_observed.randomness_hex,
+                    "target_round": target.round,
+                    "target_signature_hex": target.signature_hex,
+                    "target_randomness_hex": target.randomness_hex,
+                    "idem_payload_sha256_hex": seed_input.idem_payload_sha256_hex
+                }
+            },
+        });
+
+        let signer =
+            ReceiptSigner::from_hex_seed(PUBLISHED_TEST_SEED_HEX, "test-kid-1".to_string())
+                .unwrap();
+        let (sig, receipt_hash) = signer.sign_receipt(&body).unwrap();
+        let mut receipt = body;
+        let obj = receipt.as_object_mut().unwrap();
+        obj.insert("receipt_hash".into(), json!(receipt_hash));
+        obj.insert("sig".into(), serde_json::to_value(&sig).unwrap());
+        receipt
+    }
+
+    #[test]
+    fn signed_drand_receipt_verifies_valid() {
+        let receipt = signed_drand_receipt();
+        let report =
+            verify_receipt(&receipt, &test_public_key_b64()).expect("drand receipt verifies");
+        assert!(report.valid_signature, "{:?}", report.errors);
+        assert!(report.valid_drand, "{:?}", report.errors);
+        assert!(report.valid_sampling, "{:?}", report.errors);
+        assert!(report.face_ok, "{:?}", report.errors);
+        assert!(report.metrics_ok, "{:?}", report.errors);
+        assert!(report.is_valid(), "{:?}", report.errors);
+    }
+
+    #[test]
+    fn api_envelope_deduplicated_field_is_not_part_of_signature() {
+        let mut receipt = signed_drand_receipt();
+        receipt["deduplicated"] = json!(false);
+
+        let report =
+            verify_receipt(&receipt, &test_public_key_b64()).expect("drand receipt verifies");
+        assert!(report.valid_signature, "{:?}", report.errors);
+        assert!(report.is_valid(), "{:?}", report.errors);
+    }
+
+    #[test]
+    fn signed_drand_receipt_rejects_target_round_tamper() {
+        let mut receipt = signed_drand_receipt();
+        receipt["proof"]["drand"]["target_round"] = json!(124);
+        let report = verify_receipt(&receipt, &test_public_key_b64()).expect("structural receipt");
+        assert!(!report.valid_signature, "target round is signed");
+        assert!(
+            !report.valid_drand,
+            "target round mismatch must fail drand proof"
+        );
+        assert!(!report.is_valid());
+    }
+
+    #[test]
+    fn signed_drand_receipt_rejects_client_nonce_tamper() {
+        let mut receipt = signed_drand_receipt();
+        receipt["proof"]["drand"]["client_nonce"] =
+            json!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        let report = verify_receipt(&receipt, &test_public_key_b64()).expect("structural receipt");
+        assert!(!report.valid_signature, "client nonce is signed");
+        assert!(
+            !report.valid_drand,
+            "client nonce change must change derived seed"
+        );
+        assert!(!report.is_valid());
+    }
+
+    #[test]
+    fn signed_drand_receipt_ignores_forged_drbg_key_for_sampling() {
+        let mut receipt = signed_drand_receipt();
+        receipt["proof"]["rng"]["drbg_key_hex"] = json!("00".repeat(32));
+
+        let report = verify_receipt(&receipt, &test_public_key_b64()).expect("structural receipt");
+        assert!(
+            !report.valid_signature,
+            "drbg_key_hex is part of the signed body"
+        );
+        assert!(
+            !report.valid_drand,
+            "forged drbg_key_hex must fail the drand-derived seed equality"
+        );
+        assert!(
+            report.valid_sampling,
+            "sampling must replay from the derived drand seed, not the forged drbg_key_hex"
+        );
+        assert!(
+            report.face_ok,
+            "face must also replay from the derived seed"
+        );
+        assert!(!report.is_valid());
     }
 }

@@ -134,6 +134,7 @@ export type ReceiptVerdict = 'VALID' | 'INVALID' | 'ERROR';
 export interface WasmVerifyReport {
   verdict: ReceiptVerdict;
   valid_signature?: boolean;
+  valid_drand?: boolean;
   valid_sampling?: boolean;
   face_ok?: boolean;
   metrics_ok?: boolean;

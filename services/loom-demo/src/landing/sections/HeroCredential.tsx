@@ -2,16 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { useKarmaState } from '../../hooks/useKarmaState';
 import type { HeroPhase } from '../three/HeroCanvas';
 import type { Die, ReceiptVerifyResponse } from '../../types/kd';
-import { buildReceiptBody, tamperedView } from '../../api/receipt';
+import { buildReceiptBody, hasDrandProof as receiptHasDrandProof, tamperedView } from '../../api/receipt';
 import { postVerifyReceipt } from '../../api/client';
 import { FACES } from '../../constants/caps';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import css from './HeroCredential.module.css';
 
-const ROW_LABELS: ReadonlyArray<[keyof Pick<ReceiptVerifyResponse, 'valid_signature' | 'valid_sampling' | 'face_ok' | 'metrics_ok'>, string]> = [
+const ROW_LABELS: ReadonlyArray<[keyof Pick<ReceiptVerifyResponse, 'valid_signature' | 'valid_drand' | 'valid_sampling' | 'face_ok' | 'metrics_ok'>, string]> = [
   ['valid_signature', 'Signature'],
-  ['valid_sampling', 'RNG replay'],
+  ['valid_drand', 'Drand proof'],
+  ['valid_sampling', 'Seed replay'],
   ['face_ok', 'Face recompute'],
   ['metrics_ok', 'Metrics'],
 ];
@@ -33,6 +34,7 @@ export function HeroCredential({ state, onPhase }: Props) {
   const tamper = tamperState?.result ?? null;
 
   const signed = !!entry?.sig && !state.mock;
+  const hasDrandProof = entry ? receiptHasDrandProof(entry) : false;
 
   // New roll → reset, signal 'settled', then auto-verify the clean receipt.
   useEffect(() => {
@@ -51,7 +53,12 @@ export function HeroCredential({ state, onPhase }: Props) {
       .then((res) => {
         if (cancelled) return;
         setVerify(res);
-        const allOk = res.valid_signature && res.valid_sampling && res.face_ok && res.metrics_ok;
+        const allOk =
+          res.valid_signature &&
+          (!hasDrandProof || res.valid_drand !== false) &&
+          res.valid_sampling &&
+          res.face_ok &&
+          res.metrics_ok;
         onPhase(allOk ? 'sealed' : 'settled');
       })
       .catch(() => {
@@ -60,7 +67,7 @@ export function HeroCredential({ state, onPhase }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [entry, state.mock, onPhase]);
+  }, [entry, hasDrandProof, state.mock, onPhase]);
 
   const doTamper = useCallback(async () => {
     if (!entry?.sig) return;
@@ -116,7 +123,7 @@ export function HeroCredential({ state, onPhase }: Props) {
       </div>
 
       <div className={css.checks}>
-        {ROW_LABELS.map(([key, label]) => {
+        {ROW_LABELS.filter(([key]) => key !== 'valid_drand' || hasDrandProof).map(([key, label]) => {
           const ok = shown ? shown[key] : null;
           const cls = ok == null ? css.pending : ok ? css.ok : css.fail;
           return (

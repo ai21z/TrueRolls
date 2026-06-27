@@ -105,6 +105,7 @@ pub fn compute_roll_with_rng_labeled(
 
 /// Backward-compat: existing call sites can keep calling this variant; it will
 /// mark `sampling.rng = "unknown"`. Prefer the `_labeled` variant above.
+#[allow(dead_code)]
 pub fn compute_roll_with_rng(
     die: &str,
     kappa: f64,

@@ -14,10 +14,11 @@ Read these before integrating — they bound what the API guarantees.
 - **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` is throttled per client IP. Every other route — all GETs, both verify routes, `/healthz`, `/.well-known/*` — is unthrottled. Do not treat the throttle as access control.
 - **What is proven today:**
   - **Tamper-evidence** of a signed receipt via an Ed25519 signature over the canonicalized receipt body.
-  - **Deterministic replay** of the draw: anyone with the receipt can re-derive the same `face` from the disclosed DRBG key.
+  - **Drand seed provenance** for live `truerolls-drand-1` receipts: anyone with the receipt can verify the pinned drand quicknet BLS pulses and re-derive the seed from the target pulse.
+  - **Deterministic replay** of the draw: anyone with the receipt can re-derive the same `face` from the disclosed seed.
   - **Bounded math**: the rolled distribution is recomputable and is held within KL-divergence and EV caps relative to uniform.
-- **What is NOT implemented and is NOT claimed:** commit/reveal, VRF, Merkle anchoring, on-chain anything, any external/public randomness beacon, authentication, or production fairness.
-- **Replay determinism is not adversarial fairness.** The receipt lets you confirm the server computed the draw consistently from the inputs it disclosed. It does **not** prevent a server from choosing favorable seed material before publishing. Disclosing the derived DRBG key proves replay, not honest key derivation.
+- **What is NOT implemented and is NOT claimed:** commit/reveal, VRF, Merkle anchoring, witnessed transparency-log anchoring, on-chain anything, authentication, or strict public fairness.
+- **Drand provenance is not strict witnessed fairness.** `VALID` proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. It does **not** prove the published outcome was unbiased: the operator can still **grind** — privately fail/suppress unfavorable attempts and publish only a favorable completed receipt (withholding/timeout is the mechanism). Binding the operator to one committed attempt requires v2 witnessed fairness.
 - **The site's demo/mock verification is not cryptographic verification.** Only the receipt-mode signature + replay path described here performs real checks.
 
 ## Conventions
@@ -59,15 +60,26 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 |---|---|---|---|
 | `die` | string | yes | `d6` \| `d20` \| `d100`. Anything else → 400. |
 | `kappa` | number | yes | Finite, in `[-1, 1]`. Otherwise → 400. |
-| `seed` | string \| null | no | Optional user seed mixed into key derivation (see below). |
+| `client_nonce` | string | yes | Client-generated 32 random bytes encoded as 64 hex chars. Server-generated nonce is forbidden. |
+| `drand` | object | yes | Client-observed quicknet frontier and target round. |
+| `seed` | string \| null | no | Legacy field. Rejected on live drand rolls. |
 | `idempotency_key` | string \| null | no | Optional. May also be supplied as the `Idempotency-Key` header. |
+
+`drand` fields:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `client_observed_round` | integer | yes | Quicknet round the browser observed. |
+| `client_observed_signature_hex` | string | yes | BLS signature for that round. |
+| `client_observed_randomness_hex` | string | yes | Must equal `SHA256(client_observed_signature)`. |
+| `target_round` | integer | yes | Must equal `client_observed_round + 2`. |
 
 **Idempotency**
 
 - The key may come from the `Idempotency-Key` **header** or the `idempotency_key` **body field**. If both are present and differ → **400**. The header is preferred.
 - If neither is present, the server generates a random key (so retries do not dedup).
-- Reusing a key whose recorded canonical payload hash — over `(die, kappa, seed)` — differs from the new request → **409**.
-- A concurrent in-flight request holding the same key → **202** with a retry hint.
+- Reusing a key whose recorded canonical payload hash — over `(die, kappa, client_nonce, drand)` — differs from the new request → **409**.
+- A concurrent in-flight request holding the same key → **202** with a retry hint. Once completed, the same key returns the stored final receipt with the same target/result, not a fresh target.
 
 **Responses**
 
@@ -75,7 +87,7 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 
   ```json
   {
-    "v": "truerolls-1",
+    "v": "truerolls-drand-1",
     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "die": "d20",
     "kappa": -0.4,
@@ -90,9 +102,25 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
       "math_param_version": "roll.math.v1",
       "rng": {
         "drbg_key_hex": "<hex of the 32-byte HKDF-derived key>",
-        "algo": "HKDF(SHA-256)->ChaCha20Rng"
+        "algo": "drand-quicknet+HKDF(SHA-256)->ChaCha20Rng"
       },
-      "draw_u64": "12345678901234567890"
+      "draw_u64": "12345678901234567890",
+      "drand": {
+        "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+        "scheme": "bls-unchained-g1-rfc9380",
+        "public_key": "<pinned quicknet public key hex>",
+        "period_seconds": 3,
+        "genesis_time": 1692803367,
+        "target_delay_rounds": 2,
+        "client_nonce": "<64 hex chars>",
+        "client_observed_round": 100,
+        "client_observed_signature_hex": "<96 hex chars>",
+        "client_observed_randomness_hex": "<64 hex chars>",
+        "target_round": 102,
+        "target_signature_hex": "<96 hex chars>",
+        "target_randomness_hex": "<64 hex chars>",
+        "idem_payload_sha256_hex": "<64 hex chars>"
+      }
     },
     "receipt_hash": "sha256:<hex>",
     "sig": {
@@ -109,7 +137,7 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 
   | Field | Type | Notes |
   |---|---|---|
-  | `v` | string | Version discriminator, `"truerolls-1"`. |
+  | `v` | string | Version discriminator, `"truerolls-drand-1"` for live rolls. Legacy `"truerolls-1"` remains verifiable. |
   | `id` | uuid | Public roll id. |
   | `die`, `kappa` | string, number | Echoed inputs. |
   | `face` | int | Rolled face, 1-indexed. |
@@ -118,15 +146,16 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
   | `transcript_url` | string | API-relative path to the stored transcript. |
   | `transcript_key` | string | Object-store URI of the transcript. Optional in the schema (omitted when unset); present in practice on the 201 path. |
   | `proof.math_param_version` | string | Math parameter set the roll ran under (currently `"roll.math.v1"`). |
-  | `proof.rng.drbg_key_hex` | string | Hex of the 32-byte HKDF-derived ChaCha20 key. Enables replay (see scope note). |
-  | `proof.rng.algo` | string | RNG construction label, e.g. `"HKDF(SHA-256)->ChaCha20Rng"`. |
+  | `proof.rng.drbg_key_hex` | string | Hex of the 32-byte HKDF-derived ChaCha20 key. Enables replay and is re-derived from `proof.drand`. |
+  | `proof.rng.algo` | string | `"drand-quicknet+HKDF(SHA-256)->ChaCha20Rng"`. |
   | `proof.draw_u64` | string | Stringified `u64` drawn from the DRBG. |
+  | `proof.drand` | object | Pinned quicknet proof: chain info, client nonce/frontier, target round/signature/randomness, and canonical request hash. |
   | `receipt_hash` | string | `"sha256:<hex>"` of the canonical receipt body (sig + receipt_hash excluded). Absent when unsigned. |
   | `sig` | object | Ed25519 signature block. Absent when unsigned. The `sig.kid` is set per deployment (configured via the signing key id). |
 
   The signature and `receipt_hash` are computed over the **JCS / RFC 8785** canonicalization of the receipt body **with the `sig` and `receipt_hash` fields removed**.
 
-- **`200` — deduplicated.** The idempotency key already resolved to a completed roll with a matching payload. The body is the **legacy `RollResponse` shape** (below), *not* the receipt envelope, with `deduplicated: true`.
+- **`200` — deduplicated.** The idempotency key already resolved to a completed roll with a matching payload. The body is the stored receipt envelope with `deduplicated: true`. It is the same target/result as the original request.
 
 - **`202` — processing.** Another request with the same key is still computing.
 
@@ -134,11 +163,11 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
   { "status": "processing", "idem_key": "<key>", "retry_hint_ms": 150 }
   ```
 
-- **`400`** — invalid `die`; `kappa` non-finite or outside `[-1, 1]`; or header/body idempotency keys both present and different. Plain text.
+- **`400`** — invalid `die`; `kappa` non-finite or outside `[-1, 1]`; missing/invalid `client_nonce`; missing/invalid drand proof; stale client drand frontier; target round not equal to observed+2; target round not future versus the API's freshness frontier; legacy `seed` present; or header/body idempotency keys both present and different. Plain text.
 - **`409`** — idempotency key reused with a different payload. Plain text.
 - **`500`** — DB / Redis / object-store failure. Plain text.
 
-**Seed and key-derivation note.** `seed` (if given), the idempotency key, and the canonical payload hash are concatenated as HKDF input keying material; an optional server-side salt (`KD_RNG_SALT`, else none) is the HKDF salt. HKDF(SHA-256) derives the 32-byte ChaCha20 DRBG key. The derived key is published in the receipt's `proof.rng.drbg_key_hex`, which is what makes replay possible. This proves the draw is consistent with the disclosed key — it does **not** prove the server chose its derivation inputs honestly.
+**Drand derivation note.** The browser observes a quicknet frontier and sends a client nonce plus `target_round = observed_round + 2`. The API verifies the observed pulse, rejects targets that are not future versus `max(server latest relay round, local wall-clock quicknet schedule round)`, waits for the target pulse, verifies the target BLS signature, computes `randomness = SHA256(signature)`, and derives the 32-byte ChaCha20 seed with HKDF-SHA256 bound to the canonical request hash. There is no production fallback to local server RNG in drand mode.
 
 ---
 
@@ -196,18 +225,43 @@ The transcript holds the flat math fields the legacy verify path consumes (`die`
 
 ---
 
+## GET /v1/drand/health
+
+Fetch and verify the latest drand quicknet pulse through the server's configured relays. This is an operational/provenance health endpoint, not a roll.
+
+**Response — `200`**
+
+```json
+{
+  "source": "drand-quicknet",
+  "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+  "scheme": "bls-unchained-g1-rfc9380",
+  "public_key": "<pinned quicknet public key hex>",
+  "period_seconds": 3,
+  "genesis_time": 1692803367,
+  "latest_round": 123456,
+  "latest_randomness_hex": "<64 hex chars>",
+  "target_delay_rounds": 2
+}
+```
+
+If the configured relays fail, return mismatched `/info`, or serve an invalid BLS pulse, the endpoint fails closed with `500`.
+
+---
+
 ## POST /v1/verify
 
-Verify a receipt or a legacy transcript body. The handler **auto-detects** the format by the presence of `"v": "truerolls-1"`.
+Verify a receipt or a legacy transcript body. The handler **auto-detects** the format by the presence of `"v": "truerolls-drand-1"` or `"v": "truerolls-1"`.
 
-### Receipt mode (`v` == `"truerolls-1"`)
+### Receipt mode (`v` == `"truerolls-drand-1"` or `"truerolls-1"`)
 
 The raw body is passed to the shared offline verifier (the same code path used by the CLI and the WASM verifier, so the signer and verifier cannot drift). The verifier:
 
-1. checks the Ed25519 signature over the JCS/RFC8785-canonicalized body (sig + receipt_hash excluded), using the server's **own published key**;
-2. replays ChaCha20 from `proof.rng.drbg_key_hex` (one `next_u64`) and confirms it reproduces `proof.draw_u64`;
-3. recomputes the guarded distribution and face from `(die, kappa)` and checks the face;
-4. checks recomputed `alpha`, `kl`, `ev` against the receipt within a fixed tolerance (`1e-9`).
+1. for `truerolls-drand-1`, verifies the pinned quicknet drand proof and re-derives the receipt seed;
+2. checks the Ed25519 signature over the JCS/RFC8785-canonicalized body (sig + receipt_hash excluded), using the server's **own published key**;
+3. replays ChaCha20 from `proof.rng.drbg_key_hex` (one `next_u64`) and confirms it reproduces `proof.draw_u64`;
+4. recomputes the guarded distribution and face from `(die, kappa)` and checks the face;
+5. checks recomputed `alpha`, `kl`, `ev` against the receipt within a fixed tolerance (`1e-9`).
 
 **Failed checks still return `200`** — the outcome is reported via boolean flags and `errors`, not via HTTP status. `400` is reserved for input the verifier cannot process at all (see below).
 
@@ -218,6 +272,7 @@ The signature is verified against the server's currently published key. A receip
 ```json
 {
   "valid_signature": true,
+  "valid_drand": true,
   "valid_sampling": true,
   "face_ok": true,
   "metrics_ok": true,
@@ -236,6 +291,7 @@ The signature is verified against the server's currently published key. A receip
 | Field | Type | Notes |
 |---|---|---|
 | `valid_signature` | bool | Ed25519 signature verified. `false` for invalid signature, missing `sig`, or no server key to verify with (see `errors`). |
+| `valid_drand` | bool | For `truerolls-drand-1`, quicknet proof + target binding + seed derivation verified. For legacy `truerolls-1`, this is `true` because no drand proof is expected. |
 | `valid_sampling` | bool | ChaCha20 replay of `drbg_key_hex` reproduced `draw_u64`. |
 | `face_ok` | bool | Recomputed face matches the receipt. |
 | `metrics_ok` | bool | Recomputed `alpha`, `kl`, `ev` each within `tol`. |
@@ -244,7 +300,7 @@ The signature is verified against the server's currently published key. A receip
 | `details.tol` | number | Absolute tolerance for metric comparisons (currently `1e-9`). |
 | `errors` | string[] | Human-readable failures. Omitted from the JSON when all checks pass. |
 
-(There is no top-level `verdict` field on this response — derive the overall outcome from the four boolean flags.)
+(There is no top-level `verdict` field on this response — derive the overall outcome from all boolean flags.)
 
 **`400` (receipt mode)** — body that cannot be verified at all. The verifier maps every hard error to `400`: undeserializable receipt; unsupported `proof.math_param_version`; invalid or wrong-length `drbg_key_hex`; unparsable `draw_u64`; unsupported die; **and any math-recompute error, including a `kappa` outside `[-1, 1]`** (out-of-range κ hard-fails the recompute rather than returning a soft INVALID). Plain text.
 
@@ -279,7 +335,7 @@ The body is parsed as a flat `VerifyRequest`. The server recomputes the distribu
 - **`422` — MISMATCH (quirk).** On mismatch the response is the `VerifyResponse` JSON **serialized as a plain-text string** (Content-Type `text/plain`). Parse the text body as JSON to recover the structured verdict.
 - **`400`** — unsupported `math_param_version`, unsupported die, `kappa` non-finite/out of range, unparsable `draw_u64`, or `probs` length mismatch. Plain text.
 
-**Verification scope (both modes):** these prove deterministic replay consistency of the presented data. Neither proves the server chose its seed material honestly.
+**Verification scope (both modes):** drand receipt mode proves verified public-beacon seed provenance plus replay. It does not prove the published outcome was unbiased — the operator can still grind by failing/suppressing unfavorable attempts and publishing only favorable completed receipts (closing that is v2 witnessed fairness). Legacy transcript mode proves deterministic replay consistency only.
 
 ---
 
@@ -328,10 +384,11 @@ To verify a receipt offline: take its `sig.kid`, look up the matching `public_ke
 | Method | Path | Success | Body shape |
 |---|---|---|---|
 | GET | `/healthz` | 200 | `Health` |
-| POST | `/v1/roll` | 201 / 200 / 202 | `ReceiptV2Response` / `RollResponse` / processing |
+| POST | `/v1/roll` | 201 / 200 / 202 | `ReceiptV2Response` / deduplicated receipt / processing |
 | GET | `/v1/roll?idem_key=` | 200 | `RollResponse` |
 | GET | `/v1/roll/:id` | 200 | `RollResponse` |
 | GET | `/v1/roll/:id/transcript` | 200 | stored transcript JSON (verbatim) |
+| GET | `/v1/drand/health` | 200 | verified latest quicknet pulse |
 | POST | `/v1/verify` | 200 (or 422 legacy) | `ReceiptVerifyResponse` / `VerifyResponse` |
 | GET | `/v1/verify/:id` | 200 (or 422) | `VerifyResponse` |
 | GET | `/.well-known/truerolls-keys.json` | 200 | `KeysResponse` |

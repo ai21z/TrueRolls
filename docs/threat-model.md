@@ -1,147 +1,130 @@
 # TrueRolls — Threat model & honest limits
 
-This document states plainly **what a TrueRolls receipt proves today, and what it does not.** It is written for an external developer evaluating TrueRolls and running the verifier. Every claim here is grounded in the shipping verifier and signer code (`crates/kd-receipt`) and the server integration (`crates/kd-api`). Where a property is *not* implemented, it is listed as roadmap, not glossed over.
+This document states what a TrueRolls receipt proves today and what it does not. Claims here are grounded in the shipping verifier/signing code (`crates/kd-receipt`), the drand verifier/derivation layer (`crates/kd-drand`), and the server integration (`crates/kd-api`).
 
-TrueRolls is proprietary software; all rights reserved. "You can run the verifier" means the verifier logic is the single shared crate the server, CLI, and browser all execute — it does **not** mean the source is openly licensed or open source.
-
----
+TrueRolls is proprietary software; all rights reserved. "You can run the verifier" means the verifier logic is shared by the server, CLI, and browser; it does not mean the source is openly licensed.
 
 ## TL;DR
 
-A signed TrueRolls receipt lets anyone, offline, prove three things about a roll **after the fact**:
+Live TrueRolls rolls mint `truerolls-drand-1` receipts. A receipt that verifies `VALID` proves:
 
-1. **Tamper-evidence** — the receipt is bit-for-bit what the server's key signed. Flip one byte of any signed field and the Ed25519 signature fails.
-2. **Deterministic replay** — the published draw re-derives exactly from the recorded DRBG key, and the face and metrics re-derive exactly from `(die, kappa, draw)`.
-3. **Bounded behavior-weighting** — the math is guard-capped (a KL cap in nats and an EV cap measured against the uniform standard deviation), so the stance parameter `kappa` cannot bend the distribution past those bounds, and a receipt carrying a `kappa` outside its `[-1, 1]` contract is refused rather than verified.
+1. **Tamper-evidence** — the receipt is bit-for-bit what the server's Ed25519 key signed.
+2. **Drand seed provenance** — the roll seed re-derives from a BLS-verified drand quicknet target pulse, with `target_round = client_observed_round + 2`.
+3. **Deterministic replay** — the draw, face, and metrics reproduce from the receipt.
+4. **Bounded behavior-weighting** — the distribution is guard-capped by KL/EV limits, and out-of-range `kappa` is refused.
 
-It does **not** prove the *server chose its seed honestly.* Deterministic replay is not adversarial fairness. A server can still grind or withhold seed material before it signs. Pre-commitment to seed material (commit/reveal), an external randomness beacon, a VRF, and transparency-log anchoring are **not implemented** today — they are roadmap.
+It does **not** prove the published outcome was unbiased: because the operator's attempt is not publicly committed before the target round resolves, it can still **grind** — privately fail/suppress unfavorable attempts and publish only a favorable completed receipt (withholding/refusal is the mechanism). Strict witnessed fairness — one committed attempt per roll — is the v2 protocol, not this per-roll drand receipt.
 
----
+## Receipt versions
 
-## What a receipt contains
+### `truerolls-drand-1` — live product
 
-A `truerolls-1` receipt is a JSON object with the roll outcome (`die`, `kappa`, `face`, `alpha`, `kl`, `ev`), a `proof` block, and a `sig` block:
+The live roll endpoint requires:
 
-- `proof.rng.drbg_key_hex` — the 32-byte derived DRBG key, hex. This is the *output* of key derivation (HKDF-SHA256 over the roll inputs), **not** the raw input keying material. It is what a verifier reseeds `ChaCha20Rng` with to replay the draw.
-- `proof.draw_u64` — the single 64-bit draw taken from that DRBG, encoded as a decimal string.
-- `proof.math_param_version` — the engine parameter version the verifier must match exactly.
-- `sig` — Ed25519 signature (`alg: "Ed25519"`, `kid`, `signature_b64`, `canon: "JCS/RFC8785"`) over the canonicalized receipt body with the `sig` and `receipt_hash` fields removed.
+- `client_nonce`: client-generated 32 random bytes encoded as 64 hex characters.
+- `drand.client_observed_round`: the quicknet round the client saw.
+- `drand.client_observed_signature_hex` and `drand.client_observed_randomness_hex`: the BLS signature and `SHA256(signature)` for that observed round.
+- `drand.target_round`: exactly `client_observed_round + 2`.
 
-The signing public key is published at `GET /.well-known/truerolls-keys.json`, which returns a list of key entries — each with a `kid`, `alg: "Ed25519"`, and a base64-encoded 32-byte `public_key`. Pick the entry whose `kid` matches the receipt's `sig.kid`.
+The server verifies the client-observed pulse, verifies the target formula, waits for the future target pulse, verifies the target BLS signature against the pinned quicknet key, derives the seed with HKDF-SHA256, rolls through `kd-core`, signs the receipt, and stores the final receipt for idempotent retry.
 
----
+The receipt carries the drand proof so offline verifiers can repeat the same checks.
 
-## What is PROVEN today
+### `truerolls-1` — legacy saved receipts
 
-### 1. Tamper-evidence (Ed25519 over a canonical body)
+Legacy receipts remain verifiable for goldens and older saved artifacts. They prove signature, replay, face, and metrics, but they do not carry drand provenance.
 
-The signature covers the JCS / RFC 8785 canonicalization of the receipt body, with `sig` and `receipt_hash` stripped before signing (both are attached *after* signing). Signing and verification go through **one** canonicalization function in the shared crate, so the signer and verifier cannot disagree about which bytes are covered.
+## What is proven
 
-Consequence: **any** change to a signed field — `face`, `kappa`, `die`, `draw_u64`, and so on — invalidates the signature. This is exercised by tamper goldens and regression tests: editing the face, the draw, the kappa, or the die each makes `valid_signature` false. A receipt that re-verifies under the published key is byte-for-byte what the holder of that key signed.
+### 1. Tamper-evidence
 
-What this does *not* give you: it does not prove the signer is honest, only that the receipt is unaltered and was produced by the holder of that key. It is an integrity and authenticity guarantee, not a fairness guarantee.
+The signature is Ed25519 over the JCS / RFC 8785 canonical receipt body with `sig` and `receipt_hash` removed. Signing and verification use the same canonicalization function. Any edit to signed fields invalidates the signature.
 
-### 2. Deterministic replay of the draw and the math
+This proves the receipt is unaltered and was signed by the holder of the named key. It does not prove the signer is honest.
 
-Given the receipt and the published key, the verifier independently recomputes everything and compares:
+### 2. Drand seed provenance
 
-- **Sampling** — reseed `ChaCha20Rng` from `proof.rng.drbg_key_hex`, take one `next_u64()`, and check it equals `proof.draw_u64`.
-- **Face** — recompute the guarded distribution from `(die, kappa)` via the core engine, map the draw through the prefix-CDF (inverse-CDF sampling — no modulo bias), and check it equals `face`.
-- **Metrics** — recompute `alpha`, `kl`, `ev` and check each within `1e-9`.
+For `truerolls-drand-1`, the verifier checks:
 
-A receipt is `VALID` only when **all four** checks (signature, sampling, face, metrics) pass. The receipt version and `math_param_version` are gated: an unknown version or a parameter-version mismatch is a hard error, not a soft "invalid" — the verifier refuses to bless a receipt it cannot reproduce under known rules.
+- chain hash equals quicknet `52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971`;
+- scheme equals `bls-unchained-g1-rfc9380`;
+- public key, period, and genesis time match the pinned quicknet constants;
+- the client-observed BLS signature verifies;
+- `target_round = client_observed_round + 2`;
+- the target BLS signature verifies;
+- both randomness fields equal `SHA256(signature)`;
+- `proof.rng.drbg_key_hex` re-derives from the target randomness plus the canonical request binding.
 
-This proves the *published* draw and the *published* math were applied consistently and signed. It says nothing about whether the published draw was the only draw the server could have published.
+This proves the seed came from a real public drand target pulse and is bound to the client's nonce/request.
 
-### 3. Bounded behavior-weighting (the guards)
+The minting API also refuses a roll when its `target_round` is not future versus the server-side freshness frontier:
+`max(latest BLS-verified relay round, local wall-clock quicknet schedule round)`. That check is a live server
+admission rule, not an offline receipt-verifier proof; the offline verifier can only replay the completed receipt.
 
-`kappa` is a behavior stance in `[-1, 1]`. The core engine builds a tilted distribution and then applies the **minimal-α guard** toward uniform that satisfies **both** caps: a KL-divergence cap (in nats) and an expected-value cap (measured against the uniform standard deviation). The verifier recomputes `alpha`/`kl`/`ev` from scratch, so a receipt cannot claim caps it does not actually satisfy.
+### 3. Deterministic replay
 
-The `kappa` range is enforced at the core engine itself: the engine returns a `KappaOutOfRange` error for any `kappa` outside `[-1, 1]` (bounds inclusive). Because the signer and the offline verifier both route through that same core entry point, a receipt carrying an out-of-range `kappa` (for example `kappa = 50`) is **refused as structurally unverifiable — the verifier returns a hard error and does not report VALID.** The verifier's regression suite asserts exactly this. The server's roll endpoint additionally rejects out-of-range `kappa` at its input-validation layer.
+The verifier reseeds ChaCha20 from `proof.rng.drbg_key_hex`, takes one `next_u64()`, and checks it equals `proof.draw_u64`. It recomputes the distribution from `(die, kappa)`, maps the draw through prefix-CDF sampling, and checks the face.
 
-> Note for readers who have seen older TrueRolls notes claiming "`kappa` is not clamped, so a `kappa = 50` receipt verifies VALID": that note is out of date with respect to the current code. The shipping engine rejects out-of-range `kappa` at the single core entry point both the signer and the verifier use, and the verifier's test suite asserts a `kappa = 50` receipt hard-fails rather than verifying. Verify against the code, not the older note.
+### 4. Bounded behavior-weighting
 
----
+`kappa` is a behavior stance in `[-1, 1]`. The engine builds a tilted distribution and applies the minimal-alpha guard toward uniform that satisfies both the KL cap and the EV cap. The verifier recomputes `alpha`, `kl`, and `ev`; a forged claim to looser math fails verification. A receipt with out-of-range `kappa` hard-fails through the same core engine path.
 
-## What is NOT proven / NOT implemented
-
-These are **not** in TrueRolls today. Do not assume any of them.
+## What is not proven
 
 | Property | Status |
-| --- | --- |
-| Pre-commitment to seed material (commit/reveal) | **Not implemented** (roadmap) |
-| External / public randomness beacon | **Not implemented** (roadmap) |
-| VRF (verifiable random function) | **Not implemented** (roadmap) |
-| Merkle / transparency-log anchoring of receipts | **Not implemented** (roadmap) |
-| On-chain anything | **Not implemented** (roadmap) |
-| Authentication on the roll/verify endpoints | **Not implemented** |
-| Rate limiting *as a fairness / trust control* | **Not a trust control** — an abuse throttle exists (see Operational limits); it does not constrain seed choice |
-| Public / adversarial fairness protocol | **Not implemented** (roadmap) |
+|---|---|
+| Operator cannot grind (fail/suppress unfavorable attempts, publish only favorable) | **Not proven** |
+| Operator cannot withhold/refuse a roll | **Not proven** |
+| Public pre-round anchoring of every roll | **Not implemented in live product** |
+| Witnessed transparency log | **v2 protocol, not live product** |
+| Commit/reveal | **Not implemented in live product** |
+| VRF | **Not implemented** |
+| On-chain settlement/anchoring | **Not implemented** |
+| Authentication on roll/verify endpoints | **Not implemented** |
+| Strict public adversarial fairness | **v2 protocol, not live product** |
 
-The receipt proves **replay**, not **fairness.** Closing that gap requires a protocol where the seed is bound to a value the server cannot choose after the fact (for example, a pre-commitment plus an externally-unpredictable, bias-resistant beacon). None of that is shipped. Any claim to the contrary would be false.
+Per-roll drand removes the old "server just invented the seed" gap for completed receipts: the seed must re-derive from a verified future drand pulse and the client request binding. It does **not** make the server publicly accountable for attempts it refused to complete — so the operator can still **grind**: try one or many attempts privately and publish only a favorable completed receipt. The seed of any *published* receipt is honest; the *choice* of which to publish is not constrained.
 
----
+## Remaining operator powers
 
-## The seed-grinding gap (read this)
+Assume the client verifies the receipt against the genuine published key.
 
-The server derives the DRBG key itself. From the roll inputs (the idempotency key, a SHA-256 hash of the canonical roll payload, and an optional caller-supplied seed), it computes `HKDF-SHA256 → ChaCha20Rng`, takes the draw, then signs the result. **Nothing in the protocol forces the server to commit to its seed inputs before it sees the outcome.**
+A third party who is not the server cannot:
 
-So a server that wanted to bias results is *not prevented* by anything in a TrueRolls receipt. Before signing, it could:
+- alter signed receipt fields without breaking the signature;
+- forge a receipt under the server key;
+- substitute a fake drand pulse without failing BLS verification;
+- get a different face or metrics accepted for the same draw.
 
-- try multiple candidate seeds and publish only the one whose face it likes (**grinding**), or
-- compute the outcome and decline to issue a receipt it dislikes (**withholding / last-look**).
+A malicious operator cannot, for a completed `VALID` drand receipt:
 
-The receipt would still verify `VALID`, because replay determinism is exactly what makes grinding cheap for the server: the same inputs always give the same favorable output it selected. **Deterministic replay is not adversarial fairness.** This is the single most important honest limit in TrueRolls, and it is open by design until pre-commitment plus an external beacon are implemented.
+- replace the drand target pulse with a fake pulse;
+- change the target formula away from `observed + 2`;
+- claim a seed that does not re-derive from the target drand randomness and request binding;
+- exceed the KL/EV bounds without detection;
+- alter a receipt after signing without invalidating its own signature.
 
-A caller-supplied seed mixes into the derivation but does **not** close this gap on its own: the server still observes the caller's seed and derives (and could grind) on top of it before signing.
+A malicious operator can still:
 
----
+- refuse to accept a request;
+- time out or fail a roll instead of returning a receipt;
+- **grind / outcome-shop:** privately run one or many attempts (other nonces/rounds), observe each drand-derived outcome, fail/suppress the unfavorable ones (a "drand timeout" is an indistinguishable cover), and publish only a favorable completed receipt. There is no public pre-target anchor binding the operator to a single attempt, so the *selection* across discarded attempts biases the result even though every published seed is honestly drand-derived.
 
-## What an attacker can / cannot do
+That is why the public claim is "drand-backed seed provenance and replay," not "strict witnessed fairness." Closing the grind requires a witnessed, pre-target commitment to one attempt per roll (v2).
 
-Assume the published signing key is the server's genuine key (from `/.well-known/truerolls-keys.json`) **and that the client actually runs the verifier against it** — an unverified receipt guarantees nothing.
+## Operational limits
 
-**A third party (not the server) — e.g. someone who intercepts or stores a receipt — CANNOT:**
+- **No fallback to local RNG in production drand mode.** If drand verification or target fetch fails, the roll fails closed.
+- **Idempotency matters.** A retry during the drand wait must resolve to the same in-flight/final roll for the same idempotency key and canonical payload, not choose a fresh target.
+- **Transcript exposure.** The signed receipt is the verifiable artifact. Transcript endpoint access is deployment-specific and is not equivalent to receipt verification.
+- **Demo/mock verification is not cryptographic verification.** Only `kd-receipt` via CLI, WASM, or server receipt verify is the real verifier.
+- **Test keys are not production keys.** Production profile refuses the published test seed and test key id.
+- **Rate limiting is an abuse throttle, not a fairness control.**
 
-- Alter any signed field of a receipt without breaking the Ed25519 signature.
-- Forge a new receipt under the server's key without the server's private key.
-- Make a tampered draw, face, kappa, or die re-verify — the recomputation catches the inconsistency *and* the signature breaks.
-- Get an out-of-range `kappa` receipt to report VALID — the core rejects it and the verifier returns a hard error.
+## How to verify
 
-**A third party CAN:**
+1. Fetch the issuer key set from `GET /.well-known/truerolls-keys.json` and select the key whose `kid` matches the receipt.
+2. Run the offline verifier: browser WASM, CLI `kd verify --receipt`, or `POST /v1/verify`.
+3. Accept the receipt only if all reported checks are true.
 
-- Read a receipt's contents, and read the transcript if they can reach it (see "Operational and disclosure limits" below). Receipts and transcripts carry the roll details in the clear; treat them as non-secret.
-
-**A malicious or curious *server* (holder of the signing key) CANNOT (relative to a VALID verdict the client checks):**
-
-- Make the math exceed its declared KL/EV bounds for a given `(die, kappa)` — the verifier recomputes and would reject.
-- Have a `kappa` outside `[-1, 1]` accepted — the core rejects it on both sign and verify.
-- Retroactively change a receipt it already issued without breaking its own signature.
-
-**A malicious server CAN (this is the unclosed part):**
-
-- **Grind** seed inputs and publish only a favorable outcome.
-- **Withhold** an unfavorable outcome (refuse to issue the receipt).
-- Choose *when* and *whether* to roll. TrueRolls does not constrain seed timing today.
-
-A signed receipt therefore protects you against everyone *except* a dishonest server's pre-signing seed choice. If your threat model includes the server itself, a TrueRolls receipt alone is **not** sufficient — that is precisely the gap the beacon / commit-reveal roadmap targets.
-
----
-
-## Operational and disclosure limits
-
-- **Transcript exposure.** The signed receipt is the verifiable artifact. The transcript (served at `GET /v1/roll/:id/transcript`, and typically also stored as a separate object) is distinct from the receipt; whether it is reachable, and with what auth, depends on deployment. Reaching a transcript is **not** the same as cryptographically verifying a receipt, and transcript availability says nothing about privacy. State your deployment's transcript access posture explicitly; do not assume it is private or public.
-- **Demo / mock verification is not cryptographic verification.** Any in-page "verify" affordance in a demo or marketing surface that does not run the actual `kd-receipt` checks against the published key proves nothing. Only the shared verifier — the CLI (`kd verify --receipt`), the WASM build, or `POST /v1/verify` (which delegates to the same `kd-receipt` code) — constitutes verification.
-- **Test keys are not production keys.** A published test signing seed exists for goldens and demos. Under the production profile, the server refuses to boot if configured with that test seed, a known test `kid`, or no signer at all. A receipt signed by the test key is real only as a demo — verify against the key the production server actually publishes.
-- **No authentication.** The roll and verify endpoints provide no authentication today. Do not rely on identity or access control at this layer.
-- **Rate limiting is an abuse throttle, not a trust control.** `POST /v1/roll` is rate-limited per client IP (configurable). This exists to throttle abuse and load; it does **not** authenticate callers and does **not** constrain the server's seed choice or fairness in any way. The IP key is derived from forwarding headers, so it is only meaningful when the service runs behind a trusted proxy — a direct client could otherwise spoof its source. Do not treat rate limiting as a security or fairness guarantee.
-
----
-
-## How to verify a receipt yourself
-
-1. Fetch the server's public key from `GET /.well-known/truerolls-keys.json` and pick the entry whose `kid` matches the receipt's `sig.kid`.
-2. Run the offline verifier against the receipt JSON and that public key — either the CLI (`kd verify --receipt`), the WASM build in a browser, or `POST /v1/verify` (all run the same `kd-receipt` code).
-3. Accept the roll only if the verdict is `VALID` — i.e. signature **and** sampling replay **and** face **and** metrics all pass.
-
-A `VALID` verdict means: *this receipt is unaltered, was signed by that key, and the draw, face, and bounded math all reproduce.* It does **not** mean: *the server could not have chosen a seed it preferred.* Hold both of those in mind at once — that is the honest state of TrueRolls today.
+For `truerolls-drand-1`, a `VALID` verdict means: signed, drand-backed, seed-replayed, face-replayed, and bounded-math-replayed. It does not mean the published outcome was unbiased — the operator can still grind by failing/suppressing unfavorable attempts and publishing only favorable completed receipts.

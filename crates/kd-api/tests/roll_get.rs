@@ -11,7 +11,7 @@ async fn get_by_id_and_by_idem_key_consistent() {
     let c = client();
     let base = base_url();
     let idem = Uuid::new_v4().to_string();
-    let body = serde_json::json!({ "die":"d20","kappa":0.8,"seed":"alice" });
+    let body = _helpers::drand_roll_body("d20", 0.8).await;
 
     // create
     let created = c

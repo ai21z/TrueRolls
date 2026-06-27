@@ -62,7 +62,7 @@ export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
               onClick={() => state.roll()}
               disabled={state.isRolling}
             >
-              {state.isRolling ? 'Rolling…' : 'Roll a die'}
+              {state.isRolling ? (state.rollStatus ?? 'Rolling…') : 'Roll a die'}
             </InkButton>
             <InkButton seed={62} className={css.ctaSecondary} onClick={onSeeProof}>
               See the proof

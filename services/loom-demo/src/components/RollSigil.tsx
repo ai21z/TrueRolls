@@ -35,7 +35,7 @@ const W = 420;
 const H = 252;
 const SEAL = { x: 212, y: 120 };
 
-type Bond = 'signature' | 'sampling' | 'face' | 'metrics';
+type Bond = 'signature' | 'drand' | 'sampling' | 'face' | 'metrics';
 
 interface NodeDef {
   key: string;
@@ -54,6 +54,7 @@ interface EdgeDef {
 
 const EDGES: EdgeDef[] = [
   { from: 'seed', to: 'seal', bond: 'sampling' },
+  { from: 'beacon', to: 'seed', bond: 'drand' },
   { from: 'die', to: 'seal' },
   { from: 'kappa', to: 'seal' },
   { from: 'face', to: 'seal', bond: 'face' },
@@ -91,6 +92,7 @@ interface Parsed {
   die: string | null;
   hashShort: string | null;
   kid: string | null;
+  hasDrandProof: boolean;
 }
 
 function parseReceipt(text: string): Parsed {
@@ -99,6 +101,7 @@ function parseReceipt(text: string): Parsed {
     const hash = typeof o.receipt_hash === 'string' ? o.receipt_hash : null;
     const proof = (o.proof as Record<string, unknown> | undefined) ?? undefined;
     const rng = (proof?.rng as Record<string, unknown> | undefined) ?? undefined;
+    const drand = proof?.drand;
     const drbg = typeof rng?.drbg_key_hex === 'string' ? rng.drbg_key_hex : undefined;
     const draw = typeof proof?.draw_u64 === 'string' ? proof.draw_u64 : undefined;
     const sig = (o.sig as Record<string, unknown> | undefined) ?? undefined;
@@ -109,9 +112,18 @@ function parseReceipt(text: string): Parsed {
       die: typeof o.die === 'string' ? o.die : null,
       hashShort: hash ? hash.replace(/^sha256:/, '').slice(0, 12) : null,
       kid: typeof sig?.kid === 'string' ? sig.kid : null,
+      hasDrandProof: drand != null,
     };
   } catch {
-    return { seedStr: text.slice(0, 96) || 'void', face: null, kappa: null, die: null, hashShort: null, kid: null };
+    return {
+      seedStr: text.slice(0, 96) || 'void',
+      face: null,
+      kappa: null,
+      die: null,
+      hashShort: null,
+      kid: null,
+      hasDrandProof: false,
+    };
   }
 }
 
@@ -151,14 +163,18 @@ export function RollSigil({ receiptText, report, editable, onTamper }: RollSigil
   const r = report != null && report.verdict !== 'ERROR' ? report : null;
   const cs: Record<Bond, boolean | undefined> = {
     signature: r?.valid_signature,
+    drand: parsed.hasDrandProof ? r?.valid_drand : undefined,
     sampling: r?.valid_sampling,
     face: r?.face_ok,
     metrics: r?.metrics_ok,
   };
-  const bondList: Bond[] = ['signature', 'sampling', 'face', 'metrics'];
+  const bondList: Bond[] = parsed.hasDrandProof
+    ? ['signature', 'drand', 'sampling', 'face', 'metrics']
+    : ['signature', 'sampling', 'face', 'metrics'];
 
-  const nodes: NodeDef[] = [
+  const allNodes: NodeDef[] = [
     { key: 'seed', label: 'seed', x: 50, y: 74, kind: 'seed' },
+    { key: 'beacon', label: 'drand', x: 56, y: 20, kind: 'ro' },
     { key: 'die', label: parsed.die ?? 'die', x: 58, y: 166, kind: 'ro' },
     { key: 'kappa', label: 'κ', x: 114, y: 206, kind: 'edit', field: 'kappa' },
     { key: 'face', label: 'face', x: 160, y: 48, kind: 'edit', field: 'face' },
@@ -166,24 +182,26 @@ export function RollSigil({ receiptText, report, editable, onTamper }: RollSigil
     { key: 'sig', label: parsed.kid ? `sig · ${parsed.kid}` : 'sig', x: 366, y: 138, kind: 'ro' },
     { key: 'metrics', label: 'α · KL · EV', x: 322, y: 204, kind: 'ro' },
   ];
+  const nodes = allNodes.filter((node) => parsed.hasDrandProof || node.key !== 'beacon');
+  const edgeDefs = parsed.hasDrandProof
+    ? EDGES
+    : EDGES.filter((edge) => edge.from !== 'beacon' && edge.to !== 'beacon');
   const pt = (key: string) => (key === 'seal' ? SEAL : nodes.find((n) => n.key === key)!);
 
-  const edges = useMemo(() => {
-    const rand = mulberry32(seedNum);
-    return EDGES.map((e) => {
-      const bow = (rand() - 0.5) * 24;
-      const g = edgeGeom(pt(e.from), pt(e.to), bow);
-      // A bond forks once (anastomosis): a thin sub-strand bowed the other way,
-      // so the strand visibly splits and rejoins on its way to the seal.
-      const fork = e.bond ? hyphaePath(pt(e.from), pt(e.to), -bow * 0.55 - 6) : null;
-      return { ...e, ...g, fork };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedNum]);
+  const rand = mulberry32(seedNum);
+  const edges = edgeDefs.map((e) => {
+    const bow = (rand() - 0.5) * 24;
+    const g = edgeGeom(pt(e.from), pt(e.to), bow);
+    // A bond forks once (anastomosis): a thin sub-strand bowed the other way,
+    // so the strand visibly splits and rejoins on its way to the seal.
+    const fork = e.bond ? hyphaePath(pt(e.from), pt(e.to), -bow * 0.55 - 6) : null;
+    return { ...e, ...g, fork };
+  });
 
+  const nExpected = bondList.length;
   const nRun = bondList.filter((b) => cs[b] !== undefined).length;
   const nFail = bondList.filter((b) => cs[b] === false).length;
-  const allPass = nRun === 4 && nFail === 0;
+  const allPass = nRun === nExpected && nFail === 0;
 
   const state: 'intact' | 'broken' | 'unsealed' = nRun === 0 ? 'unsealed' : allPass ? 'intact' : 'broken';
   const word = state === 'unsealed' ? 'Unsealed' : state === 'intact' ? 'Intact' : 'Broken';
@@ -192,8 +210,8 @@ export function RollSigil({ receiptText, report, editable, onTamper }: RollSigil
     state === 'unsealed'
       ? 'Verify a receipt to read its seal.'
       : state === 'intact'
-        ? `${rolled}All four bonds hold. The seal is whole.`
-        : `${rolled}${nFail} of 4 bonds severed. The seal is cut.`;
+        ? `${rolled}All ${nExpected} bonds hold. The seal is whole.`
+        : `${rolled}${nFail} of ${nExpected} bonds severed. The seal is cut.`;
 
   const kx = SEAL.x;
   const ky = SEAL.y;

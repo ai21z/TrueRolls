@@ -69,6 +69,15 @@ function parseSigKid(text: string): string | null {
   }
 }
 
+function receiptHasDrandProof(text: string): boolean {
+  try {
+    const obj = JSON.parse(text) as { proof?: { drand?: unknown } };
+    return obj.proof?.drand != null;
+  } catch {
+    return false;
+  }
+}
+
 type KeySource = 'well-known' | 'demo' | 'manual';
 
 interface CheckRowProps {
@@ -277,6 +286,7 @@ export function Verify() {
   const verdict = report?.verdict;
   const isError = verdict === 'ERROR';
   const isValid = verdict === 'VALID';
+  const hasDrandProof = receiptHasDrandProof(receiptText);
 
   const keyBadgeText =
     keySource === 'well-known'
@@ -418,7 +428,7 @@ export function Verify() {
                   <span className={css.verdictWord}>{isValid ? 'VALID' : 'INVALID'}</span>
                   <span className={css.verdictSub}>
                     {isValid
-                      ? 'Signature, sampling, face, and metrics all check out.'
+                      ? 'VALID proves the roll seed came from a verified public drand beacon when proof.drand is present, and the outcome replays from that seed.'
                       : tampered
                         ? 'Edited. The receipt no longer matches its signature.'
                         : 'One or more checks failed.'}
@@ -431,10 +441,17 @@ export function Verify() {
                     label="Signature"
                     detail="Ed25519 over the JCS-canonical body"
                   />
+                  {hasDrandProof && typeof report.valid_drand === 'boolean' && (
+                    <CheckRow
+                      ok={report.valid_drand}
+                      label="Drand"
+                      detail="verified quicknet beacon proof and target binding"
+                    />
+                  )}
                   <CheckRow
                     ok={report.valid_sampling}
-                    label="Sampling"
-                    detail="drbg_key → ChaCha20 → draw replayed"
+                    label="Seed replay"
+                    detail="verified seed → ChaCha20 → draw replayed"
                   />
                   <CheckRow
                     ok={report.face_ok}
@@ -485,12 +502,12 @@ export function Verify() {
       <section className={css.honest}>
         <h2 className={css.honestTitle}>What this proves. And what it doesn't.</h2>
         <p>
-          A VALID verdict means the published draw and math were applied consistently and the
-          receipt was signed by the holder of the key above, checked by deterministic replay
-          and Ed25519, right here in your browser. It does <b>not</b> prove the server's seed
-          choice was honest. Replay can't see that. Binding the seed to a public source the
-          server can't grind (commit-reveal with a client seed, then a drand beacon) is the next
-          milestone, not a claim today.
+          A VALID verdict proves the roll seed came from a verified public drand beacon when
+          <code>proof.drand</code> is present, and the outcome replays from that seed. It also
+          proves the receipt was signed by the holder of the key above. VALID does <b>not</b>{' '}
+          prove the published outcome was unbiased: the operator can still <b>grind</b> — privately
+          fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed
+          fairness is the v2 protocol, not this per-roll drand receipt.
         </p>
         <p className={css.honestLinks}>
           <a href="#docs">Read the docs</a> · <a href="#docs-threat-model">the threat model</a>

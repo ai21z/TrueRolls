@@ -54,6 +54,14 @@ pub struct Config {
     pub roll_rl_period_secs: u64,
     /// Rate-limit for `POST /v1/roll`: max burst (`KD_ROLL_RL_BURST`).
     pub roll_rl_burst: u32,
+    /// Comma-separated drand relay base URLs.
+    pub drand_relays: Vec<String>,
+    /// HTTP timeout per drand relay request.
+    pub drand_timeout_ms: u64,
+    /// Max tolerated lag between server-side freshness frontier and client-observed round.
+    pub drand_client_max_lag_rounds: u64,
+    /// Max wall-clock time to wait for the future target drand round to publish.
+    pub drand_target_wait_ms: u64,
 }
 
 impl Config {
@@ -90,6 +98,28 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(60)
             .max(1);
+        let drand_relays = env::var("DRAND_RELAYS")
+            .unwrap_or_else(|_| {
+                "https://api.drand.sh,https://api2.drand.sh,https://api3.drand.sh".to_string()
+            })
+            .split(',')
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        let drand_timeout_ms = env::var("DRAND_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2_500)
+            .max(250);
+        let drand_client_max_lag_rounds = env::var("DRAND_CLIENT_MAX_LAG_ROUNDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2);
+        let drand_target_wait_ms = env::var("DRAND_TARGET_WAIT_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(12_000)
+            .max(1_000);
 
         Ok(Self {
             host,
@@ -109,6 +139,10 @@ impl Config {
             env_profile,
             roll_rl_period_secs,
             roll_rl_burst,
+            drand_relays,
+            drand_timeout_ms,
+            drand_client_max_lag_rounds,
+            drand_target_wait_ms,
         })
     }
 
@@ -123,6 +157,9 @@ impl Config {
                 self.signing_kid.as_deref(),
             )
             .map_err(internal)?;
+        }
+        if self.drand_relays.is_empty() {
+            return Err(bad_request("DRAND_RELAYS must contain at least one relay"));
         }
         Ok(())
     }
@@ -179,6 +216,10 @@ mod tests {
             env_profile: profile,
             roll_rl_period_secs: 1,
             roll_rl_burst: 60,
+            drand_relays: vec!["https://api.drand.sh".to_string()],
+            drand_timeout_ms: 2500,
+            drand_client_max_lag_rounds: 2,
+            drand_target_wait_ms: 12_000,
         }
     }
 

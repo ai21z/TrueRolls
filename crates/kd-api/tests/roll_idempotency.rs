@@ -7,7 +7,7 @@ async fn post_roll_201_then_200_on_same_idem_key() {
     let c = client();
     let url = format!("{}/v1/roll", base_url());
     let idem = Uuid::new_v4().to_string();
-    let body = serde_json::json!({ "die":"d20","kappa":0.8,"seed":"alice" });
+    let body = _helpers::drand_roll_body("d20", 0.8).await;
 
     let r1 = c
         .post(&url)
@@ -38,8 +38,9 @@ async fn post_roll_conflict_on_same_key_different_body() {
     let c = client();
     let url = format!("{}/v1/roll", base_url());
     let idem = Uuid::new_v4().to_string();
-    let b1 = serde_json::json!({ "die":"d20","kappa":0.8,"seed":"alice" });
-    let b2 = serde_json::json!({ "die":"d20","kappa":0.9,"seed":"alice" });
+    let b1 = _helpers::drand_roll_body("d20", 0.8).await;
+    let mut b2 = b1.clone();
+    b2["kappa"] = serde_json::json!(0.9);
 
     let r1 = c
         .post(&url)
@@ -74,13 +75,9 @@ async fn post_roll_validation_errors() {
         .unwrap();
     assert_eq!(r.status(), 400);
 
-    // kappa = -1.0 is a valid signed stance (lower bound of [-1, 1]) → 201
-    let r = c
-        .post(&url)
-        .json(&serde_json::json!({"die":"d6","kappa":-1.0}))
-        .send()
-        .await
-        .unwrap();
+    // kappa = -1.0 is a valid signed stance (lower bound of [-1, 1]) -> 201
+    let body = _helpers::drand_roll_body("d6", -1.0).await;
+    let r = c.post(&url).json(&body).send().await.unwrap();
     assert_eq!(r.status(), 201, "kappa=-1.0 is valid signed kappa");
 
     // kappa below -1 → 400
@@ -103,6 +100,24 @@ async fn post_roll_validation_errors() {
 }
 
 #[tokio::test]
+async fn post_roll_rejects_already_published_drand_target() {
+    _helpers::wait_until_ready(std::time::Duration::from_secs(2))
+        .await
+        .expect("kd-api must be running externally");
+
+    let c = client();
+    let url = format!("{}/v1/roll", base_url());
+    let body = _helpers::drand_roll_body_with_already_published_target("d20", 0.8).await;
+
+    let r = c.post(&url).json(&body).send().await.unwrap();
+    assert_eq!(
+        r.status(),
+        400,
+        "target round at or behind server latest must be rejected"
+    );
+}
+
+#[tokio::test]
 async fn post_roll_concurrent_same_key_thundering_herd() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -111,7 +126,7 @@ async fn post_roll_concurrent_same_key_thundering_herd() {
     let c = client();
     let url = format!("{}/v1/roll", base_url());
     let idem = Uuid::new_v4().to_string();
-    let body = serde_json::json!({ "die":"d20","kappa":0.8,"seed":"alice" });
+    let body = _helpers::drand_roll_body("d20", 0.8).await;
 
     let mut tasks = Vec::new();
     for _ in 0..10 {

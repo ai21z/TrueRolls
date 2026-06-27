@@ -329,9 +329,11 @@ export function Landing({ state }: Props) {
                   </span>
                 </div>
                 <p className={css.honest}>
-                  Replay proves the published draw and math were applied consistently.
-                  It does not yet prove the server's seed choice was honest. And we
-                  don't pretend it does. That's the next milestone, not a claim today.
+                  VALID proves the roll seed came from a verified public drand beacon
+                  and the outcome replays from that seed. It does not prove the published
+                  outcome was unbiased: the operator can still grind — privately fail
+                  unfavorable attempts and publish only favorable completed receipts.
+                  Strict witnessed fairness is the v2 protocol, not this per-roll receipt.
                 </p>
               </div>
             </Reveal>

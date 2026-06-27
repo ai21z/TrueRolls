@@ -2,7 +2,7 @@
 //! GET  /v1/verify/:id — verify a roll by fetching its transcript from S3
 //!
 //! POST now auto-detects the body format:
-//!   • ReceiptV2 (has `"v": "truerolls-1"`) — signature + sampling verification
+//!   • ReceiptV2 (has `"v": "truerolls-1"` or `"truerolls-drand-1"`) — signature + proof verification
 //!   • Legacy VerifyRequest (has `math_param_version`, `probs`) — recompute only
 //!
 //! GET fetches the transcript from S3 and runs legacy verification.
@@ -64,7 +64,7 @@ pub async fn get_verify_by_id(
 /// POST /v1/verify
 ///
 /// Auto-detects body format:
-/// - ReceiptV2 (v == "truerolls-1"): signature + RNG replay + face check
+/// - ReceiptV2 (v == "truerolls-1" or "truerolls-drand-1"): signature + drand when present + replay + face/metrics
 /// - Legacy VerifyRequest (math_param_version + probs): recompute only
 #[tracing::instrument(name = "verify", skip_all)]
 pub async fn post_verify(
@@ -73,8 +73,11 @@ pub async fn post_verify(
 ) -> Result<axum::response::Response, AppError> {
     use axum::response::IntoResponse;
 
-    // Detect format by checking for "v": "truerolls-1"
-    if body.get("v").and_then(|v| v.as_str()) == Some("truerolls-1") {
+    // Detect receipt format by version discriminator.
+    if matches!(
+        body.get("v").and_then(|v| v.as_str()),
+        Some("truerolls-1") | Some(kd_drand::DRAND_RECEIPT_VERSION)
+    ) {
         // Delegate to the shared verifier with the RAW body (identical to the CLI / wasm path).
         let resp = run_receipt_verification(&state, &body)?;
         return Ok(Json(resp).into_response());
@@ -93,8 +96,8 @@ pub async fn post_verify(
 /// Verify a signed ReceiptV2 by delegating to the shared offline verifier,
 /// `kd_receipt::verify_receipt` — the SAME code the CLI (`kd verify --receipt`)
 /// and the browser (wasm) run, so the signer and the verifier cannot drift
-/// (SIG-1). All four checks (signature · sampling replay · face · metrics) and
-/// the math_param_version gate live in `kd_receipt`; it covers d4..d100 (the
+/// (SIG-1). All receipt checks (signature · drand when present · sampling replay · face · metrics)
+/// and the math_param_version gate live in `kd_receipt`; it covers d4..d100 (the
 /// inline path this replaced only handled d6/d20/d100).
 ///
 /// We verify against the server's OWN published key (the one served at
@@ -123,6 +126,7 @@ fn run_receipt_verification(
     info!(
         event = "verify.receipt",
         valid_signature = report.valid_signature,
+        valid_drand = report.valid_drand,
         valid_sampling = report.valid_sampling,
         face_ok = report.face_ok,
         metrics_ok = report.metrics_ok,
@@ -130,6 +134,7 @@ fn run_receipt_verification(
 
     Ok(ReceiptVerifyResponse {
         valid_signature: report.valid_signature,
+        valid_drand: report.valid_drand,
         valid_sampling: report.valid_sampling,
         face_ok: report.face_ok,
         metrics_ok: report.metrics_ok,

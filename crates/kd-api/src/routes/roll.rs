@@ -14,13 +14,14 @@ use uuid::Uuid;
 
 use crate::error::{AppError, bad_request, conflict, internal, not_found};
 use crate::models::dto::{
-    ReceiptProof, ReceiptRng, ReceiptV2, ReceiptV2Response, RollPayloadCanonical, RollRequest,
-    RollResponse,
+    ReceiptDrandProof, ReceiptProof, ReceiptRng, ReceiptV2, ReceiptV2Response,
+    RollPayloadCanonical, RollRequest, RollResponse,
 };
-use crate::services::rng::{RngProvenance, rng_for_roll};
-use crate::services::roll_math::compute_roll_with_rng;
+use crate::services::drand::{quicknet_wall_clock_frontier_round, validate_roll_drand_request};
+use crate::services::roll_math::compute_roll_with_rng_labeled;
 use crate::services::{db, idempotency, s3};
 use crate::state::AppState;
+use rand_core::SeedableRng;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct IdemQuery {
@@ -143,7 +144,8 @@ pub async fn post_roll(
         "roll.request",
         die = %req.die,
         kappa = req.kappa,
-        has_seed = %req.seed.is_some()
+        has_seed = %req.seed.is_some(),
+        has_client_nonce = %req.client_nonce.is_some()
     );
     let _g = span.enter();
 
@@ -155,6 +157,20 @@ pub async fn post_roll(
     if !req.kappa.is_finite() || req.kappa < -1.0 || req.kappa > 1.0 {
         return Err(bad_request("Invalid kappa; must be finite and in [-1, 1]"));
     }
+    if req.seed.is_some() {
+        return Err(bad_request(
+            "seed is legacy and disabled for drand-backed rolls; send client_nonce + drand proof",
+        ));
+    }
+    let client_nonce = req
+        .client_nonce
+        .as_deref()
+        .ok_or_else(|| bad_request("client_nonce is required for drand-backed rolls"))?;
+    validate_client_nonce(client_nonce)?;
+    let drand_req = req
+        .drand
+        .as_ref()
+        .ok_or_else(|| bad_request("drand proof is required for drand-backed rolls"))?;
 
     // ---- idempotency: header preferred; if both present and differ -> 400 ---
     let header_key = headers
@@ -181,10 +197,13 @@ pub async fn post_roll(
     let canonical = RollPayloadCanonical {
         die: &req.die,
         kappa: req.kappa,
-        seed: req.seed.as_deref(),
+        client_nonce,
+        drand: drand_req,
     };
-    let payload_bytes = serde_json::to_vec(&canonical).map_err(internal)?;
+    let payload_bytes = serde_jcs::to_vec(&serde_json::to_value(&canonical).map_err(internal)?)
+        .map_err(internal)?;
     let payload_sha = sha256_bytes(&payload_bytes);
+    let payload_sha_hex = hex::encode(&payload_sha);
 
     // ---- acquire lock (SET NX EX) -------------------------------------------
     let acquired = idempotency::acquire_lock(&state.redis, &redis_key, state.cfg.idem_ttl_secs)
@@ -201,7 +220,12 @@ pub async fn post_roll(
             move || {
                 let pg = pg_for_poll.clone();
                 let key = key_for_poll.clone();
-                Box::pin(async move { db::select_by_idem_key(&pg, &key).await.ok().flatten() })
+                Box::pin(async move {
+                    db::select_receipt_by_idem_key(&pg, &key)
+                        .await
+                        .ok()
+                        .flatten()
+                })
             },
             state.cfg.idem_poll_ms,
             state.cfg.idem_poll_max,
@@ -209,7 +233,7 @@ pub async fn post_roll(
         .await;
 
         if let Some(row) = row_opt {
-            info!(event = "idem.dedup.hit", key_hash = %key_hash, public_id = %row.public_id);
+            info!(event = "idem.dedup.hit", key_hash = %key_hash);
 
             if let Some(stored) = row.idem_payload_sha256 {
                 if stored != payload_sha {
@@ -218,25 +242,10 @@ pub async fn post_roll(
                 }
             }
 
-            let full_uri = row
-                .s3_key
-                .as_ref()
-                .map(|k| s3::s3_uri(&state.s3_bucket, k))
-                .unwrap_or_default();
-
-            let resp = RollResponse {
-                id: row.public_id,
-                die: row.die,
-                kappa: row.kappa,
-                seed: row.seed,
-                face: row.face,
-                ev: row.ev,
-                alpha: row.alpha,
-                kl: row.kl,
-                created_at: row.created_at,
-                transcript_key: full_uri,
-                deduplicated: true,
-            };
+            let mut receipt = row.receipt_json;
+            if let Some(obj) = receipt.as_object_mut() {
+                obj.insert("deduplicated".to_string(), serde_json::json!(true));
+            }
 
             info!(
                 event = "roll.done",
@@ -244,7 +253,7 @@ pub async fn post_roll(
                 dedup = true,
                 ms = started.elapsed().as_millis() as u64
             );
-            return Ok((StatusCode::OK, Json(resp)).into_response());
+            return Ok((StatusCode::OK, Json(receipt)).into_response());
         }
 
         // 202 Accepted: request with this idempotency key is still being computed
@@ -264,16 +273,41 @@ pub async fn post_roll(
         return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
     }
 
-    // ---- compute (RNG must be created and used BEFORE any await) ------------
-    // Build a deterministic, Send RNG from (idem_key, payload_sha, optional seed, optional salt)
-    let (mut rng, rng_prov): (rand_chacha::ChaCha20Rng, RngProvenance) = rng_for_roll(
-        &idem_key,
-        &payload_sha,
-        req.seed.as_deref(),
-        state.cfg.rng_salt.as_deref(),
-    );
+    // ---- drand: verify client frontier, wait for target, derive RNG ---------
+    let server_latest = state
+        .drand
+        .fetch_latest_verified()
+        .await
+        .map_err(|e| internal(format!("drand latest fetch failed: {e}")))?;
+    let wall_clock_frontier_round = quicknet_wall_clock_frontier_round()
+        .map_err(|e| internal(format!("drand wall-clock frontier failed: {e}")))?;
+    let client_observed = validate_roll_drand_request(
+        drand_req,
+        server_latest.round,
+        wall_clock_frontier_round,
+        state.cfg.drand_client_max_lag_rounds,
+    )
+    .map_err(bad_request)?;
+    let target_pulse = state
+        .drand
+        .wait_for_round_verified(drand_req.target_round, state.cfg.drand_target_wait_ms)
+        .await
+        .map_err(|e| internal(format!("drand target fetch failed: {e}")))?;
 
-    let result = compute_roll_with_rng(&req.die, req.kappa, &mut rng, None).map_err(internal)?;
+    let seed_input = kd_drand::DrandSeedInput {
+        target_pulse: target_pulse.clone(),
+        client_nonce: client_nonce.to_string(),
+        die: req.die.clone(),
+        kappa: req.kappa,
+        idem_payload_sha256_hex: payload_sha_hex.clone(),
+    };
+    let drbg_key = kd_drand::derive_roll_seed(&seed_input)
+        .map_err(|e| internal(format!("drand seed derivation failed: {e}")))?;
+    let mut rng = rand_chacha::ChaCha20Rng::from_seed(drbg_key);
+
+    let result =
+        compute_roll_with_rng_labeled(&req.die, req.kappa, &mut rng, None, kd_drand::RNG_ALGO)
+            .map_err(internal)?;
     drop(rng); // ensure RNG is dropped before any await below
 
     // ---- attach RNG provenance into transcript ------------------------------
@@ -281,28 +315,51 @@ pub async fn post_roll(
     //  - top-level "rng": { ...full provenance... }
     //  - "sampling": { method: "prefix_cdf", rng: <actual algo> }  (force overwrite)
     let mut transcript_json = result.transcript_json; // take ownership
-    let rng_val = serde_json::to_value(&rng_prov).map_err(internal)?;
+    let drand_proof = ReceiptDrandProof {
+        chain_hash: kd_drand::QUICKNET_CHAIN_HASH.to_string(),
+        scheme: kd_drand::QUICKNET_SCHEME.to_string(),
+        public_key: kd_drand::QUICKNET_PUBLIC_KEY_HEX.to_string(),
+        period_seconds: kd_drand::QUICKNET_PERIOD_SECONDS,
+        genesis_time: kd_drand::QUICKNET_GENESIS_TIME,
+        target_delay_rounds: kd_drand::DEFAULT_TARGET_DELAY_ROUNDS,
+        client_nonce: client_nonce.to_string(),
+        client_observed_round: client_observed.round,
+        client_observed_signature_hex: client_observed.signature_hex.clone(),
+        client_observed_randomness_hex: client_observed.randomness_hex.clone(),
+        target_round: target_pulse.round,
+        target_signature_hex: target_pulse.signature_hex.clone(),
+        target_randomness_hex: target_pulse.randomness_hex.clone(),
+        idem_payload_sha256_hex: payload_sha_hex.clone(),
+    };
+    let rng_val = serde_json::json!({
+        "algo": kd_drand::RNG_ALGO,
+        "source": "drand-quicknet",
+        "chain_hash": kd_drand::QUICKNET_CHAIN_HASH,
+        "client_observed_round": client_observed.round,
+        "target_round": target_pulse.round,
+        "target_delay_rounds": kd_drand::DEFAULT_TARGET_DELAY_ROUNDS,
+    });
 
     use serde_json::Value as JsonValue;
 
     if let Some(map) = transcript_json.as_object_mut() {
         // Set/overwrite top-level rng provenance
-        map.insert("rng".to_string(), rng_val);
+        map.insert("rng".to_string(), rng_val.clone());
 
         // Force sampling to the correct rng label
         map.insert(
             "sampling".to_string(),
             serde_json::json!({
                 "method": "prefix_cdf",
-                "rng": rng_prov.algo,
+                "rng": kd_drand::RNG_ALGO,
             }),
         );
     } else {
         // If transcript isn't an object, wrap it so we can still attach provenance.
         let inner = std::mem::replace(&mut transcript_json, JsonValue::Null);
         transcript_json = serde_json::json!({
-            "rng": rng_prov,
-            "sampling": { "method": "prefix_cdf", "rng": rng_prov.algo },
+            "rng": rng_val,
+            "sampling": { "method": "prefix_cdf", "rng": kd_drand::RNG_ALGO },
             "inner": inner
         });
     }
@@ -320,7 +377,7 @@ pub async fn post_roll(
         public_id,
         &req.die,
         req.kappa,
-        req.seed.as_deref(), // Option<&str> for nullable TEXT
+        None,
         &idem_key,
         &payload_sha,
         face,
@@ -353,11 +410,11 @@ pub async fn post_roll(
     // ---- build response ------------------------------------------------------
     let transcript_url = format!("/v1/roll/{}/transcript", public_id);
     let transcript_key_s3 = s3::s3_uri(&state.s3_bucket, &s3_key);
-    let drbg_key_hex = hex::encode(rng_prov.drbg_key);
+    let drbg_key_hex = hex::encode(drbg_key);
 
     // Build the receipt body (everything except sig and receipt_hash) for signing
     let mut receipt = ReceiptV2 {
-        v: "truerolls-1".to_string(),
+        v: kd_drand::DRAND_RECEIPT_VERSION.to_string(),
         id: public_id,
         die: req.die,
         kappa: req.kappa,
@@ -372,9 +429,10 @@ pub async fn post_roll(
             math_param_version: kd_core::PARAM_VERSION.to_string(),
             rng: ReceiptRng {
                 drbg_key_hex,
-                algo: rng_prov.algo.to_string(),
+                algo: kd_drand::RNG_ALGO.to_string(),
             },
             draw_u64: result.draw_u64.to_string(),
+            drand: Some(drand_proof),
         },
         receipt_hash: None,
         sig: None,
@@ -387,6 +445,10 @@ pub async fn post_roll(
         receipt.receipt_hash = Some(receipt_hash);
         receipt.sig = Some(sig_block);
     }
+    let receipt_json = serde_json::to_value(&receipt).map_err(internal)?;
+    db::update_roll_receipt_json(&state.pg, row.id, &receipt_json)
+        .await
+        .map_err(internal)?;
 
     let resp = ReceiptV2Response {
         receipt,
@@ -408,6 +470,15 @@ fn sha256_bytes(data: &[u8]) -> Vec<u8> {
     let mut h = Sha256::new();
     h.update(data);
     h.finalize().to_vec()
+}
+
+fn validate_client_nonce(client_nonce: &str) -> Result<(), AppError> {
+    if client_nonce.len() != 64 || !client_nonce.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(bad_request(
+            "client_nonce must be 32 random bytes encoded as 64 hex characters",
+        ));
+    }
+    Ok(())
 }
 
 /// Short redacted hex hash (12 chars) for logging keys safely.

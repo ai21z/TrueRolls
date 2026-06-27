@@ -197,7 +197,7 @@ mod tests {
     /// The clincher: a receipt signed by THIS crate's signer verifies VALID under
     /// THIS crate's verifier. Both share [`crate::canonical_signing_bytes`], so they
     /// cannot drift. Builds a structurally honest d20 receipt via `kd_core` (the
-    /// same math the verifier recomputes) so all four checks pass.
+    /// same math the verifier recomputes) so the legacy receipt checks pass.
     #[test]
     fn sign_then_verify_roundtrip_is_valid() {
         use kd_core::{

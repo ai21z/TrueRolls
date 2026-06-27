@@ -8,6 +8,7 @@ description = "Shared offline ReceiptV2 verifier (Ed25519 + JCS + RNG replay + m
 
 [dependencies]
 kd-core = { path = "../kd-core" }
+kd-drand = { path = "../kd-drand" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_jcs = { workspace = true }
