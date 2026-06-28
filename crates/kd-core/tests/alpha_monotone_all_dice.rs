@@ -4,9 +4,9 @@
 //! analytic proof (the comonotone-covariance / Chebyshev argument) lives in
 //! `docs/explanation/alpha-monotonicity.md`.
 //!
-//! Why it holds (sketch): the feasible α-set is `[α*, 1]` — mixing toward
+//! Why it holds (sketch): the feasible α-set is `[α*, 1]` - mixing toward
 //! uniform lowers both `KL(p‖u)` (convex in α, min at α=1) and `|EV−μ|` (linear
-//! in α) — so the minimal α is the binding threshold. At any fixed α, both
+//! in α) - so the minimal α is the binding threshold. At any fixed α, both
 //! `KL(p(α,κ)‖u)` and `|EV(p(α,κ))−μ|` are non-decreasing in |κ| (each a
 //! covariance of two comonotone functions of the face score), so the threshold
 //! itself rises with |κ|. The ε-floor+renorm is a small monotonicity-preserving
@@ -31,7 +31,7 @@ fn assert_alpha_monotone<const N: usize>(steps: u32, tol: f64) {
                 .alpha;
             assert!(
                 alpha >= prev - tol,
-                "d{N}: α dropped as |κ| rose — α({kappa:.5}) = {alpha} < prev = {prev}"
+                "d{N}: α dropped as |κ| rose - α({kappa:.5}) = {alpha} < prev = {prev}"
             );
             prev = alpha;
         }

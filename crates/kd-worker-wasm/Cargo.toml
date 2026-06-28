@@ -19,6 +19,6 @@ rand_chacha = "0.9.0"
 rand_core = "0.9.3"
 # getrandom is transitive (via kd-core / ed25519); on wasm32 it needs the wasm_js
 # backend (paired with the rustflags cfg in .cargo/config.toml). It is unused at
-# runtime — the Worker passes a CSPRNG seed in, so rolling + signing stay
+# runtime - the Worker passes a CSPRNG seed in, so rolling + signing stay
 # deterministic given inputs.
 getrandom = { version = "0.3", features = ["wasm_js"] }

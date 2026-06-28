@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Shared drand quicknet BLS verification — scheme bls-unchained-g1-rfc9380.
+// Shared drand quicknet BLS verification - scheme bls-unchained-g1-rfc9380.
 //
 // Signatures live in G1 (48-byte compressed); the group public key lives in G2
 // (96-byte compressed). "Unchained" means the signed message is the round alone:
 //   m = SHA-256( uint64_be(round) )  -> hashed onto G1 with the RFC 9380 DST.
 // Verification is one pairing check against the PINNED quicknet group key (the
-// constant below — NEVER a key a relay hands back at runtime). This is the
+// constant below - NEVER a key a relay hands back at runtime). This is the
 // authenticity gate the §3.1/§3.2 timing samples are filtered through: a
 // fast-but-bogus σ that does not verify is not a measurement and must be dropped.
 //
@@ -47,14 +47,14 @@ export function unchainedMessage(round) {
 export function assertPinnedKey(info) {
   if (info?.public_key !== PINNED_PUBKEY) {
     throw new Error(
-      `group public key mismatch: /info=${String(info?.public_key).slice(0, 16)}… != pinned ${PINNED_PUBKEY.slice(0, 16)}… (re-share or hostile relay) — refusing to measure`,
+      `group public key mismatch: /info=${String(info?.public_key).slice(0, 16)}… != pinned ${PINNED_PUBKEY.slice(0, 16)}… (re-share or hostile relay) - refusing to measure`,
     )
   }
 }
 
 // True iff `signatureHex` is a valid quicknet G1 signature for `round` under the
 // G2 group key (DEFAULTS to the pinned key; an explicit key is for testing only).
-// Never throws — malformed input -> false.
+// Never throws - malformed input -> false.
 export function verifyBeacon(round, signatureHex, groupPublicKeyHex = PINNED_PUBKEY) {
   try {
     const msgPoint = bls12_381.shortSignatures.hash(unchainedMessage(round), DRAND_G1_DST)
@@ -65,7 +65,7 @@ export function verifyBeacon(round, signatureHex, groupPublicKeyHex = PINNED_PUB
 }
 
 // Cheap self-consistency: drand publishes randomness = SHA-256(signature). This is
-// NOT authenticity (any relay can fabricate a consistent pair) — use verifyBeacon.
+// NOT authenticity (any relay can fabricate a consistent pair) - use verifyBeacon.
 export function randomnessMatches(signatureHex, randomnessHex) {
   return sha256(hexToBytes(signatureHex)).toString('hex') === randomnessHex
 }
@@ -113,7 +113,7 @@ async function selftest() {
   console.log(`wrong round rejected        : ${okWrongRound ? 'ok ✓' : 'ACCEPTED WRONG ROUND ✗'}`)
   console.log(`WRONG KEY rejects real σ    : ${okWrongKeyRejects ? 'ok ✓' : 'ACCEPTED UNDER WRONG KEY ✗'}`)
   const pass = pinnedKeyOk && okValid && okRand && okTamperFails && okWrongRound && okWrongKeyRejects
-  console.log(`\n${pass ? 'SELFTEST PASS — BLS verify correct + pinned against live quicknet' : 'SELFTEST FAIL'}`)
+  console.log(`\n${pass ? 'SELFTEST PASS - BLS verify correct + pinned against live quicknet' : 'SELFTEST FAIL'}`)
   process.exit(pass ? 0 : 1)
 }
 

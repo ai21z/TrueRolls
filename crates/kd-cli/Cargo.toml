@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "TrueRolls CLI — roll dice and verify distribution invariants"
+description = "TrueRolls CLI - roll dice and verify distribution invariants"
 
 [[bin]]
 name = "kd"
@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 kd-core = { path = "../kd-core" }
-# Single shared receipt verifier — the same engine the browser runs via wasm.
+# Single shared receipt verifier - the same engine the browser runs via wasm.
 kd-receipt = { path = "../kd-receipt" }
 clap = { version = "4", features = ["derive"] }
 rand = "0.9.2"

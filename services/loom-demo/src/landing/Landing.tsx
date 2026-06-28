@@ -21,14 +21,14 @@ import css from './Landing.module.css';
 type Pt = { x: number; y: number };
 const TRI_O = { x: 300, y: 317 };
 const RA = 240;
-const RB = 388; // RA · φ — the icosahedron's projected radius ratio
+const RB = 388; // RA · φ - the icosahedron's projected radius ratio
 
 function vert(deg: number, r: number): Pt {
   const a = (deg * Math.PI) / 180;
   return { x: +(TRI_O.x + r * Math.cos(a)).toFixed(1), y: +(TRI_O.y - r * Math.sin(a)).toFixed(1) };
 }
 
-// front face (90/210/330) — the labelled triangle the boxes hang off
+// front face (90/210/330) - the labelled triangle the boxes hang off
 const A = vert(90, RA);
 const B = vert(210, RA);
 const C = vert(330, RA);
@@ -42,7 +42,7 @@ const O150 = vert(150, RB);
 
 const APEX = A;
 
-// Deterministic spark dust at the roll vertex — engraving grain, not confetti.
+// Deterministic spark dust at the roll vertex - engraving grain, not confetti.
 function makeSparks(cx: number, cy: number, n = 20, seed = 71) {
   const rand = seedRng(seed);
   const out: { x: number; y: number; r: number; op: number }[] = [];
@@ -95,7 +95,7 @@ const D20 = {
     hyphaePath(C, O270, -6),
     hyphaePath(C, O30, 6),
   ],
-  // the labelled front face (bright) — base forks + rejoins (anastomosis)
+  // the labelled front face (bright) - base forks + rejoins (anastomosis)
   central: [
     hyphaePath(C, A, -14),
     hyphaePath(A, B, -14),
@@ -206,7 +206,7 @@ export function Landing({ state }: Props) {
                     <stop offset="100%" stopColor="#b87242" stopOpacity="0" />
                   </radialGradient>
                 </defs>
-                {/* faceted shading — the die's other front faces */}
+                {/* faceted shading - the die's other front faces */}
                 {D20.facets.map((f, i) => (
                   <polygon key={`fc-${i}`} className={css.triadFacet} points={f.d} style={{ opacity: f.op }} />
                 ))}
@@ -220,7 +220,7 @@ export function Landing({ state }: Props) {
                     style={{ animationDelay: `${0.1 + i * 0.06}s` }}
                   />
                 ))}
-                {/* spokes — front-face corners out to the hull */}
+                {/* spokes - front-face corners out to the hull */}
                 {D20.spokes.map((d, i) => (
                   <path
                     key={`sk-${i}`}
@@ -310,7 +310,7 @@ export function Landing({ state }: Props) {
                 <div className={css.trustItem}>
                   <span className={css.trustDot} />
                   <span className={css.trustText}>
-                    <b>One verifier.</b> The same kd-core engine in Rust, CLI, and WASM —
+                    <b>One verifier.</b> The same kd-core engine in Rust, CLI, and WASM -
                     one path, bit-for-bit.
                   </span>
                 </div>
@@ -331,7 +331,7 @@ export function Landing({ state }: Props) {
                 <p className={css.honest}>
                   VALID proves the roll seed came from a verified public drand beacon
                   and the outcome replays from that seed. It does not prove the published
-                  outcome was unbiased: the operator can still grind — privately fail
+                  outcome was unbiased: the operator can still grind - privately fail
                   unfavorable attempts and publish only favorable completed receipts.
                   Strict witnessed fairness is the v2 protocol, not this per-roll receipt.
                 </p>

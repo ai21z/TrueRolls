@@ -87,13 +87,13 @@ function randomHex32(): string {
 }
 export async function postVerify(rollId: string): Promise<VerifyResponse> {
   if (_mockMode) return mockVerify();
-  // GET /v1/verify/:id — server fetches transcript from S3 and re-verifies
+  // GET /v1/verify/:id - server fetches transcript from S3 and re-verifies
   // (legacy math-only path; performs NO signature checking)
   const res = await fetch(BASE + `/v1/verify/${rollId}`, { method: 'GET' });
   if (res.ok) {
     return res.json() as Promise<VerifyResponse>;
   }
-  // 422 = MISMATCH — the body is still a valid VerifyResponse
+  // 422 = MISMATCH - the body is still a valid VerifyResponse
   if (res.status === 422) {
     return res.json() as Promise<VerifyResponse>;
   }
@@ -119,7 +119,7 @@ export async function postVerifyReceipt(receipt: unknown): Promise<ReceiptVerify
   }
   throw new Error(`Receipt verify failed (${res.status}): ${await res.text()}`);
 }
-/** GET /.well-known/truerolls-keys.json — published Ed25519 verification keys. */
+/** GET /.well-known/truerolls-keys.json - published Ed25519 verification keys. */
 export async function getTruerollsKeys(): Promise<TruerollsKeys> {
   if (_mockMode) {
     throw new Error('key fetch requires live API');

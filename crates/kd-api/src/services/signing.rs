@@ -1,4 +1,4 @@
-//! Ed25519 receipt signing — re-exported from the shared `kd-receipt` crate.
+//! Ed25519 receipt signing - re-exported from the shared `kd-receipt` crate.
 //!
 //! The signer implementation lives in `kd_receipt` alongside the verifier so both
 //! share ONE JCS canonicalization (`kd_receipt::canonical_signing_bytes`) and can

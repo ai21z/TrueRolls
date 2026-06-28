@@ -7,7 +7,7 @@
 //! - **Host-testable core.** All logic lives in plain-Rust `*_impl` functions returning
 //!   `Result<_, String>`; the `#[wasm_bindgen]` exports are thin wrappers converting errors
 //!   to `JsError`. Unit tests run on the host target against the `*_impl` functions and
-//!   assert *exact* (`f64 ==`) parity with direct `kd_core` calls — same code path,
+//!   assert *exact* (`f64 ==`) parity with direct `kd_core` calls - same code path,
 //!   serde_json f64 round-trips are bit-exact.
 //! - kd-core stays untouched; defaults come from `default_for_die(N)` (λ fixed at the
 //!   per-die default; no λ override in v1 of these bindings).
@@ -182,8 +182,8 @@ pub fn compute_roll_replay_json(die: &str, kappa: f64, draw: u64) -> Result<Stri
     compute_roll_replay_json_impl(die, kappa, draw).map_err(|e| JsError::new(&e))
 }
 
-/// Verify a signed TrueRolls receipt entirely client-side — Ed25519 signature,
-/// DRBG sampling replay, face, and metric caps — using the shared `kd_receipt`
+/// Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
+/// DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
 /// engine (identical to `kd verify --receipt`).
 ///
 /// - `receiptJson`: the raw receipt JSON string.
@@ -351,7 +351,7 @@ mod tests {
 
     // --- verifyReceiptJson: the browser verifier IS the kd_receipt engine ----
 
-    /// PUBLIC test signing seed (never production) — same as the goldens.
+    /// PUBLIC test signing seed (never production) - same as the goldens.
     const TEST_SIGNING_SEED_HEX: &str =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 

@@ -32,7 +32,7 @@ function useActiveSection(ids: string[]): string {
     if (els.length === 0) return;
 
     // The active section is the last one whose top has scrolled above a line
-    // just below the sticky bar — robust regardless of section length. We use
+    // just below the sticky bar - robust regardless of section length. We use
     // an IntersectionObserver purely as the trigger (it fires on any scroll,
     // including programmatic), then recompute from live geometry.
     const LINE = 120;
@@ -403,7 +403,7 @@ export function Docs() {
                 <ul className={css.calloutList}>
                   <li>
                     That the published outcome was unbiased. The operator can still{' '}
-                    <b>grind</b> — privately fail/suppress unfavorable attempts after seeing
+                    <b>grind</b> - privately fail/suppress unfavorable attempts after seeing
                     each drand-derived outcome, and publish only a favorable completed receipt.
                     Per-roll drand fixes the seed source; it does not publicly bind the operator
                     to a single attempt before the beacon resolves. That needs strict witnessed fairness.

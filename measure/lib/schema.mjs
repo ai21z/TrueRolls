@@ -29,7 +29,7 @@ export function quorumLostTime(witnessTimes, k) {
   return orderStat(present, present.length - k + 1)
 }
 
-// Nearest-rank percentiles (documented crude estimator; adequate at large n — the
+// Nearest-rank percentiles (documented crude estimator; adequate at large n - the
 // audit-flagged §8 limitation, made explicit here rather than hidden).
 export function percentiles(arr, ps = [50, 95, 99, 99.9]) {
   const s = [...arr].filter((x) => x != null).sort((a, b) => a - b)

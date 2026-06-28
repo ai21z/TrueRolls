@@ -1,9 +1,9 @@
 /**
- * DieScene — the TrueRolls hero's marquee 3D visual.
+ * DieScene - the TrueRolls hero's marquee 3D visual.
  *
  * Rendered as the children of <Canvas> (see HeroCanvas). A faceted d20-style
  * die floats, tumbles, settles, gets sealed by a glowing credential ring, and
- * — the money shot — shatters into shards when the credential is tampered.
+ * - the money shot - shatters into shards when the credential is tampered.
  *
  * All per-frame motion runs in a single `useFrame` state machine that eases
  * refs toward per-phase targets, so flipping `phase` mid-animation stays smooth.
@@ -147,7 +147,7 @@ function makeShards(): Shard[] {
   return shards;
 }
 
-/* Eased lerp helpers — frame-rate independent via exponential smoothing. */
+/* Eased lerp helpers - frame-rate independent via exponential smoothing. */
 function damp(current: number, target: number, lambda: number, dt: number): number {
   return THREE.MathUtils.damp(current, target, lambda, dt);
 }
@@ -323,7 +323,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
 
   /**
    * Compose a single static frame for reduced-motion. Pure target values, no
-   * easing — die settled, seal present, tamper shows a static red-cracked die.
+   * easing - die settled, seal present, tamper shows a static red-cracked die.
    */
   function composeStatic() {
     const s = sm.current;
@@ -361,7 +361,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
     s.shatter = 0;
 
     // Thermal: cooled char for settled/sealed/idle, the anneal is motion so it
-    // never plays under reduced motion — we render its resting (cooled) frame.
+    // never plays under reduced motion - we render its resting (cooled) frame.
     s.cool = phase === 'rolling' ? 0 : 1;
     const dieShader = dieMaterial.userData.shader as
       | { uniforms: { uCool: { value: number } } }
@@ -566,13 +566,13 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
       >
         <group ref={dieGroup}>
           <mesh ref={dieMesh} geometry={dieGeometry} material={dieMaterial} />
-          {/* Hairline edge accent — reads premium without neon. Hidden with the
+          {/* Hairline edge accent - reads premium without neon. Hidden with the
               die on shatter so it doesn't ghost as a wireframe. */}
           <lineSegments ref={dieEdges}>
             <edgesGeometry args={[dieGeometry]} />
             <lineBasicMaterial color="#6e8478" transparent opacity={0.32} />
           </lineSegments>
-          {/* d20 face numbers — accent glyphs lifted just off each face, tumbling
+          {/* d20 face numbers - accent glyphs lifted just off each face, tumbling
               and scaling with the die, hidden with it on shatter. */}
           <group ref={numbersGroup}>
             {facePips.map((p) => (

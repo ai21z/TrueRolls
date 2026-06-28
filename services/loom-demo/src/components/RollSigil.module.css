@@ -1,7 +1,7 @@
-/* RollSigil — a Necrography reading of a receipt. Self-contained palette: a cool
+/* RollSigil - a Necrography reading of a receipt. Self-contained palette: a cool
    ashen-green residue with one warm ember focal, deliberately NOT the host's
    --kd-void purple. The break colour reuses the host danger red (--kd-fail), which
-   doubles as Necrography's rare blood-red focal — a tamper is a wound, not a badge. */
+   doubles as Necrography's rare blood-red focal - a tamper is a wound, not a badge. */
 
 .root {
   /* --nec-* palette now lives in tokens.css :root (shared engraved layer) */
@@ -244,7 +244,7 @@
   color: var(--kd-text-secondary, #bbc0c9);
 }
 
-/* The knot, tied or broken — the one-glance state. */
+/* The knot, tied or broken - the one-glance state. */
 .sealWhole {
   fill: none;
   stroke: var(--nec-node);
@@ -296,7 +296,7 @@
   letter-spacing: 0.2px;
 }
 
-/* The two editable levers (face, κ) — a quiet inked field, not a chrome input. */
+/* The two editable levers (face, κ) - a quiet inked field, not a chrome input. */
 .valueWrap {
   display: flex;
   align-items: center;

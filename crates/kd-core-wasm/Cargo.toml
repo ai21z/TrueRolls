@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 kd-core = { path = "../kd-core" }
-# The shared offline receipt verifier — exposed to the browser via verifyReceiptJson.
+# The shared offline receipt verifier - exposed to the browser via verifyReceiptJson.
 kd-receipt = { path = "../kd-receipt" }
 wasm-bindgen = "0.2"
 serde = { workspace = true }

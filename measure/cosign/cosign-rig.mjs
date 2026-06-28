@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// §3.3 — cosign-cost rig: the attack-execution latency (the denominator of
+// §3.3 - cosign-cost rig: the attack-execution latency (the denominator of
 // exploitability). Measures, per attempt: build+sign a commit (real Ed25519) →
 // submit to the witness set → collect the k-th reactive cosignature.
 //   cosign_cost = start → the k-th cosignature received AND verified.
@@ -9,15 +9,15 @@
 //    commit is signed, so the server-sign time is included).
 //  • The per-witness network RTT is MODELLED (base + jitter + a rare per-witness
 //    spike). A local rig CANNOT measure RTT to genuinely independent, geographically
-//    distributed witnesses — that is the operational §9.1 unknown. The RTT parameters
+//    distributed witnesses - that is the operational §9.1 unknown. The RTT parameters
 //    are inputs, stated, not measured.
 //  • LOAD runs attempts concurrently. It contends only in-process (Ed25519 + event
 //    loop); the modelled-RTT sleeps overlap freely, so cosign_cost here is a NO-LOAD
 //    floor. Real cosign-cost-under-load needs real witness endpoints (network/OS
-//    queueing) — not modelled here. Treat the number as a lower bound on the denominator.
+//    queueing) - not modelled here. Treat the number as a lower bound on the denominator.
 //  • The per-witness spike models ONE witness's tail. k-of-n collection with k<n
 //    CORRECTLY filters it (you wait for the k-th, tolerating n−k slow witnesses), so
-//    cosign_cost has no spike tail by design — and p1 (the gate's fastest attack) is
+//    cosign_cost has no spike tail by design - and p1 (the gate's fastest attack) is
 //    set by base+jitter. This is realistic, not a defect; do not read a spike tail into it.
 //
 // Run:  node cosign/cosign-rig.mjs -k 3 -n 5
@@ -32,7 +32,7 @@ const arg = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? proce
 const K = Number(arg('-k', 3))
 const N = Number(arg('-n', 5))
 const ATTEMPTS = Number(process.env.ATTEMPTS ?? 500)
-const LOAD = Math.max(1, Number(process.env.LOAD ?? 8))   // concurrent attempts — in-process crypto/event-loop only (see header)
+const LOAD = Math.max(1, Number(process.env.LOAD ?? 8))   // concurrent attempts - in-process crypto/event-loop only (see header)
 const RTT_MS = Number(process.env.COSIGN_RTT_MS ?? 80)
 const RTT_JITTER = Number(process.env.COSIGN_RTT_JITTER_MS ?? 40)
 const SPIKE_P = Number(process.env.RTT_SPIKE_P ?? 0.01)
@@ -55,7 +55,7 @@ const modelledRtt = () => {
 
 async function oneAttempt(epoch) {
   const t0 = process.hrtime.bigint()
-  // server builds + signs the commit (real Ed25519) — inside the timed window
+  // server builds + signs the commit (real Ed25519) - inside the timed window
   const commit = canon({ v: 'truerolls-v2-strict', epoch, batch_root: 'b'.repeat(64), target_round: 1000 + epoch })
   const serverSig = edSign(null, commit, serverKey.privateKey)
   if (serverSig.length !== 64) throw new Error('bad server sig')

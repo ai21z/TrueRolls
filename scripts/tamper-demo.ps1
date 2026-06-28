@@ -128,7 +128,7 @@ Write-Host "`n[3] Tampered receipt (face flipped) is REJECTED" -ForegroundColor 
 $origFace = [int]$roll.face
 $newFace = ($origFace % $faces) + 1
 $rawTampered = [regex]::Replace($rawClean, '"face"\s*:\s*\d+', "`"face`":$newFace", 1)
-if ($rawTampered -eq $rawClean) { Fail-Fast "tamper produced no change — face field not found in receipt bytes" }
+if ($rawTampered -eq $rawClean) { Fail-Fast "tamper produced no change - face field not found in receipt bytes" }
 Set-Content -Path $tamperPath -Value $rawTampered -Encoding utf8 -NoNewline
 Write-Host "      (face $origFace -> $newFace; signature left intact)"
 

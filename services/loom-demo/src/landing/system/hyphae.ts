@@ -1,5 +1,5 @@
 /**
- * hyphaePath — the one way to draw a Necrography filament.
+ * hyphaePath - the one way to draw a Necrography filament.
  *
  * A bowed mycelial strand between two points. `bow` offsets the path's midline
  * perpendicular to the run; two calls with opposite bows between the same endpoints

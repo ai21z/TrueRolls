@@ -1,13 +1,13 @@
-//! kd-worker-wasm — wasm-bindgen bindings for the TrueRolls Cloudflare Worker.
+//! kd-worker-wasm - wasm-bindgen bindings for the TrueRolls Cloudflare Worker.
 //!
 //! One call, [`rollAndSign`], does a full server-side roll: replay the draw from a
 //! CSPRNG seed, compute the guarded face + metrics via `kd_core`, then sign the
-//! receipt with the shared `kd_receipt` signer — the SAME JCS canonicalization the
+//! receipt with the shared `kd_receipt` signer - the SAME JCS canonicalization the
 //! verifier (browser/CLI) checks, so a Worker receipt verifies bit-for-bit.
 //!
 //! This crate is **server-side only**. The signing key is supplied per-call from a
 //! Worker secret and never leaves the Worker. The browser bundle is the separate
-//! `kd-core-wasm` (math preview + verify) — sign code never ships to the client.
+//! `kd-core-wasm` (math preview + verify) - sign code never ships to the client.
 //!
 //! Design mirrors `kd-core-wasm`: a host-testable `*_impl` returning
 //! `Result<_, String>` plus a thin `#[wasm_bindgen]` wrapper. The Worker supplies
@@ -67,7 +67,7 @@ fn roll_and_sign_impl(
     secret_hex: &str,
     kid: &str,
 ) -> Result<String, String> {
-    // 1. Replay the draw from the 32-byte CSPRNG seed — identical to the verifier.
+    // 1. Replay the draw from the 32-byte CSPRNG seed - identical to the verifier.
     let drbg =
         hex::decode(drbg_key_hex.trim()).map_err(|e| format!("drbg_key_hex not hex: {e}"))?;
     if drbg.len() != 32 {
@@ -83,7 +83,7 @@ fn roll_and_sign_impl(
     // 2. Guarded face + metrics from kd-core.
     let (face, alpha, kl, ev) = dispatch_die!(die, roll_face, kappa, draw)?;
 
-    // 3. Receipt body (pre-sig) — the ReceiptV2 shape kd-api emits and the verifier reads.
+    // 3. Receipt body (pre-sig) - the ReceiptV2 shape kd-api emits and the verifier reads.
     let body = json!({
         "v": kd_receipt::RECEIPT_VERSION,
         "id": id,
@@ -122,7 +122,7 @@ fn roll_and_sign_impl(
 /// Roll a die and return a signed TrueRolls receipt (JSON string).
 ///
 /// - `die`: "d4".."d100"; `kappa`: stance in [-1, 1].
-/// - `drbgKeyHex`: 32 random bytes (hex) from the Worker's CSPRNG — the ChaCha20
+/// - `drbgKeyHex`: 32 random bytes (hex) from the Worker's CSPRNG - the ChaCha20
 ///   seed the verifier replays.
 /// - `id`, `createdAt`, `transcriptUrl`: receipt provenance the Worker supplies.
 /// - `secretHex`, `kid`: the Ed25519 signing seed + key id (a Worker secret;

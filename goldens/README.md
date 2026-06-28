@@ -34,7 +34,7 @@ reflect the honest κ=0.6 computation.
 
 ## Tamper rationale
 
-Files 4–6, 8, 9 are derived programmatically from `golden_01` by the generator
+Files 4-6, 8, 9 are derived programmatically from `golden_01` by the generator
 (`crates/kd-cli/tests/gen_goldens.rs`); each changes exactly one thing:
 
 | # | What was changed | Why it must fail |
@@ -42,24 +42,24 @@ Files 4–6, 8, 9 are derived programmatically from `golden_01` by the generator
 | 4 | `face: 3 → 4` (`(face % 6) + 1`) | Claimed face no longer matches the prefix-CDF replay of `draw_u64` over the honest probs |
 | 5 | `kappa: 0.6 → -0.9` | Recomputation from κ=-0.9 yields different probs/alpha/kl/ev (and a different replayed face) than the recorded ones |
 | 6 | `math_param_version: "roll.math.v1" → "roll.math.v2_FAKE"` | The version gate must hard-error before any recomputation (no false OK/MISMATCH against the wrong math) |
-| 8 | `draw_u64 → "0"` (claimed face kept) | draw 0 replays to face 1 ≠ claimed face 3 — a forged draw cannot back an honest-looking face |
+| 8 | `draw_u64 → "0"` (claimed face kept) | draw 0 replays to face 1 ≠ claimed face 3 - a forged draw cannot back an honest-looking face |
 | 9 | `draw_u64` key removed | A face claim without a replayable draw is unverifiable; the KD-023 policy treats that as MISMATCH, never a silent pass |
 
 Receipt R2 takes the valid R1, bumps `face` 10 → 11 (`(face % 20) + 1`), and
-keeps the ORIGINAL signature — so both the Ed25519 check and the face
+keeps the ORIGINAL signature - so both the Ed25519 check and the face
 recompute fail.
 
 ## Regeneration
 
 Everything in this directory is regenerated deterministically by one command
-(byte-identical output on every run — fixed seeds, fixed receipt id/timestamp,
+(byte-identical output on every run - fixed seeds, fixed receipt id/timestamp,
 deterministic Ed25519):
 
 ```powershell
 cargo test -p kd-cli --test gen_goldens -- --ignored
 ```
 
-The clean transcripts (1–3, 7) are produced by the real `kd` binary; the
+The clean transcripts (1-3, 7) are produced by the real `kd` binary; the
 manual equivalents are:
 
 ```powershell
@@ -77,13 +77,13 @@ trailing newline; tampered files and receipts are derived in code.)
 ### Local CLI
 
 ```powershell
-# Clean — verdict: OK, exit 0
+# Clean - verdict: OK, exit 0
 kd verify --input goldens/golden_01_d6_k06.json
 kd verify --input goldens/golden_02_d20_k06.json
 kd verify --input goldens/golden_03_d100_k06.json
 kd verify --input goldens/golden_07_d6_kneg05.json
 
-# Tampered/broken — exit 1
+# Tampered/broken - exit 1
 kd verify --input goldens/golden_04_d6_tampered_face.json   # MISMATCH (face)
 kd verify --input goldens/golden_05_d6_tampered_kappa.json  # MISMATCH (alpha/kl/ev/probs/face)
 kd verify --input goldens/golden_06_d6_bad_version.json     # hard error: param_version
@@ -107,7 +107,7 @@ the server's `VerifyRequest` (kd-api `src/models/dto.rs`) has no
 `deny_unknown_fields`, so serde ignores the CLI-only keys
 (`transcript_version`, `lambda`, `seed`, `sampling`) and deserializes only the
 flat fields. This works for these goldens because they all use the server's
-fixed default λ=0.5 — a transcript rolled with a different λ would falsely
+fixed default λ=0.5 - a transcript rolled with a different λ would falsely
 MISMATCH server-side.
 
 ```powershell
@@ -123,12 +123,12 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/v1/verify -ContentType
 
 > **⚠ TEST KEY ONLY.** The receipts are signed with the Ed25519 key derived
 > from the seed `0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`
-> (kid `test-kid-1`) — the same PUBLIC seed used by kd-api's `signing.rs`
+> (kid `test-kid-1`) - the same PUBLIC seed used by kd-api's `signing.rs`
 > unit tests. It is committed to the repo on purpose so the fixtures are
 > reproducible by anyone. **It must NEVER be used in production**, and a real
 > deployment must reject it.
 
-Shape: `truerolls-1` `ReceiptV2` — fixed id
+Shape: `truerolls-1` `ReceiptV2` - fixed id
 `00000000-0000-0000-0000-00000000d201`, fixed
 `created_at: 2026-01-01T00:00:00Z`, no `transcript_key`,
 `proof.rng.drbg_key_hex` = `"42"` × 32 (so the draw replays as the first
@@ -151,7 +151,7 @@ seed, so the fixtures and the tests cannot drift apart.
 
 All transcript goldens use the v1.3.1 defaults:
 
-- λ = 0.50 (matches the server's fixed default — required for server parity)
+- λ = 0.50 (matches the server's fixed default - required for server parity)
 - ε = 1e-12
 - KL cap: d6=0.060, d20=0.035, d100=0.025 (nats)
 - EV cap: 0.20 × SD_uniform

@@ -1,11 +1,11 @@
-//! Ed25519 receipt signing — the signer half of the shared receipt crate.
+//! Ed25519 receipt signing - the signer half of the shared receipt crate.
 //!
 //! Signing lives in the same crate as verification on purpose: both go through
 //! [`crate::canonical_signing_bytes`], so the bytes a signature covers can never
 //! drift between the signer and the verifier (a verifier that drifts from the
 //! signer is worse than no verifier). Ed25519 signing is deterministic
 //! (RFC 8032) and the key is derived from a fixed seed, so this needs no entropy
-//! source and compiles to `wasm32-unknown-unknown` — the Cloudflare Worker can
+//! source and compiles to `wasm32-unknown-unknown` - the Cloudflare Worker can
 //! sign with the exact same code `kd-api` runs.
 
 use base64::Engine;
@@ -13,7 +13,7 @@ use ed25519_dalek::{Signer as _, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 /// The PUBLIC test signing seed (hex). Published in the goldens, these tests, and
-/// the loom-demo demo key — safe to embed, but NEVER valid in production. The
+/// the loom-demo demo key - safe to embed, but NEVER valid in production. The
 /// SIG-2 guard ([`reject_test_signer_in_prod`]) blocks it under `KD_ENV=prod`.
 /// Single source of truth: the verifier tests, kd-cli's gen_goldens, and kd-api's
 /// boot guard all reference this one const so they cannot drift.
@@ -25,7 +25,7 @@ pub const TEST_KIDS: &[&str] = &["test-kid-1"];
 
 /// SIG-2 guard. Call ONLY under the production profile. Returns `Err` (which
 /// aborts boot) when the configured signer is the published TEST seed, a
-/// published TEST kid, or absent — so a leaked dev key can never sign forgeable
+/// published TEST kid, or absent - so a leaked dev key can never sign forgeable
 /// production receipts. Never logs seed bytes.
 pub fn reject_test_signer_in_prod(
     secret_hex: Option<&str>,
@@ -110,7 +110,7 @@ impl ReceiptSigner {
     }
 
     /// Sign a receipt body (the JSON value WITHOUT the `sig`/`receipt_hash`
-    /// fields — [`crate::canonical_signing_bytes`] strips them defensively).
+    /// fields - [`crate::canonical_signing_bytes`] strips them defensively).
     /// Returns the [`ReceiptSignature`] and the `sha256:<hex>` receipt hash, both
     /// over the SAME canonical bytes the verifier checks.
     pub fn sign_receipt(

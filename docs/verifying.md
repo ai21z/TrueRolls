@@ -8,7 +8,7 @@ The browser verifier, the CLI (`kd verify --receipt`), and the server all run th
 
 - A drand receipt is verified by five checks: signature, drand beacon proof, seed replay, face, and metrics. All five must pass for `VALID`.
 - `VALID` proves the roll seed came from a verified public drand beacon and the outcome replays from that seed.
-- `VALID` does not prove the published outcome was unbiased: the operator can still **grind** — privately fail/suppress unfavorable attempts and publish only a favorable completed receipt. Strict witnessed fairness is the v2 protocol.
+- `VALID` does not prove the published outcome was unbiased: the operator can still **grind** - privately fail/suppress unfavorable attempts and publish only a favorable completed receipt. Strict witnessed fairness is the v2 protocol.
 - Legacy `truerolls-1` receipts still verify signature, replay, face, and metrics, but they do not carry drand provenance.
 
 ## The checks
@@ -97,7 +97,7 @@ For legacy `truerolls-1`, `VALID` proves only tamper-evidence, deterministic rep
 
 ## What VALID does not prove
 
-`VALID` does not prove the published outcome was **unbiased**. Because this per-roll drand receipt is not publicly anchored before the target round, the operator can **grind**: privately run one or many attempts (other nonces/rounds), see each outcome, fail/suppress the unfavorable ones — "drand timeout" is an indistinguishable cover — and publish only a favorable completed receipt. Each published receipt's seed is genuinely drand-derived; the *selection* across discarded attempts is what biases the result, so withholding/refusal here is the grinding mechanism, not merely an availability issue. Strict witnessed fairness — binding the operator to one committed attempt per roll — is the v2 protocol, which requires public/witnessed pre-round commitments.
+`VALID` does not prove the published outcome was **unbiased**. Because this per-roll drand receipt is not publicly anchored before the target round, the operator can **grind**: privately run one or many attempts (other nonces/rounds), see each outcome, fail/suppress the unfavorable ones - "drand timeout" is an indistinguishable cover - and publish only a favorable completed receipt. Each published receipt's seed is genuinely drand-derived; the *selection* across discarded attempts is what biases the result, so withholding/refusal here is the grinding mechanism, not merely an availability issue. Strict witnessed fairness - binding the operator to one committed attempt per roll - is the v2 protocol, which requires public/witnessed pre-round commitments.
 
 Per-roll drand is implemented. Commit/reveal, transparency-log anchoring, witnessed checkpoints, on-chain anchoring, authentication, and production strict fairness are not implemented in the live product.
 

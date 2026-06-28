@@ -4,20 +4,20 @@ import { makeFeederRoots, makeGhostTaproot, makeSeed } from '../system/seed';
 import css from './SeedSocket.module.css';
 
 /**
- * SeedSocket — the honesty paragraph as an interactive specimen, drawn by hand.
+ * SeedSocket - the honesty paragraph as an interactive specimen, drawn by hand.
  *
  * TrueRolls proves each live roll seed came from verified drand and that the outcome
  * replays from it. The one thing it cannot prove yet is that the published outcome was
- * unbiased — the operator can still grind by failing/suppressing unfavorable attempts.
+ * unbiased - the operator can still grind by failing/suppressing unfavorable attempts.
  * So six re-derivable facts are carved as labelled cells,
- * wired to a germinating seed where they enter the cracked coat as FEEDER roots —
+ * wired to a germinating seed where they enter the cracked coat as FEEDER roots -
  * and the seventh fact, strict fairness, is the seed's MISSING taproot: a deep
  * anchor left ungrown. The seed is a forensic herbarium plate: a hatched reniform
  * testa, an oval hilum scar, the coat split at the rooting pole.
  *
  * Layout mirrors the verify grid above it: the specimen sits in its own inked box the
  * width of the offline-verify card; the explanation is an unboxed column the width of
- * the trust text. Every part explains itself — hover, tap, or keyboard-focus a cell, the
+ * the trust text. Every part explains itself - hover, tap, or keyboard-focus a cell, the
  * seed, or the roots and a plain-English explanation appears in the text column.
  */
 
@@ -26,7 +26,7 @@ import css from './SeedSocket.module.css';
 // roots and the ghosted missing taproot descending below the ground register.
 const VB_W = 580;
 const VB_H = 372;
-const SX = 356; // seed centre x (off-centre right — a specimen, not a centred seal)
+const SX = 356; // seed centre x (off-centre right - a specimen, not a centred seal)
 const SY = 150; // seed centre y
 const HW = 46; // seed half-width
 const HH = 52; // seed half-height
@@ -47,7 +47,7 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
       <>
         TrueRolls proves each live roll seed came from a verified public drand beacon, and you
         can replay the outcome yourself. The one thing it cannot prove yet is whether the
-        published outcome was unbiased — the operator can still grind, failing unfavorable
+        published outcome was unbiased - the operator can still grind, failing unfavorable
         attempts and publishing only favorable ones. The cells re-derive straight from the receipt
         and feed the seed as roots. The seventh, <b>strict fairness</b>, still waits for witnesses.
       </>
@@ -83,7 +83,7 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
       <>
         Did the operator publicly bind the roll before it could see the outcome, or could it
         privately fail unfavorable attempts and publish only a favorable one (grinding)? Per-roll
-        drand provenance cannot certify that — so strict witnessed fairness remains the seed's <b>missing taproot</b>.
+        drand provenance cannot certify that - so strict witnessed fairness remains the seed's <b>missing taproot</b>.
       </>
     ),
   },
@@ -146,7 +146,7 @@ export function SeedSocket() {
             className={css.svg}
             viewBox={`0 0 ${VB_W} ${VB_H}`}
             role="img"
-            aria-label="Seed honesty specimen: a germinating seed whose six re-derivable facts feed it as roots, with the seventh — seed honesty — left as a missing taproot. Use the cells, or read the explanation."
+            aria-label="Seed honesty specimen: a germinating seed whose six re-derivable facts feed it as roots, with the seventh - seed honesty - left as a missing taproot. Use the cells, or read the explanation."
             xmlns="http://www.w3.org/2000/svg"
           >
             <defs>
@@ -160,7 +160,7 @@ export function SeedSocket() {
               </clipPath>
             </defs>
 
-            {/* ground/soil register at rooting depth — forensic notation, not decoration */}
+            {/* ground/soil register at rooting depth - forensic notation, not decoration */}
             <line className={css.soil} x1="18" y1={SOIL_Y} x2={VB_W - 18} y2={SOIL_Y} aria-hidden="true" />
 
             {/* the six facts converge at the rooting pole as feeder roots into the crack */}
@@ -232,7 +232,7 @@ export function SeedSocket() {
               </g>
               <circle cx={SEED.pole.x} cy={SEED.pole.y} r="12" fill={`url(#${emberId})`} />
               <ellipse className={css.emberCore} cx={SEED.pole.x} cy={SEED.pole.y} rx="4.5" ry="2.2" />
-              {/* the missing taproot — a faint dotted reach ending in an unfilled anchor */}
+              {/* the missing taproot - a faint dotted reach ending in an unfilled anchor */}
               <path className={css.ghostTap} d={TAP.d} />
               <circle className={css.ghostTip} cx={TAP.tip.x} cy={TAP.tip.y} r="4.5" />
               <text className={css.socketLabel} x={TAP.tip.x + 11} y={TAP.tip.y + 4}>

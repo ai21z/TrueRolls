@@ -22,11 +22,11 @@ pub fn router(state: Arc<AppState>) -> Router {
     //
     // SmartIpKeyExtractor reads X-Forwarded-For / X-Real-IP / Forwarded (set by Fly /
     // Cloudflare), falling back to the peer IP. It must therefore run **behind a trusted
-    // proxy** in production — a direct client could spoof X-Forwarded-For. The peer-IP
+    // proxy** in production - a direct client could spoof X-Forwarded-For. The peer-IP
     // fallback needs ConnectInfo, which `main.rs` wires via
     // `into_make_service_with_connect_info`. Limits are config-driven (KD_ROLL_RL_*).
     //
-    // On 429 the layer sets `x-ratelimit-after` (seconds) — tower_governor's header, not
+    // On 429 the layer sets `x-ratelimit-after` (seconds) - tower_governor's header, not
     // `Retry-After`.
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
@@ -154,7 +154,7 @@ mod tests {
                 .status(),
             StatusCode::OK
         );
-        // A different IP is independent — its first request still passes.
+        // A different IP is independent - its first request still passes.
         assert_eq!(
             app.clone()
                 .oneshot(post_from("2.2.2.2"))

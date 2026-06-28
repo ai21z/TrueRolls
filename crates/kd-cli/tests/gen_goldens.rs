@@ -1,4 +1,4 @@
-//! KD-026 — Golden fixture generator (ignored by default; run explicitly).
+//! KD-026 - Golden fixture generator (ignored by default; run explicitly).
 //!
 //! Regenerates EVERY file in `goldens/`:
 //!
@@ -7,7 +7,7 @@
 //! ```
 //!
 //! Determinism contract: running the generator twice must produce
-//! byte-identical files. All inputs are fixed — seeds, the receipt id, the
+//! byte-identical files. All inputs are fixed - seeds, the receipt id, the
 //! `created_at` timestamp, the drbg key, and the PUBLIC test signing seed
 //! (the same seed used by kd-api's `signing.rs` unit tests; it is committed
 //! to the repo on purpose and must NEVER be used in production). Ed25519
@@ -17,7 +17,7 @@
 //! Output format: pretty-printed JSON with sorted keys plus a trailing
 //! newline. serde_json without the `preserve_order` feature backs
 //! `serde_json::Map` with a BTreeMap (verified for this workspace via
-//! `cargo tree -p kd-cli -i serde_json -e features` — only `default`,
+//! `cargo tree -p kd-cli -i serde_json -e features` - only `default`,
 //! `float_roundtrip`, `std` are unified), so keys are already sorted; the
 //! explicit `sort_keys` pass below keeps the output stable even if
 //! `preserve_order` is ever unified into the build later.
@@ -35,7 +35,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-/// PUBLIC test signing seed — identical to the one in kd-api
+/// PUBLIC test signing seed - identical to the one in kd-api
 /// `src/services/signing.rs` unit tests. Committed on purpose: it exists so
 /// receipt goldens are reproducible by anyone. NEVER a production key.
 const TEST_SIGNING_SEED_HEX: &str =
@@ -109,7 +109,7 @@ fn roll_clean(die: &str, kappa: &str, seed: &str) -> Value {
     serde_json::from_str(&content).expect("kd wrote invalid JSON")
 }
 
-/// Replay the prefix-CDF face from a raw draw — mirrors
+/// Replay the prefix-CDF face from a raw draw - mirrors
 /// `kd_core::sample::prefix_cdf_index_from_u64` over a dynamic prob slice.
 fn replay_face(probs: &[f64], draw: u64) -> u64 {
     let u = (draw as f64) / ((u64::MAX as f64) + 1.0);
@@ -126,18 +126,18 @@ fn replay_face(probs: &[f64], draw: u64) -> u64 {
 /// Build the valid signed receipt golden (golden_receipt_01_d20).
 fn build_receipt_01() -> Value {
     // Deterministic draw: first next_u64() of ChaCha20Rng seeded with the
-    // drbg key bytes ([0x42; 32]) — exactly what the CLI/server replay does.
+    // drbg key bytes ([0x42; 32]) - exactly what the CLI/server replay does.
     let drbg_key_hex: String = "42".repeat(32);
     let mut rng = ChaCha20Rng::from_seed([0x42u8; 32]);
     let draw = rng.next_u64();
 
-    // d20 @ κ=0.6 with default params — same math path as kd-api recompute.
+    // d20 @ κ=0.6 with default params - same math path as kd-api recompute.
     let params = default_for_die(20);
     let out =
         compute_distribution::<20>(Die::<20>, 0.6, &params).expect("compute_distribution failed");
     let face = (prefix_cdf_index_from_u64::<20>(&out.probs, draw) + 1) as u64;
 
-    // Receipt body — everything except sig and receipt_hash (the signature
+    // Receipt body - everything except sig and receipt_hash (the signature
     // and the hash both cover the JCS canonicalization of this body).
     let body = json!({
         "v": "truerolls-1",
@@ -199,7 +199,7 @@ fn build_receipt_01() -> Value {
 }
 
 #[test]
-#[ignore = "regenerates goldens — run explicitly: cargo test -p kd-cli --test gen_goldens -- --ignored"]
+#[ignore = "regenerates goldens - run explicitly: cargo test -p kd-cli --test gen_goldens -- --ignored"]
 fn regenerate_goldens() {
     let dir = goldens_dir();
     std::fs::create_dir_all(&dir)
@@ -221,7 +221,7 @@ fn regenerate_goldens() {
     // ---- tampered transcripts (derived programmatically from golden_01) ---
     let claimed_face = g01["face"].as_u64().expect("golden_01 missing face");
 
-    // 04 — tampered face: rotate to the next in-range face; everything else
+    // 04 - tampered face: rotate to the next in-range face; everything else
     // (probs, draw_u64, metrics) still reflects the honest roll.
     let mut g04 = g01.clone();
     let tampered_face = (claimed_face % 6) + 1;
@@ -232,19 +232,19 @@ fn regenerate_goldens() {
     g04["face"] = json!(tampered_face);
     write_golden("golden_04_d6_tampered_face.json", &g04);
 
-    // 05 — tampered kappa: only κ changes; recomputation from κ=-0.9 yields
+    // 05 - tampered kappa: only κ changes; recomputation from κ=-0.9 yields
     // different probs/alpha/kl/ev (and a different replayed face).
     let mut g05 = g01.clone();
     g05["kappa"] = json!(-0.9);
     write_golden("golden_05_d6_tampered_kappa.json", &g05);
 
-    // 06 — bad math_param_version: the version gate must hard-error before
+    // 06 - bad math_param_version: the version gate must hard-error before
     // any recomputation.
     let mut g06 = g01.clone();
     g06["math_param_version"] = json!("roll.math.v2_FAKE");
     write_golden("golden_06_d6_bad_version.json", &g06);
 
-    // 08 — tampered draw: keep the claimed face, replace draw_u64 with a
+    // 08 - tampered draw: keep the claimed face, replace draw_u64 with a
     // draw that replays to a DIFFERENT face. draw=0 replays to face 1; if
     // the claimed face is already 1, u64::MAX replays to the last face.
     let probs: Vec<f64> = g01["probs"]
@@ -267,7 +267,7 @@ fn regenerate_goldens() {
     g08["draw_u64"] = json!(tampered_draw.to_string());
     write_golden("golden_08_d6_tampered_draw.json", &g08);
 
-    // 09 — missing draw: face present but unverifiable (no replay possible).
+    // 09 - missing draw: face present but unverifiable (no replay possible).
     let mut g09 = g01.clone();
     g09.as_object_mut().unwrap().remove("draw_u64");
     write_golden("golden_09_d6_missing_draw.json", &g09);
@@ -276,7 +276,7 @@ fn regenerate_goldens() {
     let receipt_01 = build_receipt_01();
     write_golden("golden_receipt_01_d20.json", &receipt_01);
 
-    // 02 — tampered receipt face: bump the face (1-based mod 20) but keep the
+    // 02 - tampered receipt face: bump the face (1-based mod 20) but keep the
     // ORIGINAL signature, so both the Ed25519 check and the face recompute
     // must fail.
     let receipt_face = receipt_01["face"]

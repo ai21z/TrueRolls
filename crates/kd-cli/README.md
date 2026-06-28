@@ -4,8 +4,8 @@ Cross-platform CLI for the TrueRolls verifiable dice system.
 
 ## Commands
 
-- **`kd roll`** — Roll a die with guarded karma distribution
-- **`kd verify`** — Verify distribution caps or verify a transcript file
+- **`kd roll`** - Roll a die with guarded karma distribution
+- **`kd verify`** - Verify distribution caps or verify a transcript file
 
 ## Quick Start
 

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// TrueRolls — §3.1 standalone server-drand-view probe (throwaway measurement harness).
+// TrueRolls - §3.1 standalone server-drand-view probe (throwaway measurement harness).
 // Measures, per drand quicknet round R: the wall-clock arrival of σ_R at each relay, the
 // latency vs the scheduled round time, and the per-round RELAY SPREAD (fastest vs slowest).
 //
 // The relay spread is the clock-robust signal (one machine clock, so common offset cancels):
-// it is the spread ACROSS THE CONFIGURED RELAYS only — an indicative LOWER bound on the server's
+// it is the spread ACROSS THE CONFIGURED RELAYS only - an indicative LOWER bound on the server's
 // advantage, NOT an upper bound. A real independent witness (§3.2) may sit on a worse path / ASN /
 // region than any relay here, so the true server-vs-witness skew can EXCEED this spread; only §3.2
 // pins it (see ../../docs/design/beacon-skew-measurement.md §3.1, §4).
 //
 // Verification scope: this probe checks drand SELF-CONSISTENCY only (randomness == SHA-256(σ)). It
-// does NOT BLS-verify σ under the quicknet group key — full BLS verification + dropping unverified
+// does NOT BLS-verify σ under the quicknet group key - full BLS verification + dropping unverified
 // samples lands with §3.2, so σ values here are timing samples, not authenticated beacon values.
 //
 // Run (Node 20+, zero deps):  node probe.mjs
@@ -48,7 +48,7 @@ async function getInfo() {
       if (res.ok) return await res.json()
     } catch { /* try next relay */ }
   }
-  throw new Error('could not fetch /info from any relay — check network/relays')
+  throw new Error('could not fetch /info from any relay - check network/relays')
 }
 
 // Poll one relay for a SPECIFIC round until it returns 200; resolve first-arrival time.
@@ -57,7 +57,7 @@ async function awaitRound(relay, round, deadline) {
     try {
       const res = await fetch(`${relay}/${CHAIN}/public/${round}`, { signal: AbortSignal.timeout(2000) })
       if (res.ok) return { arrival: Date.now(), body: await res.json() }
-    } catch { /* not published yet, or transient — keep polling */ }
+    } catch { /* not published yet, or transient - keep polling */ }
     await sleep(POLL_MS)
   }
   return null
@@ -128,12 +128,12 @@ const main = async () => {
     console.log(`round ${round}: fastest=${fastest}ms slowest=${slowest}ms ${spreadText}${badSig ? '  SIG MISMATCH' : ''}`)
   }
 
-  console.log('\n=== per-relay σ-arrival latency vs scheduled (ms) — has local clock offset; NTP-sync for absolute accuracy ===')
+  console.log('\n=== per-relay σ-arrival latency vs scheduled (ms) - has local clock offset; NTP-sync for absolute accuracy ===')
   for (const r of RELAYS) console.log(`  ${r}`, stats(perRelay[r]))
-  console.log('\n=== EXACT RELAY SPREAD per complete round (ms) — clock-robust; configured-relay spread only ===')
+  console.log('\n=== EXACT RELAY SPREAD per complete round (ms) - clock-robust; configured-relay spread only ===')
   console.log(' ', stats(spreads))
   if (censoredSpreadLowerBounds.length) {
-    console.log('\n=== CENSORED relay-spread lower bounds for incomplete rounds (ms) — actual tail is >= this ===')
+    console.log('\n=== CENSORED relay-spread lower bounds for incomplete rounds (ms) - actual tail is >= this ===')
     console.log(' ', stats(censoredSpreadLowerBounds))
   }
   console.log(`\nwrote ${spreads.length}/${ROUNDS} complete rounds to ${OUT}; censored=${censoredSpreadLowerBounds.length}`)

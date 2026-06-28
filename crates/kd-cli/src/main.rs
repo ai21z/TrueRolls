@@ -2,7 +2,7 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 
-/// TrueRolls CLI — roll dice and verify distribution invariants.
+/// TrueRolls CLI - roll dice and verify distribution invariants.
 ///
 /// Two modes of operation:
 ///   • Local (default): pure math via kd-core, no server needed

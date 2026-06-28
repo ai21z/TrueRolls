@@ -76,7 +76,7 @@ pub async fn get_roll_by_idem(
     }
 }
 
-/// GET /v1/roll/:id/transcript — return transcript JSON via HTTP (not s3://)
+/// GET /v1/roll/:id/transcript - return transcript JSON via HTTP (not s3://)
 #[tracing::instrument(name = "roll.transcript", skip(state), fields(id = %public_id))]
 pub async fn get_transcript_by_id(
     State(state): State<Arc<AppState>>,

@@ -24,7 +24,7 @@ interface Props {
 
 export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
   // The credential drives idle/settled/sealed; rolling overrides live. The header
-  // die is roll-agnostic until a roll is recorded — but if THAT roll is broken by a
+  // die is roll-agnostic until a roll is recorded - but if THAT roll is broken by a
   // tamper anywhere on the page, the die shatters here too (shared tamper state).
   const [credPhase, setCredPhase] = useState<HeroPhase>('idle');
   const latestRoll = state.rolls.length > 0 ? state.rolls[0] : null;

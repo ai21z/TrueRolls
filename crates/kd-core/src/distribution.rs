@@ -81,9 +81,9 @@ pub fn compute_distribution<const N: usize>(
     if !kappa.is_finite() || !params.validate() {
         return Err(CoreError::NonFiniteInput);
     }
-    // κ is a stance in [-1, 1] by the math contract. Reject out-of-range κ here —
+    // κ is a stance in [-1, 1] by the math contract. Reject out-of-range κ here -
     // the single place both the signer (kd-api) and the offline verifier
-    // (kd-receipt) route through — so neither can bless a κ outside the contract.
+    // (kd-receipt) route through - so neither can bless a κ outside the contract.
     // A κ=50 receipt is therefore refused, not verified VALID. Bounds inclusive.
     if !(-1.0..=1.0).contains(&kappa) {
         return Err(CoreError::KappaOutOfRange(kappa));
@@ -174,7 +174,7 @@ mod tests {
         // In-contract boundaries are accepted (κ ∈ [-1, 1], inclusive).
         assert!(compute_distribution_with_defaults(Die::<20>, 1.0).is_ok());
         assert!(compute_distribution_with_defaults(Die::<20>, -1.0).is_ok());
-        // Out-of-contract κ is rejected — the verifier must never bless it.
+        // Out-of-contract κ is rejected - the verifier must never bless it.
         assert!(matches!(
             compute_distribution_with_defaults(Die::<20>, 50.0),
             Err(CoreError::KappaOutOfRange(k)) if k == 50.0

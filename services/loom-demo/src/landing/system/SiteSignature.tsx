@@ -1,12 +1,12 @@
 import css from './SiteSignature.module.css';
 
 /**
- * SiteSignature — the author's imprint, identical on every page (landing, docs, verify).
+ * SiteSignature - the author's imprint, identical on every page (landing, docs, verify).
  * Mirrors the colophon on vissarion's personal site: "Lovecrafted by · [sigil] · name".
  * Both the sigil and the name link out to the personal site.
  */
 
-// TODO(links): confirm the destination — defaulting to the email's domain for now.
+// TODO(links): confirm the destination - defaulting to the email's domain for now.
 const PERSONAL_SITE = 'https://zounarakis.com';
 
 export function SiteSignature() {
@@ -20,7 +20,7 @@ export function SiteSignature() {
           href={PERSONAL_SITE}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="Vissarion Zounarakis — personal site"
+          aria-label="Vissarion Zounarakis - personal site"
         >
           <picture>
             <source srcSet="/sigil/no-bg-seal-sigil.webp" type="image/webp" />

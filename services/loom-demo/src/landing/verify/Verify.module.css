@@ -1,4 +1,4 @@
-/* TrueRolls — client-side verify page. Premium dark precision, token-only. */
+/* TrueRolls - client-side verify page. Premium dark precision, token-only. */
 
 .page {
   min-height: 100vh;
@@ -485,7 +485,7 @@
   color: var(--kd-fail);
 }
 
-/* A check that did not run — neutral, never styled as pass or fail. */
+/* A check that did not run - neutral, never styled as pass or fail. */
 .checkUnknown .checkMark,
 .checkUnknown .checkState {
   color: var(--kd-text-muted);

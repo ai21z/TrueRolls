@@ -1,5 +1,5 @@
 /**
- * inkRect — a hand-drawn rectangle border, the rectangle twin of hyphaePath.
+ * inkRect - a hand-drawn rectangle border, the rectangle twin of hyphaePath.
  *
  * Bakes the pen quality (corner overshoot, a wavering edge) into the path itself,
  * seeded deterministically so a given box is stable but no two are quite identical.

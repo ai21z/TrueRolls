@@ -4,7 +4,7 @@ Operational helpers for local verification. These are deterministic: every
 assertion is an exact equality, and they fail loudly (non-zero exit) rather
 than reporting false success.
 
-## `dev-up.ps1` / `dev-down.ps1` — one-command local stack
+## `dev-up.ps1` / `dev-down.ps1` - one-command local stack
 
 `dev-up.ps1` brings the whole stack up in the correct order and leaves kd-api
 running detached, then prints next steps:
@@ -19,17 +19,17 @@ pwsh -File scripts/dev-down.ps1 -Volumes # also wipe volumes
 It enforces the ordering that previously caused friction:
 
 1. `docker compose up` → wait until Postgres/Redis/MinIO are **healthy**.
-2. `sqlx migrate run` **before** building — kd-api's `sqlx::query!` macros
+2. `sqlx migrate run` **before** building - kd-api's `sqlx::query!` macros
    validate against the live DB at *compile* time, so the schema must exist
    first.
 3. create the S3 bucket (idempotent).
-4. `cargo build -p kd-api` (**debug** — reuses the already-compiled
+4. `cargo build -p kd-api` (**debug** - reuses the already-compiled
    `aws-lc-sys` artifact).
 5. launch `target/debug/kd-api.exe` **detached** (not `cargo run`, so a later
    `cargo test` never collides with the Windows exe lock).
 6. health-gate `/healthz`.
 
-Signing uses the **public test key** (`kid test-kid-1`) — never production.
+Signing uses the **public test key** (`kid test-kid-1`) - never production.
 
 ### Build-tooling note (NASM / cmake)
 
@@ -43,7 +43,7 @@ generating one requires `cargo check` to succeed. Install NASM + cmake (or
 switch the TLS backend off `aws-lc`) to enable release builds and an offline
 sqlx cache.
 
-## `tamper-demo.ps1` — end-to-end trust-spine proof
+## `tamper-demo.ps1` - end-to-end trust-spine proof
 
 Proves, against a running `kd-api`, that a signed receipt verifies VALID and
 that a single tampered field is rejected both offline (`kd verify --receipt`)

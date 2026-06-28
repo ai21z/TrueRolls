@@ -41,7 +41,7 @@
 }
 
 /* ── The face readout: the FILLED twin of the trust panel's empty SeedSocket.
-   The same rooting-seed specimen — engraved aura, void socket, ember, roots — but
+   The same rooting-seed specimen - engraved aura, void socket, ember, roots - but
    the live result lands in it. Goes broken+red when the die is tampered anywhere. ── */
 .seed {
   display: block;

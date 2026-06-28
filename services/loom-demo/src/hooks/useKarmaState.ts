@@ -131,11 +131,11 @@ export function useKarmaState() {
           res.metrics_ok;
         status = allOk ? 'verified_server' : 'mismatch';
         detail = allOk
-          ? 'VALID proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. VALID does not prove the published outcome was unbiased: the operator can still grind — privately fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed fairness is the v2 protocol.'
+          ? 'VALID proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. VALID does not prove the published outcome was unbiased: the operator can still grind - privately fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed fairness is the v2 protocol.'
           : (res.errors ?? []).join('; ');
       } else if (!isMock && entry.v === 'truerolls-1' && entry.sig) {
         // Signed live receipt → POST /v1/verify with the full ReceiptV2 body.
-        // Check rows are derived 1:1 from the server response — never fabricated.
+        // Check rows are derived 1:1 from the server response - never fabricated.
         const res = await postVerifyReceipt(buildReceiptBody(entry));
         checks = [
           { id: 'signature', label: 'Signature (Ed25519)', ok: res.valid_signature },
@@ -171,7 +171,7 @@ export function useKarmaState() {
         await postVerify(entry.id);
         checks = [];
         status = 'verified_local';
-        detail = 'DEMO — no cryptographic verification performed';
+        detail = 'DEMO - no cryptographic verification performed';
       }
 
       setRolls((prev) =>

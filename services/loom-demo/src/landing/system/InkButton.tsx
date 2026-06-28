@@ -2,7 +2,7 @@ import { type ButtonHTMLAttributes } from 'react';
 import { InkFrame } from './InkFrame';
 
 /**
- * InkButton — a button whose border is drawn by hand. Wraps a real <button> in an
+ * InkButton - a button whose border is drawn by hand. Wraps a real <button> in an
  * inline InkFrame so the element stays a focusable, interactive button (its
  * :focus-visible ring and hover still work); only the border becomes inked.
  *

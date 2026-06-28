@@ -3,17 +3,17 @@ import type { Die } from '../types/kd';
 /**
  * Display constants only. All math (softmax, guard solving, KL/EV,
  * prefix-CDF sampling) lives in kd-core and is consumed through the
- * kd-core-wasm engine (see src/api/wasmEngine.ts) — no math duplication here.
+ * kd-core-wasm engine (see src/api/wasmEngine.ts) - no math duplication here.
  */
 
-/** KL divergence caps (nats) per die size — from spec v1.3.1. */
+/** KL divergence caps (nats) per die size - from spec v1.3.1. */
 export const KL_CAPS: Record<Die, number> = {
   d6: 0.060,
   d20: 0.035,
   d100: 0.025,
 };
 
-/** EV cap expressed as fraction of uniform SD — from spec v1.3.1. */
+/** EV cap expressed as fraction of uniform SD - from spec v1.3.1. */
 export const EV_CAP_SIGMA = 0.20;
 
 /** Face count per die. */

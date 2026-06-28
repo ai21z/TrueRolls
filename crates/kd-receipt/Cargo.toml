@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Shared offline ReceiptV2 verifier (Ed25519 + JCS + RNG replay + math recompute) over kd-core — one engine for CLI and browser"
+description = "Shared offline ReceiptV2 verifier (Ed25519 + JCS + RNG replay + math recompute) over kd-core - one engine for CLI and browser"
 
 [dependencies]
 kd-core = { path = "../kd-core" }

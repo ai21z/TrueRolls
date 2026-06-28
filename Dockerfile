@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# TrueRolls kd-api — multi-stage Linux image.
+# TrueRolls kd-api - multi-stage Linux image.
 #
 # Build from the WORKSPACE ROOT (context = repo root): kd-api depends on the `kd-core`
 # path crate and the workspace `Cargo.lock`, so the whole workspace must be present.
@@ -7,7 +7,7 @@
 #
 # Reproducible & DB-free: SQLX_OFFLINE=true uses the committed `.sqlx/` query cache, so the
 # build needs no Postgres. aws-lc-sys (pulled via rustls / aws-lc-rs) needs cmake + a C
-# toolchain + perl on Linux — NOT NASM (NASM is only required on Windows).
+# toolchain + perl on Linux - NOT NASM (NASM is only required on Windows).
 #
 # Note: this is a correct, simple build. A future optimization (cargo-chef or a
 # Cargo.toml-first dependency layer) would cache dependency compilation across source

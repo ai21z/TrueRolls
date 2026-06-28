@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// §3.2 — dev-witness frontier recorder (with the server role, on one clock).
+// §3.2 - dev-witness frontier recorder (with the server role, on one clock).
 //
 // Stands up one "server" role (its best/fastest relay) and `n` "witness" roles,
-// each pinned to a DISTINCT relay, and per round R records — on a SINGLE machine
-// clock so the common offset cancels in the reducer's window(R) — the wall-clock
+// each pinned to a DISTINCT relay, and per round R records - on a SINGLE machine
+// clock so the common offset cancels in the reducer's window(R) - the wall-clock
 // time each role first SEES and BLS-VERIFIES round R (`t_server`, `t_w`). Every
 // sample is verified against the PINNED quicknet group key (lib/drand-bls.mjs);
 // a fast-but-unverified σ is recorded as blsOk:false and treated by the reducer as
@@ -15,10 +15,10 @@
 //
 // HONEST LIMIT (same as §3.1): one host varies the RELAY per witness and can add a
 // deliberate per-witness delay to STRESS the skew tail, but it CANNOT manufacture
-// real ASN/region/operator independence — that is operational (v2-spec §9.1), not
+// real ASN/region/operator independence - that is operational (v2-spec §9.1), not
 // measured here. This rig characterises relay-path skew, not witness independence.
 //
-// window(R) and exploitable_fraction are NOT computed here — that is reduce/window.mjs.
+// window(R) and exploitable_fraction are NOT computed here - that is reduce/window.mjs.
 //
 // Run:  node witness/witness.mjs            (Node 20+, dep: @noble/curves)
 // Env:  ROUNDS=20 POLL_MS=80 DEADLINE_PERIODS=4 OUT=witness-frontier.jsonl

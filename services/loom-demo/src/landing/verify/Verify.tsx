@@ -15,8 +15,8 @@ import {
 import css from './Verify.module.css';
 
 /**
- * Client-side receipt verifier. The entire verdict — Ed25519 signature, DRBG
- * sampling replay, face, and metric caps — is computed in the browser by the
+ * Client-side receipt verifier. The entire verdict - Ed25519 signature, DRBG
+ * sampling replay, face, and metric caps - is computed in the browser by the
  * shared kd_receipt engine (wasm), the same code `kd verify --receipt` runs.
  * No receipt or key ever leaves the page.
  */
@@ -24,7 +24,7 @@ import css from './Verify.module.css';
 // A signed sample receipt (kd-api ReceiptV2, d20 κ=0.6) so a first-time visitor
 // can verify something instantly. It is a verbatim copy of the committed golden
 // `goldens/golden_receipt_01_d20.json`, signed by the PUBLIC test key below
-// — never a production signer. If the goldens are ever regenerated, this sample
+// - never a production signer. If the goldens are ever regenerated, this sample
 // will visibly verify as INVALID on load (the mount auto-verify is the canary);
 // re-copy the golden when that happens.
 const SAMPLE_RECEIPT = `{
@@ -166,7 +166,7 @@ export function Verify() {
       try {
         keys = (await getTruerollsKeys()).keys;
       } catch {
-        /* no live API — the bundled demo key verifies the sample offline */
+        /* no live API - the bundled demo key verifies the sample offline */
       }
       if (cancelled) return;
       setWellKnownKeys(keys);
@@ -229,7 +229,7 @@ export function Verify() {
         setTimeout(() => setCopied(null), 1500);
       })
       .catch(() => {
-        /* clipboard blocked — no-op */
+        /* clipboard blocked - no-op */
       });
   };
 
@@ -505,7 +505,7 @@ export function Verify() {
           A VALID verdict proves the roll seed came from a verified public drand beacon when
           <code>proof.drand</code> is present, and the outcome replays from that seed. It also
           proves the receipt was signed by the holder of the key above. VALID does <b>not</b>{' '}
-          prove the published outcome was unbiased: the operator can still <b>grind</b> — privately
+          prove the published outcome was unbiased: the operator can still <b>grind</b> - privately
           fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed
           fairness is the v2 protocol, not this per-roll drand receipt.
         </p>

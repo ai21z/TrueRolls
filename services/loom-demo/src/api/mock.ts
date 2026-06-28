@@ -16,7 +16,7 @@ export async function mockRoll(die: Die, kappa: number): Promise<RollResponse> {
 
   // Single engine: guarded distribution + prefix-CDF face replay all come
   // from kd-core (wasm). The draw is a real random u64 and is recorded in
-  // proof.draw_u64 so the sampling step is honestly reproducible — but the
+  // proof.draw_u64 so the sampling step is honestly reproducible - but the
   // receipt stays clearly mock: zeroed drbg_key_hex, algo "mock", no sig.
   const draw = randomDrawU64();
   const { face, alpha, kl, ev, drawU64 } = computeRollReplayWasm(die, kappa, draw);
@@ -50,7 +50,7 @@ export async function mockVerify(): Promise<VerifyResponse> {
   return {
     verdict: 'OK',
     mismatches: [],
-    warnings: ['mock mode — no real verification performed'],
+    warnings: ['mock mode - no real verification performed'],
     recomputed: { face: 0, alpha: 0, kl: 0, ev: 0 },
   };
 }

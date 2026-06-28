@@ -1,4 +1,4 @@
-//! GET /.well-known/truerolls-keys.json — public key discovery
+//! GET /.well-known/truerolls-keys.json - public key discovery
 
 use axum::{Json, extract::State};
 use serde::Serialize;

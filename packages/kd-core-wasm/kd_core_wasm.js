@@ -110,8 +110,8 @@ export function computeRollReplayJson(die, kappa, draw) {
 }
 
 /**
- * Verify a signed TrueRolls receipt entirely client-side — Ed25519 signature,
- * DRBG sampling replay, face, and metric caps — using the shared `kd_receipt`
+ * Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
+ * DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
  * engine (identical to `kd verify --receipt`).
  *
  * - `receiptJson`: the raw receipt JSON string.
