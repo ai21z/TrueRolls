@@ -1,4 +1,4 @@
-# TrueRolls — Threat model & honest limits
+# TrueRolls - Threat model & honest limits
 
 This document states what a TrueRolls receipt proves today and what it does not. Claims here are grounded in the shipping verifier/signing code (`crates/kd-receipt`), the drand verifier/derivation layer (`crates/kd-drand`), and the server integration (`crates/kd-api`).
 
@@ -8,16 +8,16 @@ TrueRolls is proprietary software; all rights reserved. "You can run the verifie
 
 Live TrueRolls rolls mint `truerolls-drand-1` receipts. A receipt that verifies `VALID` proves:
 
-1. **Tamper-evidence** — the receipt is bit-for-bit what the server's Ed25519 key signed.
-2. **Drand seed provenance** — the roll seed re-derives from a BLS-verified drand quicknet target pulse, with `target_round = client_observed_round + 2`.
-3. **Deterministic replay** — the draw, face, and metrics reproduce from the receipt.
-4. **Bounded behavior-weighting** — the distribution is guard-capped by KL/EV limits, and out-of-range `kappa` is refused.
+1. **Tamper-evidence** - the receipt is bit-for-bit what the server's Ed25519 key signed.
+2. **Drand seed provenance** - the roll seed re-derives from a BLS-verified drand quicknet target pulse, with `target_round = client_observed_round + 2`.
+3. **Deterministic replay** - the draw, face, and metrics reproduce from the receipt.
+4. **Bounded behavior-weighting** - the distribution is guard-capped by KL/EV limits, and out-of-range `kappa` is refused.
 
-It does **not** prove the published outcome was unbiased: because the operator's attempt is not publicly committed before the target round resolves, it can still **grind** — privately fail/suppress unfavorable attempts and publish only a favorable completed receipt (withholding/refusal is the mechanism). Strict witnessed fairness — one committed attempt per roll — is the v2 protocol, not this per-roll drand receipt.
+It does **not** prove the published outcome was unbiased: because the operator's attempt is not publicly committed before the target round resolves, it can still **grind** - privately fail/suppress unfavorable attempts and publish only a favorable completed receipt (withholding/refusal is the mechanism). Strict witnessed fairness - one committed attempt per roll - is the v2 protocol, not this per-roll drand receipt.
 
 ## Receipt versions
 
-### `truerolls-drand-1` — live product
+### `truerolls-drand-1` - live product
 
 The live roll endpoint requires:
 
@@ -30,7 +30,7 @@ The server verifies the client-observed pulse, verifies the target formula, wait
 
 The receipt carries the drand proof so offline verifiers can repeat the same checks.
 
-### `truerolls-1` — legacy saved receipts
+### `truerolls-1` - legacy saved receipts
 
 Legacy receipts remain verifiable for goldens and older saved artifacts. They prove signature, replay, face, and metrics, but they do not carry drand provenance.
 
@@ -83,7 +83,28 @@ The verifier reseeds ChaCha20 from `proof.rng.drbg_key_hex`, takes one `next_u64
 | Authentication on roll/verify endpoints | **Not implemented** |
 | Strict public adversarial fairness | **v2 protocol, not live product** |
 
-Per-roll drand removes the old "server just invented the seed" gap for completed receipts: the seed must re-derive from a verified future drand pulse and the client request binding. It does **not** make the server publicly accountable for attempts it refused to complete — so the operator can still **grind**: try one or many attempts privately and publish only a favorable completed receipt. The seed of any *published* receipt is honest; the *choice* of which to publish is not constrained.
+Per-roll drand removes the old "server just invented the seed" gap for completed receipts: the seed must re-derive from a verified future drand pulse and the client request binding. It does **not** make the server publicly accountable for attempts it refused to complete - so the operator can still **grind**: try one or many attempts privately and publish only a favorable completed receipt. The seed of any *published* receipt is honest; the *choice* of which to publish is not constrained.
+
+## External fairness-standard mapping
+
+This is a design comparison, not a product classification. If TrueRolls is ever positioned in a
+gambling-adjacent or regulated-game context, the current `truerolls-drand-1` receipt should be mapped
+honestly against the UK Gambling Commission's RTS 7 standard for random outcomes.
+
+The important RTS 7 point is the no-discard rule. RTS 7B says random inputs should be used in the
+order received and should not be discarded due to adaptive behaviour, except when they fall outside
+the expected range and the event is logged and investigated. RTS 7A also says external-event outcomes
+for lotteries should be unpredictable, externally verifiable, and unable to be influenced by the
+operator. Source: UK Gambling Commission, "RTS 7 - Generation of random outcomes", last updated
+2024-05-07:
+https://www.gamblingcommission.gov.uk/standards/remote-gambling-and-software-technical-standards/rts-7-generation-of-random-outcomes
+
+Current per-roll drand satisfies the **external provenance** side for completed receipts: the target
+pulse is public, BLS-verified, pinned to quicknet, and replayable offline. It does **not** satisfy the
+**no-discard / operator-uninfluenceable** side because the operator is not publicly committed to one
+attempt before the target pulse resolves. A timeout, refusal, or suppressed receipt can hide the
+discard of an unfavorable outcome. That is the exact gap v2 witnessed commitments are designed to
+close.
 
 ## Remaining operator powers
 
@@ -127,4 +148,4 @@ That is why the public claim is "drand-backed seed provenance and replay," not "
 2. Run the offline verifier: browser WASM, CLI `kd verify --receipt`, or `POST /v1/verify`.
 3. Accept the receipt only if all reported checks are true.
 
-For `truerolls-drand-1`, a `VALID` verdict means: signed, drand-backed, seed-replayed, face-replayed, and bounded-math-replayed. It does not mean the published outcome was unbiased — the operator can still grind by failing/suppressing unfavorable attempts and publishing only favorable completed receipts.
+For `truerolls-drand-1`, a `VALID` verdict means: signed, drand-backed, seed-replayed, face-replayed, and bounded-math-replayed. It does not mean the published outcome was unbiased - the operator can still grind by failing/suppressing unfavorable attempts and publishing only favorable completed receipts.
