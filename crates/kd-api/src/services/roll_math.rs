@@ -123,6 +123,7 @@ pub fn compute_roll(die: &str, kappa: f64, _seed: Option<&str>) -> anyhow::Resul
 }
 
 /// Internal enum to hold Output<N> of any supported die; lets us extract common scalars.
+#[allow(clippy::large_enum_variant)]
 enum OutAny {
     D6(Output<6>),
     D20(Output<20>),

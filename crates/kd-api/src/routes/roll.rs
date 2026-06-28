@@ -178,12 +178,12 @@ pub async fn post_roll(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.trim().to_owned());
 
-    if let (Some(h), Some(b)) = (header_key.as_deref(), req.idempotency_key.as_deref()) {
-        if h != b {
-            return Err(bad_request(
-                "Idempotency-Key header and body.idempotency_key differ",
-            ));
-        }
+    if let (Some(h), Some(b)) = (header_key.as_deref(), req.idempotency_key.as_deref())
+        && h != b
+    {
+        return Err(bad_request(
+            "Idempotency-Key header and body.idempotency_key differ",
+        ));
     }
 
     let idem_key = header_key
@@ -235,11 +235,11 @@ pub async fn post_roll(
         if let Some(row) = row_opt {
             info!(event = "idem.dedup.hit", key_hash = %key_hash);
 
-            if let Some(stored) = row.idem_payload_sha256 {
-                if stored != payload_sha {
-                    warn!(event = "idem.dedup.mismatch", key_hash = %key_hash);
-                    return Err(conflict("Idempotency-Key was used with a different body"));
-                }
+            if let Some(stored) = row.idem_payload_sha256
+                && stored != payload_sha
+            {
+                warn!(event = "idem.dedup.mismatch", key_hash = %key_hash);
+                return Err(conflict("Idempotency-Key was used with a different body"));
             }
 
             let mut receipt = row.receipt_json;
@@ -268,7 +268,7 @@ pub async fn post_roll(
         let processing = ProcessingResponse {
             status: "processing",
             idem_key: &idem_key,
-            retry_hint_ms: state.cfg.idem_poll_ms as u64,
+            retry_hint_ms: state.cfg.idem_poll_ms,
         };
         return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
     }
@@ -303,12 +303,11 @@ pub async fn post_roll(
     };
     let drbg_key = kd_drand::derive_roll_seed(&seed_input)
         .map_err(|e| internal(format!("drand seed derivation failed: {e}")))?;
-    let mut rng = rand_chacha::ChaCha20Rng::from_seed(drbg_key);
-
-    let result =
+    let result = {
+        let mut rng = rand_chacha::ChaCha20Rng::from_seed(drbg_key);
         compute_roll_with_rng_labeled(&req.die, req.kappa, &mut rng, None, kd_drand::RNG_ALGO)
-            .map_err(internal)?;
-    drop(rng); // ensure RNG is dropped before any await below
+            .map_err(internal)?
+    };
 
     // ---- attach RNG provenance into transcript ------------------------------
     // Ensure both:

@@ -24,7 +24,7 @@ Read these before integrating - they bound what the API guarantees.
 ## Conventions
 
 - **Base path:** roll/verify endpoints live under `/v1`. `/healthz` and `/.well-known/*` are unversioned.
-- **Content types:** request and success bodies are `application/json`. Error bodies (400 / 404 / 409 / 422 / 500) are **plain-text messages**, not JSON. (The 422 legacy-verify body is a special case - see that endpoint.)
+- **Content types:** request and success bodies are `application/json`. Most validation/storage error bodies (400 / 404 / 409 / 422 / 500) are **plain-text messages**, not JSON. Protective overload/timeout responses are JSON - see `POST /v1/roll`. (The 422 legacy-verify body is a special case - see that endpoint.)
 - **Dice:** the roll path accepts `d6`, `d20`, `d100`. The receipt verifier's die parser additionally accepts `d4`, `d8`, `d10`, `d12`, but only `d6` / `d20` / `d100` are reachable through `POST /v1/roll`.
 - **kappa (`κ`):** a signed stance. It is validated to be **finite and in `[-1, 1]`** on `POST /v1/roll` and on the **legacy** verify paths. In **receipt** verify mode κ is *not* range-checked at the request layer; an out-of-range κ instead fails inside the math recompute and is returned as a `400` (see receipt mode below).
 - **`draw_u64`** is a **stringified `u64`** everywhere it appears (JSON numbers cannot represent every `u64` exactly).
@@ -165,6 +165,10 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 
 - **`400`** - invalid `die`; `kappa` non-finite or outside `[-1, 1]`; missing/invalid `client_nonce`; missing/invalid drand proof; stale client drand frontier; target round not equal to observed+2; target round not future versus the API's freshness frontier; legacy `seed` present; or header/body idempotency keys both present and different. Plain text.
 - **`409`** - idempotency key reused with a different payload. Plain text.
+- **`413`** - POST body exceeds the `POST /v1/roll` body cap.
+- **`429`** - per-client-IP token bucket exhausted. Carries `x-ratelimit-after` from `tower_governor`.
+- **`503`** - global in-flight roll limit is saturated. JSON: `{ "error": "overloaded" }`; includes `Retry-After: 1`.
+- **`504`** - whole-roll handler timeout. JSON: `{ "error": "timeout" }`; includes `Retry-After: 1`.
 - **`500`** - DB / Redis / object-store failure. Plain text.
 
 **Drand derivation note.** The browser observes a quicknet frontier and sends a client nonce plus `target_round = observed_round + 2`. The API verifies the observed pulse, rejects targets that are not future versus `max(server latest relay round, local wall-clock quicknet schedule round)`, waits for the target pulse, verifies the target BLS signature, computes `randomness = SHA256(signature)`, and derives the 32-byte ChaCha20 seed with HKDF-SHA256 bound to the canonical request hash. There is no production fallback to local server RNG in drand mode.
@@ -399,6 +403,6 @@ To verify a receipt offline: take its `sig.kid`, look up the matching `public_ke
 
 These are points where the OpenAPI reference and the running code diverge. **The code is authoritative.**
 
-- **Rate limiting / `429` is undocumented in OpenAPI.** The code applies a per-IP token-bucket limiter (`tower_governor`, `SmartIpKeyExtractor`) scoped to `POST /v1/roll` only - all other routes pass through (covered by the router's own tests). When the limit is exceeded the request gets **`429 Too Many Requests`**. Per `tower_governor`'s behavior (and the router's inline documentation) the rejection carries an `x-ratelimit-after` header (seconds) rather than `Retry-After`; confirm against your deployment. The IP extractor trusts `X-Forwarded-For` / `X-Real-IP` / `Forwarded`, so it is only meaningful **behind a trusted proxy** - a direct client can spoof those headers. Treat this as an abuse throttle, not access control.
+- **Rate limiting and L2 overload statuses are undocumented in OpenAPI.** The code applies a per-IP token-bucket limiter (`tower_governor`) scoped to `POST /v1/roll` only. It now keys the client IP through `KD_TRUSTED_PROXY`: default `peer` ignores forwarded headers, `xff:<hops>` takes the Nth IP from the right, and `cloudflare` / `fly` read the provider's authoritative client-IP header. Under `KD_ENV=prod`, `peer` mode fails closed unless `KD_ALLOW_PEER_IP=1` is set deliberately. When the token bucket is exceeded the request gets **`429 Too Many Requests`** with `x-ratelimit-after`. Separately, `POST /v1/roll` has a body cap, global in-flight cap, and whole-handler timeout; overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. GET roll lookup, verify, health, drand health, and well-known routes are not wrapped in the heavy stack. Treat all of this as abuse/load protection, not authentication.
 
-Aside from `429`, the OpenAPI's endpoint set, request/response shapes, status codes, and the documented quirks (the 200-on-failed-check receipt path, the 422 plain-text-JSON-string legacy body, the receipt-vs-legacy response asymmetry) match the code at the time of writing. Note that example key ids and crypto values in both this doc and the OpenAPI are placeholders, not code constants.
+Aside from the rate-limit/body-cap/overload statuses named above, the OpenAPI's endpoint set, request/response shapes, status codes, and the documented quirks (the 200-on-failed-check receipt path, the 422 plain-text-JSON-string legacy body, the receipt-vs-legacy response asymmetry) match the code at the time of writing. Note that example key ids and crypto values in both this doc and the OpenAPI are placeholders, not code constants.

@@ -28,6 +28,40 @@ impl EnvProfile {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrustedProxy {
+    Peer,
+    Xff(u8),
+    Cloudflare,
+    Fly,
+}
+
+impl TrustedProxy {
+    pub fn from_env_str(s: Option<&str>) -> Result<Self, AppError> {
+        let raw = s.unwrap_or("").trim().to_ascii_lowercase();
+        match raw.as_str() {
+            "" | "none" | "peer" => Ok(Self::Peer),
+            "cloudflare" | "cf" => Ok(Self::Cloudflare),
+            "fly" => Ok(Self::Fly),
+            _ if raw.starts_with("xff:") => {
+                let hops = raw
+                    .strip_prefix("xff:")
+                    .and_then(|v| v.parse::<u8>().ok())
+                    .filter(|v| *v >= 1)
+                    .ok_or_else(|| bad_request("KD_TRUSTED_PROXY xff hop count must be >= 1"))?;
+                Ok(Self::Xff(hops))
+            }
+            _ => Err(bad_request(format!(
+                "KD_TRUSTED_PROXY must be peer, xff:<hops>, cloudflare, or fly; got '{raw}'"
+            ))),
+        }
+    }
+
+    pub fn ignores_forwarded_headers(self) -> bool {
+        matches!(self, Self::Peer)
+    }
+}
+
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct Config {
@@ -62,6 +96,16 @@ pub struct Config {
     pub drand_client_max_lag_rounds: u64,
     /// Max wall-clock time to wait for the future target drand round to publish.
     pub drand_target_wait_ms: u64,
+    /// Source of the client IP used by the `POST /v1/roll` rate limiter.
+    pub trusted_proxy: TrustedProxy,
+    /// Explicit production opt-in for peer-IP rate limiting with no trusted proxy.
+    pub allow_peer_ip_in_prod: bool,
+    /// Global max concurrent in-flight `POST /v1/roll` requests.
+    pub roll_max_inflight: usize,
+    /// Max Postgres connections. Size deliberately with `roll_max_inflight`.
+    pub db_max_connections: u32,
+    /// Whole-handler timeout for `POST /v1/roll`.
+    pub roll_timeout_ms: u64,
 }
 
 impl Config {
@@ -88,6 +132,9 @@ impl Config {
         let public_base_url =
             env::var("KD_PUBLIC_BASE_URL").unwrap_or_else(|_| format!("http://{}:{}", host, port));
         let env_profile = EnvProfile::from_env_str(env::var("KD_ENV").ok().as_deref());
+        let trusted_proxy =
+            TrustedProxy::from_env_str(env::var("KD_TRUSTED_PROXY").ok().as_deref())?;
+        let allow_peer_ip_in_prod = env_truthy("KD_ALLOW_PEER_IP");
         let roll_rl_period_secs = env::var("KD_ROLL_RL_PERIOD_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -120,6 +167,25 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(12_000)
             .max(1_000);
+        let roll_max_inflight = env::var("KD_ROLL_MAX_INFLIGHT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(32)
+            .max(1);
+        let db_max_connections = env::var("KD_DB_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5)
+            .max(1);
+        let computed_roll_timeout_ms = drand_target_wait_ms
+            + (drand_relays.len() as u64) * 2 * drand_timeout_ms
+            + 2 * drand_timeout_ms
+            + 2_000;
+        let roll_timeout_ms = env::var("KD_ROLL_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(computed_roll_timeout_ms)
+            .max(1_000);
 
         Ok(Self {
             host,
@@ -143,6 +209,11 @@ impl Config {
             drand_timeout_ms,
             drand_client_max_lag_rounds,
             drand_target_wait_ms,
+            trusted_proxy,
+            allow_peer_ip_in_prod,
+            roll_max_inflight,
+            db_max_connections,
+            roll_timeout_ms,
         })
     }
 
@@ -157,12 +228,28 @@ impl Config {
                 self.signing_kid.as_deref(),
             )
             .map_err(internal)?;
+            if self.trusted_proxy.ignores_forwarded_headers() && !self.allow_peer_ip_in_prod {
+                return Err(internal(
+                    "KD_TRUSTED_PROXY is unset/peer in prod. Set peer, xff:<hops>, cloudflare, or fly. To intentionally run peer-IP keyed in prod, set KD_ALLOW_PEER_IP=1.",
+                ));
+            }
         }
         if self.drand_relays.is_empty() {
             return Err(bad_request("DRAND_RELAYS must contain at least one relay"));
         }
         Ok(())
     }
+}
+
+fn env_truthy(name: &str) -> bool {
+    matches!(
+        env::var(name)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "y" | "on"
+    )
 }
 
 #[cfg(test)]
@@ -220,6 +307,11 @@ mod tests {
             drand_timeout_ms: 2500,
             drand_client_max_lag_rounds: 2,
             drand_target_wait_ms: 12_000,
+            trusted_proxy: TrustedProxy::Peer,
+            allow_peer_ip_in_prod: true,
+            roll_max_inflight: 32,
+            db_max_connections: 5,
+            roll_timeout_ms: 34_000,
         }
     }
 
@@ -262,6 +354,69 @@ mod tests {
             Some(PUBLISHED_TEST_SEED_HEX),
             Some("test-kid-1"),
         );
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn trusted_proxy_parsing_is_fail_closed() {
+        assert_eq!(
+            TrustedProxy::from_env_str(None).unwrap(),
+            TrustedProxy::Peer
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("")).unwrap(),
+            TrustedProxy::Peer
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("peer")).unwrap(),
+            TrustedProxy::Peer
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("none")).unwrap(),
+            TrustedProxy::Peer
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("xff:2")).unwrap(),
+            TrustedProxy::Xff(2)
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("cloudflare")).unwrap(),
+            TrustedProxy::Cloudflare
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("cf")).unwrap(),
+            TrustedProxy::Cloudflare
+        );
+        assert_eq!(
+            TrustedProxy::from_env_str(Some("fly")).unwrap(),
+            TrustedProxy::Fly
+        );
+        assert!(TrustedProxy::from_env_str(Some("xff:0")).is_err());
+        assert!(TrustedProxy::from_env_str(Some("xff:nope")).is_err());
+        assert!(TrustedProxy::from_env_str(Some("smart")).is_err());
+    }
+
+    #[test]
+    fn prod_rejects_peer_ip_mode_unless_explicitly_allowed() {
+        let mut c = cfg_with(
+            EnvProfile::Prod,
+            Some(FRESH_SEED_HEX),
+            Some("truerolls-prod-1"),
+        );
+        c.trusted_proxy = TrustedProxy::Peer;
+        c.allow_peer_ip_in_prod = false;
+
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("KD_TRUSTED_PROXY"),
+            "prod peer mode without explicit opt-in must fail closed, got: {err}"
+        );
+
+        c.allow_peer_ip_in_prod = true;
+        assert!(c.validate().is_ok());
+
+        c.allow_peer_ip_in_prod = false;
+        c.trusted_proxy = TrustedProxy::Xff(1);
         assert!(c.validate().is_ok());
     }
 }

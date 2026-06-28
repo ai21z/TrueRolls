@@ -29,7 +29,7 @@ pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
     cfg.validate()?;
 
     let pg = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(cfg.db_max_connections)
         .connect(&cfg.database_url)
         .await
         .map_err(internal)?;
@@ -83,7 +83,7 @@ pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::EnvProfile;
+    use crate::config::{EnvProfile, TrustedProxy};
     use crate::services::signing::PUBLISHED_TEST_SEED_HEX;
 
     /// A Config that violates SIG-2 (prod + published test seed) with EMPTY connection
@@ -114,6 +114,11 @@ mod tests {
             drand_timeout_ms: 2500,
             drand_client_max_lag_rounds: 2,
             drand_target_wait_ms: 12_000,
+            trusted_proxy: TrustedProxy::Peer,
+            allow_peer_ip_in_prod: true,
+            roll_max_inflight: 32,
+            db_max_connections: 5,
+            roll_timeout_ms: 34_000,
         }
     }
 
