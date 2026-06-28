@@ -119,6 +119,9 @@ mod tests {
             roll_max_inflight: 32,
             db_max_connections: 5,
             roll_timeout_ms: 34_000,
+            roll_global_cap: 0,
+            roll_global_cap_window_secs: 3_600,
+            allow_uncapped_roll_in_prod: true,
         }
     }
 

@@ -10,6 +10,7 @@ mod services {
     pub mod db;
     pub mod drand;
     pub mod idempotency;
+    pub mod quota;
     pub mod roll_math;
     pub mod s3;
     pub mod signing;

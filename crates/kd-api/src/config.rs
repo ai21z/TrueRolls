@@ -5,7 +5,7 @@ use std::{env, net::IpAddr};
 
 /// Deployment profile, parsed from `KD_ENV`. `Prod` activates the SIG-2 guard
 /// (reject the published TEST signing seed/kid). **Fails closed:** only an explicit dev
-/// allowlist ⇒ `Dev`; everything else (incl. unknown values) ⇒ `Prod`.
+/// allowlist => `Dev`; everything else (incl. unknown values) => `Prod`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EnvProfile {
     Dev,
@@ -106,6 +106,13 @@ pub struct Config {
     pub db_max_connections: u32,
     /// Whole-handler timeout for `POST /v1/roll`.
     pub roll_timeout_ms: u64,
+    /// Global cap on receipts minted per window across ALL clients (`KD_ROLL_GLOBAL_CAP`).
+    /// `0` means uncapped. Bounds the unauthenticated signing endpoint's total cost (OPS-AUTH-01).
+    pub roll_global_cap: u64,
+    /// Fixed-window length for `roll_global_cap` (`KD_ROLL_GLOBAL_CAP_WINDOW_SECS`).
+    pub roll_global_cap_window_secs: u64,
+    /// Explicit production opt-out for running the roll endpoint uncapped (`KD_ALLOW_UNCAPPED_ROLL`).
+    pub allow_uncapped_roll_in_prod: bool,
 }
 
 impl Config {
@@ -186,6 +193,16 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(computed_roll_timeout_ms)
             .max(1_000);
+        let roll_global_cap = env::var("KD_ROLL_GLOBAL_CAP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let roll_global_cap_window_secs = env::var("KD_ROLL_GLOBAL_CAP_WINDOW_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3_600)
+            .max(1);
+        let allow_uncapped_roll_in_prod = env_truthy("KD_ALLOW_UNCAPPED_ROLL");
 
         Ok(Self {
             host,
@@ -214,6 +231,9 @@ impl Config {
             roll_max_inflight,
             db_max_connections,
             roll_timeout_ms,
+            roll_global_cap,
+            roll_global_cap_window_secs,
+            allow_uncapped_roll_in_prod,
         })
     }
 
@@ -231,6 +251,11 @@ impl Config {
             if self.trusted_proxy.ignores_forwarded_headers() && !self.allow_peer_ip_in_prod {
                 return Err(internal(
                     "KD_TRUSTED_PROXY is unset/peer in prod. Set peer, xff:<hops>, cloudflare, or fly. To intentionally run peer-IP keyed in prod, set KD_ALLOW_PEER_IP=1.",
+                ));
+            }
+            if self.roll_global_cap == 0 && !self.allow_uncapped_roll_in_prod {
+                return Err(internal(
+                    "KD_ROLL_GLOBAL_CAP is unset/0 in prod: the unauthenticated POST /v1/roll endpoint would mint signed receipts without a global ceiling. Set KD_ROLL_GLOBAL_CAP=<max mints per window>. To intentionally run uncapped, set KD_ALLOW_UNCAPPED_ROLL=1.",
                 ));
             }
         }
@@ -281,7 +306,7 @@ mod tests {
         );
         assert_eq!(EnvProfile::from_env_str(Some("  Prod  ")), EnvProfile::Prod);
         assert_eq!(EnvProfile::from_env_str(Some("staging")), EnvProfile::Prod);
-        assert_eq!(EnvProfile::from_env_str(Some("prdo")), EnvProfile::Prod); // typo ⇒ fail-closed
+        assert_eq!(EnvProfile::from_env_str(Some("prdo")), EnvProfile::Prod); // typo => fail-closed
     }
 
     fn cfg_with(profile: EnvProfile, secret: Option<&str>, kid: Option<&str>) -> Config {
@@ -312,6 +337,9 @@ mod tests {
             roll_max_inflight: 32,
             db_max_connections: 5,
             roll_timeout_ms: 34_000,
+            roll_global_cap: 0,
+            roll_global_cap_window_secs: 3_600,
+            allow_uncapped_roll_in_prod: true,
         }
     }
 
@@ -417,6 +445,46 @@ mod tests {
 
         c.allow_peer_ip_in_prod = false;
         c.trusted_proxy = TrustedProxy::Xff(1);
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn prod_requires_global_roll_cap_unless_explicitly_uncapped() {
+        // Fresh signer + a real proxy boundary, so SIG-2 and the proxy gate both pass and only
+        // the mint-cap gate is under test.
+        let mut c = cfg_with(
+            EnvProfile::Prod,
+            Some(FRESH_SEED_HEX),
+            Some("truerolls-prod-1"),
+        );
+        c.trusted_proxy = TrustedProxy::Xff(1);
+        c.allow_peer_ip_in_prod = false;
+
+        // Uncapped (0) without the explicit opt-out must refuse to boot.
+        c.roll_global_cap = 0;
+        c.allow_uncapped_roll_in_prod = false;
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("KD_ROLL_GLOBAL_CAP"),
+            "prod uncapped without opt-out must fail closed, got: {err}"
+        );
+
+        // A finite cap satisfies the gate.
+        c.roll_global_cap = 10_000;
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+
+        // Or an explicit uncapped opt-out.
+        c.roll_global_cap = 0;
+        c.allow_uncapped_roll_in_prod = true;
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    #[test]
+    fn dev_does_not_require_a_global_roll_cap() {
+        // Dev skips the gate (like SIG-2 and the proxy gate): uncapped is fine locally.
+        let mut c = cfg_with(EnvProfile::Dev, None, None);
+        c.roll_global_cap = 0;
+        c.allow_uncapped_roll_in_prod = false;
         assert!(c.validate().is_ok());
     }
 }

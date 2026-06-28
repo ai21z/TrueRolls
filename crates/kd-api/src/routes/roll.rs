@@ -19,7 +19,7 @@ use crate::models::dto::{
 };
 use crate::services::drand::{quicknet_wall_clock_frontier_round, validate_roll_drand_request};
 use crate::services::roll_math::compute_roll_with_rng_labeled;
-use crate::services::{db, idempotency, s3};
+use crate::services::{db, idempotency, quota, s3};
 use crate::state::AppState;
 use rand_core::SeedableRng;
 
@@ -121,7 +121,7 @@ fn to_api_response(bucket: &str, row: crate::models::db::RollRow) -> RollRespons
         kl: row.kl,
         created_at: row.created_at,
         transcript_key,
-        // For GETs, mark as deduplicated=true to signal “this is an existing roll”
+        // For GETs, mark as deduplicated=true to signal "this is an existing roll"
         deduplicated: true,
     }
 }
@@ -206,13 +206,14 @@ pub async fn post_roll(
     let payload_sha_hex = hex::encode(&payload_sha);
 
     // ---- acquire lock (SET NX EX) -------------------------------------------
-    let acquired = idempotency::acquire_lock(&state.redis, &redis_key, state.cfg.idem_ttl_secs)
+    let idem_lock = idempotency::acquire_lock(&state.redis, &redis_key, state.cfg.idem_ttl_secs)
         .await
         .map_err(internal)?;
+    let acquired = idem_lock.is_some();
     info!(event = "idem.lock", acquired, key_hash = %key_hash);
 
     // ---- dedup path ----------------------------------------------------------
-    if !acquired {
+    let Some(idem_lock) = idem_lock else {
         let pg_for_poll = state.pg.clone();
         let key_for_poll = idem_key.clone();
 
@@ -271,7 +272,7 @@ pub async fn post_roll(
             retry_hint_ms: state.cfg.idem_poll_ms,
         };
         return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
-    }
+    };
 
     // ---- drand: verify client frontier, wait for target, derive RNG ---------
     let server_latest = state
@@ -288,6 +289,71 @@ pub async fn post_roll(
         state.cfg.drand_client_max_lag_rounds,
     )
     .map_err(bad_request)?;
+
+    // ---- global mint cap: bound TOTAL receipts minted per window (OPS-AUTH-01) ----
+    // The drand proof is now validated and we hold the idempotency lock, so we are committed to a
+    // *new* mint. Reserve global budget here - AFTER validation (an invalid proof has already 400'd
+    // above without spending budget) and BEFORE the expensive target-round wait + signing + DB + S3
+    // - so the counter tracks validated reservation attempts at the mint-commit point, an over-cap
+    // request is rejected before the ~6s wait, and a legitimate idempotent retry (which dedups)
+    // never charges.
+    // Fail-closed: a Redis error -> 500 (the roll path already requires Redis for the idem lock).
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(internal)?
+        .as_secs();
+    match quota::reserve_mint(
+        &state.redis,
+        state.cfg.roll_global_cap,
+        state.cfg.roll_global_cap_window_secs,
+        now_unix,
+    )
+    .await
+    .map_err(internal)?
+    {
+        quota::MintReservation::Allowed { window_count } => {
+            info!(
+                event = "roll.mintcap.ok",
+                window_count,
+                cap = state.cfg.roll_global_cap
+            );
+        }
+        quota::MintReservation::Rejected {
+            window_count,
+            retry_after_secs,
+        } => {
+            warn!(
+                event = "roll.mintcap.exceeded",
+                window_count,
+                cap = state.cfg.roll_global_cap,
+                retry_after_secs
+            );
+            // No mint happened, so release the idempotency lock (unlike the normal post-mint
+            // flow, which keeps it to fence concurrent duplicates). This lets a retry of the SAME
+            // idem key succeed once the window resets, instead of polling to a 202 until TTL.
+            match idempotency::release_lock(&state.redis, &idem_lock).await {
+                Ok(true) => {
+                    info!(event = "idem.lock_released", key_hash = %key_hash);
+                }
+                Ok(false) => {
+                    warn!(
+                        event = "idem.lock_release_failed",
+                        key_hash = %key_hash,
+                        reason = "missing_or_owned_by_another_request"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        event = "idem.lock_release_failed",
+                        key_hash = %key_hash,
+                        error = %err
+                    );
+                }
+            }
+            return Ok(mint_cap_response(retry_after_secs));
+        }
+    }
+
     let target_pulse = state
         .drand
         .wait_for_round_verified(drand_req.target_round, state.cfg.drand_target_wait_ms)
@@ -464,6 +530,22 @@ pub async fn post_roll(
 }
 
 // -------------------- helpers ----------------------
+
+/// 429 Too Many Requests for a global-mint-cap rejection, with a `Retry-After` (seconds) pointing
+/// at the next window. Built inline (not via `AppError`) so it can carry the header, matching how
+/// the dedup path returns custom status codes directly.
+fn mint_cap_response(retry_after_secs: u64) -> axum::response::Response {
+    let mut resp = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(serde_json::json!({ "error": "global_roll_cap_exceeded" })),
+    )
+        .into_response();
+    if let Ok(value) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string()) {
+        resp.headers_mut()
+            .insert(axum::http::header::RETRY_AFTER, value);
+    }
+    resp
+}
 
 fn sha256_bytes(data: &[u8]) -> Vec<u8> {
     let mut h = Sha256::new();
