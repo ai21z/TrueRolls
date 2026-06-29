@@ -1,0 +1,43 @@
+{
+  "alpha": 0.3213648106902838,
+  "created_at": "2026-01-01T00:00:00Z",
+  "die": "d20",
+  "ev": 11.65325625845831,
+  "face": 2,
+  "id": "00000000-0000-0000-0000-00000000d123",
+  "kappa": 0.6,
+  "kl": 0.02011901380257613,
+  "proof": {
+    "drand": {
+      "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+      "client_nonce": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "client_observed_randomness_hex": "9f041d26fd999c82fabf50a22fc7e0be9b068623df1c00d7c8849cdf5da6d25f",
+      "client_observed_round": 121,
+      "client_observed_signature_hex": "add0b70bf54c5dacfc7289994e085c3a635442f524088b1734c908a4278b2567188d8fa569752d9b4d68e2ccd0e023bd",
+      "genesis_time": 1692803367,
+      "idem_payload_sha256_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "period_seconds": 3,
+      "public_key": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+      "scheme": "bls-unchained-g1-rfc9380",
+      "target_delay_rounds": 2,
+      "target_randomness_hex": "5d7a0b521754358360096abd05dbe9a182dc91ca47dc4628773135bf540254b5",
+      "target_round": 123,
+      "target_signature_hex": "b75c69d0b72a5d906e854e808ba7e2accb1542ac355ae486d591aa9d43765482e26cd02df835d3546d23c4b13e0dfc90"
+    },
+    "draw_u64": "1102664356705973204",
+    "math_param_version": "roll.math.v1",
+    "rng": {
+      "algo": "drand-quicknet+HKDF(SHA-256)->ChaCha20Rng",
+      "drbg_key_hex": "a5de8cd6e63465bdfe3f4a7e8b5eefbb639b1e6415549567db780e3cd91d62e0"
+    }
+  },
+  "receipt_hash": "sha256:e5fe3eb7d0381b546789cf5b7e4c177602b1a82782b826c7484756017f6343b3",
+  "sig": {
+    "alg": "Ed25519",
+    "canon": "JCS/RFC8785",
+    "kid": "test-kid-1",
+    "signature_b64": "9bPrOWv/V5CpvskkNecoU1xwC3LVw2rn+QRf6cK+MYYwBUDLLPbqRQr0mOVVq5j0w/HA5Bk9f5U16nTvDFtGAQ=="
+  },
+  "transcript_url": "/v1/roll/x/transcript",
+  "v": "truerolls-drand-1"
+}

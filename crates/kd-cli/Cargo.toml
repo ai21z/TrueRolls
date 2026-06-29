@@ -35,5 +35,10 @@ tempfile = "3"
 # Same version kd-api uses; signing deps (ed25519-dalek, serde_jcs, hex,
 # base64) are already regular [dependencies] and visible to test targets.
 sha2 = "0.10"
+# Drand golden fixtures (truerolls-drand-1): the generator builds a real
+# quicknet-backed receipt from pinned pulses, so kd-drand's pulse/seed types
+# are needed at test time. kd-receipt (the shared signer/verifier) is a regular
+# [dependency] above, so ReceiptSigner is already visible to test targets.
+kd-drand = { path = "../kd-drand" }
 
 

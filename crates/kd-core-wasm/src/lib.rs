@@ -414,6 +414,39 @@ mod tests {
     }
 
     #[test]
+    fn verify_receipt_json_drand_golden_is_valid() {
+        // truerolls-drand-1: real pinned quicknet pulses (rounds 121/123). The
+        // shared verifier - the same engine the browser runs via wasm - must
+        // accept it, INCLUDING the drand BLS pulse verification.
+        let out = verify_receipt_json_impl(
+            &golden_str("golden_receipt_03_d20_drand.json"),
+            &test_public_key_b64(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["verdict"], "VALID", "{out}");
+        assert_eq!(v["valid_signature"], true);
+        assert_eq!(v["valid_drand"], true);
+        assert_eq!(v["valid_sampling"], true);
+        assert_eq!(v["face_ok"], true);
+        assert_eq!(v["metrics_ok"], true);
+    }
+
+    #[test]
+    fn verify_receipt_json_drand_tampered_sig_isolates_bls_failure() {
+        // The Ed25519 signature still covers this body (valid_signature=true) and
+        // sampling/face/metrics all pass; ONLY the drand BLS pulse verify fails.
+        // Pins that the BLS rejection path is reached, not short-circuited.
+        let out = verify_receipt_json_impl(
+            &golden_str("golden_receipt_04_d20_drand_tampered_sig.json"),
+            &test_public_key_b64(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["verdict"], "INVALID", "{out}");
+        assert_eq!(v["valid_signature"], true);
+        assert_eq!(v["valid_drand"], false);
+    }
+
+    #[test]
     fn verify_receipt_json_unverifiable_is_error_not_panic() {
         // Malformed JSON and unsupported version both yield a structured ERROR.
         let bad_json = verify_receipt_json_impl("{not json", "");

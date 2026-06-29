@@ -29,6 +29,7 @@ use kd_core::{
     die::Die, distribution::compute_distribution, params::default_for_die,
     sample::prefix_cdf_index_from_u64,
 };
+use kd_receipt::ReceiptSigner;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
 use serde_json::{Value, json};
@@ -198,6 +199,114 @@ fn build_receipt_01() -> Value {
     receipt
 }
 
+/// Real pinned quicknet pulses used to build the drand goldens - the same
+/// genuine `bls-unchained-g1` fixtures kd-receipt's verifier tests use.
+fn quicknet_pulse(round: u64) -> kd_drand::DrandPulse {
+    match round {
+        121 => kd_drand::DrandPulse {
+            chain_hash: kd_drand::QUICKNET_CHAIN_HASH.to_string(),
+            round,
+            signature_hex: "add0b70bf54c5dacfc7289994e085c3a635442f524088b1734c908a4278b2567188d8fa569752d9b4d68e2ccd0e023bd".to_string(),
+            randomness_hex: "9f041d26fd999c82fabf50a22fc7e0be9b068623df1c00d7c8849cdf5da6d25f".to_string(),
+        },
+        123 => kd_drand::DrandPulse {
+            chain_hash: kd_drand::QUICKNET_CHAIN_HASH.to_string(),
+            round,
+            signature_hex: "b75c69d0b72a5d906e854e808ba7e2accb1542ac355ae486d591aa9d43765482e26cd02df835d3546d23c4b13e0dfc92".to_string(),
+            randomness_hex: "fb8f7bc29bf24db51871ec8c79f3a1e4bd0557bc0dfcee9ed1d924e69d1c60dc".to_string(),
+        },
+        _ => panic!("no quicknet fixture for round {round}"),
+    }
+}
+
+/// Build a signed `truerolls-drand-1` receipt golden from the pinned pulses.
+/// The honest drbg/draw/face are always derived from the REAL target signature.
+/// When `bad_target_sig` is set, only the PUBLISHED `target_signature_hex` is
+/// flipped (one nibble) so the body still signs cleanly under Ed25519 but the
+/// drand BLS pulse verify must fail - isolating the BLS check as the rejecter.
+fn build_receipt_drand(bad_target_sig: bool) -> Value {
+    let client_observed = quicknet_pulse(121);
+    let target = quicknet_pulse(123);
+    let client_nonce = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let idem = "11".repeat(32);
+
+    let seed_input = kd_drand::DrandSeedInput {
+        target_pulse: target.clone(),
+        client_nonce: client_nonce.to_string(),
+        die: "d20".to_string(),
+        kappa: 0.6,
+        idem_payload_sha256_hex: idem.clone(),
+    };
+    let drbg = kd_drand::derive_roll_seed(&seed_input).expect("drand seed derivation failed");
+    let draw = ChaCha20Rng::from_seed(drbg).next_u64();
+    let params = default_for_die(20);
+    let out =
+        compute_distribution::<20>(Die::<20>, 0.6, &params).expect("compute_distribution failed");
+    let face = (prefix_cdf_index_from_u64::<20>(&out.probs, draw) + 1) as u64;
+
+    let (published_target_sig, published_target_randomness) = if bad_target_sig {
+        // Flip one nibble of the target signature, AND set the published
+        // randomness to SHA256 of the flipped bytes so the randomness-consistency
+        // check still passes - leaving the BLS pairing verify as the sole failure.
+        let mut s = target.signature_hex.clone();
+        let last = s.pop().expect("signature hex is non-empty");
+        s.push(if last == '0' { '1' } else { '0' });
+        let flipped_bytes = hex::decode(&s).expect("flipped signature hex");
+        let randomness = hex::encode(Sha256::digest(&flipped_bytes));
+        (s, randomness)
+    } else {
+        (target.signature_hex.clone(), target.randomness_hex.clone())
+    };
+
+    let body = json!({
+        "v": kd_drand::DRAND_RECEIPT_VERSION,
+        "id": "00000000-0000-0000-0000-00000000d123",
+        "die": "d20",
+        "kappa": 0.6,
+        "face": face,
+        "alpha": out.alpha,
+        "kl": out.kl,
+        "ev": out.ev,
+        "created_at": "2026-01-01T00:00:00Z",
+        "transcript_url": "/v1/roll/x/transcript",
+        "proof": {
+            "math_param_version": kd_core::PARAM_VERSION,
+            "rng": { "drbg_key_hex": hex::encode(drbg), "algo": kd_drand::RNG_ALGO },
+            "draw_u64": draw.to_string(),
+            "drand": {
+                "chain_hash": kd_drand::QUICKNET_CHAIN_HASH,
+                "scheme": kd_drand::QUICKNET_SCHEME,
+                "public_key": kd_drand::QUICKNET_PUBLIC_KEY_HEX,
+                "period_seconds": kd_drand::QUICKNET_PERIOD_SECONDS,
+                "genesis_time": kd_drand::QUICKNET_GENESIS_TIME,
+                "target_delay_rounds": kd_drand::DEFAULT_TARGET_DELAY_ROUNDS,
+                "client_nonce": client_nonce,
+                "client_observed_round": client_observed.round,
+                "client_observed_signature_hex": client_observed.signature_hex,
+                "client_observed_randomness_hex": client_observed.randomness_hex,
+                "target_round": target.round,
+                "target_signature_hex": published_target_sig,
+                "target_randomness_hex": published_target_randomness,
+                "idem_payload_sha256_hex": idem
+            }
+        },
+    });
+
+    let signer = ReceiptSigner::from_hex_seed(TEST_SIGNING_SEED_HEX, TEST_KID.to_string())
+        .expect("test signer build failed");
+    let (sig, receipt_hash) = signer
+        .sign_receipt(&body)
+        .expect("drand receipt signing failed");
+    let mut receipt = body;
+    let obj = receipt.as_object_mut().unwrap();
+    obj.insert("receipt_hash".into(), json!(receipt_hash));
+    obj.insert(
+        "sig".into(),
+        serde_json::to_value(&sig).expect("sig serialization failed"),
+    );
+    receipt
+}
+
 #[test]
 #[ignore = "regenerates goldens - run explicitly: cargo test -p kd-cli --test gen_goldens -- --ignored"]
 fn regenerate_goldens() {
@@ -286,4 +395,17 @@ fn regenerate_goldens() {
     receipt_02["face"] = json!((receipt_face % 20) + 1);
     assert_ne!(receipt_02["face"], receipt_01["face"]);
     write_golden("golden_receipt_02_d20_tampered_face.json", &receipt_02);
+
+    // ---- drand receipt goldens (truerolls-drand-1) ------------------------
+    // Real pinned quicknet pulses -> a fully replayable, BLS-backed receipt.
+    let receipt_drand = build_receipt_drand(false);
+    write_golden("golden_receipt_03_d20_drand.json", &receipt_drand);
+
+    // Tampered target signature: the Ed25519 signature still covers this body,
+    // but the drand pulse BLS verify must fail -> valid_drand=false -> INVALID.
+    let receipt_drand_bad = build_receipt_drand(true);
+    write_golden(
+        "golden_receipt_04_d20_drand_tampered_sig.json",
+        &receipt_drand_bad,
+    );
 }

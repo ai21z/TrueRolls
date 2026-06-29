@@ -2214,6 +2214,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "kd-core",
+ "kd-drand",
  "kd-receipt",
  "predicates",
  "rand 0.9.2",
