@@ -3,6 +3,7 @@ import { getTruerollsKeys, type TruerollsKey } from '../../api/client';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
+import { CeremonyRail } from './CeremonyRail';
 import {
   initKdCoreWasm,
   isKdCoreWasmReady,
@@ -399,6 +400,15 @@ export function BehindARoll() {
         </span>
       </div>
 
+      <CeremonyRail
+        parsed={parsed}
+        onReExamine={() =>
+          document
+            .getElementById('specimen-plate')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      />
+
       <div className={css.grid}>
         {/* Source */}
         <InkFrame seed={23} className={css.panel}>
@@ -458,7 +468,7 @@ export function BehindARoll() {
         </InkFrame>
 
         {/* Specimen plate */}
-        <InkFrame seed={41} className={css.panel}>
+        <InkFrame seed={41} id="specimen-plate" className={css.panel}>
           <div className={css.panelHead}>
             <span className={css.panelTitle}>Specimen plate</span>
             <span className={css.localBadge}>● recomputed locally</span>

@@ -308,6 +308,9 @@ export function Verify() {
           </a>
         </div>
         <nav className={css.barLinks}>
+          <a className={css.barLink} href="#behind-a-roll">
+            Behind a roll
+          </a>
           <a className={css.barLink} href="#docs">
             Docs
           </a>

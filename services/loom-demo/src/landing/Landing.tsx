@@ -169,6 +169,9 @@ export function Landing({ state }: Props) {
           <a className={css.navLink} href="#verify">
             Verify
           </a>
+          <a className={css.navLink} href="#behind-a-roll">
+            Behind a roll
+          </a>
           <a className={css.navLink} href="#docs">
             Docs
           </a>
