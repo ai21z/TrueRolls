@@ -5,6 +5,7 @@ import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
 import { CeremonyRail } from './CeremonyRail';
 import { ContactSheet } from './ContactSheet';
+import { asRecord, hasBeacon, readField, shorten } from './receiptFields';
 import {
   initKdCoreWasm,
   isKdCoreWasmReady,
@@ -91,23 +92,6 @@ interface Stratum {
   limit: string;
 }
 
-function shortHash(s: string, head = 10, tail = 6): string {
-  return s.length <= head + tail + 1 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function readField(o: Record<string, unknown>, key: string): string {
-  const v = o[key];
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return '';
-}
-
 function parseReceipt(text: string): Record<string, unknown> | null {
   try {
     const o = JSON.parse(text) as unknown;
@@ -139,7 +123,7 @@ function statusFrom(ok: boolean | undefined): StratumStatus {
 function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyReport | null): Stratum[] {
   const proof = asRecord(parsed?.proof);
   const rng = asRecord(proof.rng);
-  const drand = proof.drand !== undefined ? asRecord(proof.drand) : null;
+  const drand = proof.drand != null ? asRecord(proof.drand) : null;
   const sig = asRecord(parsed?.sig);
   const beacon = drand !== null;
 
@@ -151,7 +135,7 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
       status: statusFrom(report?.valid_signature),
       fields: [
         { label: 'sig.kid', value: readField(sig, 'kid') || '-' },
-        { label: 'receipt_hash', value: shortHash(readField(parsed ?? {}, 'receipt_hash')) || '-' },
+        { label: 'receipt_hash', value: shorten(readField(parsed ?? {}, 'receipt_hash')) || '-' },
       ],
       proves:
         'The body, canonicalised (JCS / RFC 8785), verifies against the published Ed25519 key. Any edit cracks the seal.',
@@ -168,7 +152,7 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
       fields: [
         { label: 'target_round', value: readField(drand, 'target_round') || '-' },
         { label: 'observed_round', value: readField(drand, 'client_observed_round') || '-' },
-        { label: 'chain', value: shortHash(readField(drand, 'chain_hash')) || '-' },
+        { label: 'chain', value: shorten(readField(drand, 'chain_hash')) || '-' },
       ],
       proves:
         'Both the observed and target pulses BLS-verify against the pinned quicknet key, and randomness = SHA256(verified signature).',
@@ -195,7 +179,7 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
       tag: 'Replay',
       status: statusFrom(report?.valid_sampling),
       fields: [
-        { label: 'drbg_key_hex', value: shortHash(readField(rng, 'drbg_key_hex')) || '-' },
+        { label: 'drbg_key_hex', value: shorten(readField(rng, 'drbg_key_hex')) || '-' },
         { label: 'draw_u64', value: readField(proof, 'draw_u64') || '-' },
       ],
       proves: beacon
@@ -275,6 +259,7 @@ export function BehindARoll() {
   const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
   const [active, setActive] = useState<number>(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bandRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const parsed = useMemo(() => parseReceipt(receiptText), [receiptText]);
   const strata = useMemo(() => buildStrata(parsed, report), [parsed, report]);
@@ -376,7 +361,8 @@ export function BehindARoll() {
   const isValid = verdict === 'VALID';
   const verdictWord = isError ? 'UNVERIFIABLE' : isValid ? 'VALID' : 'INVALID';
   const verdictClass = isError ? css.verdictError : isValid ? css.verdictValid : css.verdictInvalid;
-  const isLegacy = parsed !== null && readField(parsed, 'v') === 'truerolls-1';
+  const beacon = hasBeacon(parsed);
+  const isLegacy = parsed !== null && !beacon;
 
   return (
     <main className={css.page}>
@@ -420,17 +406,23 @@ export function BehindARoll() {
         </span>
       </div>
 
+      <CeremonyRail parsed={parsed} onReExamine={scrollToPlate} />
+
       <ContactSheet
         cells={cells}
         active={active}
         verdict={report?.verdict}
         onSelect={(i) => {
           setActive(i);
-          scrollToPlate();
+          // setTimeout (not rAF) so focus still lands after the re-render even when
+          // the tab is backgrounded, where requestAnimationFrame is paused.
+          window.setTimeout(() => {
+            const el = bandRefs.current[i];
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el?.focus({ preventScroll: true });
+          }, 0);
         }}
       />
-
-      <CeremonyRail parsed={parsed} onReExamine={scrollToPlate} />
 
       <div className={css.grid}>
         {/* Source */}
@@ -499,6 +491,7 @@ export function BehindARoll() {
 
           <div className={`${css.verdict} ${verdictClass}`} role="status" aria-live="polite">
             <span className={css.verdictWord}>{verdictWord}</span>
+            {isValid && <span className={css.verdictScope}>seed provenance + replay only</span>}
             <span className={css.verdictSub}>
               {isError
                 ? report?.error
@@ -517,6 +510,9 @@ export function BehindARoll() {
               return (
                 <button
                   key={s.key}
+                  ref={(el) => {
+                    bandRefs.current[i] = el;
+                  }}
                   type="button"
                   className={`${css.band} ${focused ? css.focus : ''} ${stateClass}`}
                   aria-expanded={focused}
@@ -536,14 +532,12 @@ export function BehindARoll() {
                         </span>
                       ))}
                     </div>
-                    {focused && (
-                      <div className={css.bandDetail}>
-                        <p className={css.proves}>{s.proves}</p>
-                        <p className={css.limit}>
-                          <span className={css.limitTag}>Limit</span> {s.limit}
-                        </p>
-                      </div>
-                    )}
+                    <div className={css.bandDetail}>
+                      {focused && <p className={css.proves}>{s.proves}</p>}
+                      <p className={css.limit}>
+                        <span className={css.limitTag}>Limit</span> {s.limit}
+                      </p>
+                    </div>
                   </div>
                 </button>
               );
@@ -564,8 +558,8 @@ export function BehindARoll() {
 
           {report?.errors && report.errors.length > 0 && (
             <ul className={css.errorList}>
-              {report.errors.map((e, i) => (
-                <li key={i}>{e}</li>
+              {report.errors.map((e) => (
+                <li key={e}>{e}</li>
               ))}
             </ul>
           )}

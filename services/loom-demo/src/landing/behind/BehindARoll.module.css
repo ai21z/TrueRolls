@@ -190,6 +190,7 @@
   border-radius: var(--kd-radius-sm);
   padding: clamp(16px, 2.5vw, 24px);
   min-width: 0;
+  scroll-margin-top: 64px;
 }
 
 .panel::before {
@@ -374,6 +375,13 @@
   font-size: 18px;
 }
 
+.verdictScope {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--kd-text-muted);
+}
+
 .verdictSub {
   font-size: 13.5px;
   line-height: 1.5;
@@ -399,6 +407,7 @@
   background: var(--kd-bg);
   border: 1px solid var(--kd-border);
   cursor: pointer;
+  scroll-margin-top: 72px;
   transition: border-color var(--kd-duration), background var(--kd-duration);
 }
 

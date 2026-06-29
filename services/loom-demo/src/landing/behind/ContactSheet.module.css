@@ -41,6 +41,13 @@
   color: var(--kd-text-secondary);
 }
 
+.scope {
+  font-family: var(--kd-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--kd-text-muted);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -50,9 +57,9 @@
 .cell {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   text-align: left;
   background: var(--nec-ground, #090a0c);
   border: 1px solid var(--kd-border);
@@ -77,8 +84,8 @@
 
 /* carved assay cell: state is its fill, never a glyph */
 .assay {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   flex: 0 0 auto;
   border: 1px solid var(--nec-node);
   border-radius: var(--kd-radius-sm);
@@ -101,9 +108,14 @@
   background: transparent;
 }
 
+.pending .assay {
+  border-color: var(--nec-node);
+  background: transparent;
+}
+
 .label {
   font-family: var(--kd-font-body);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--kd-text);
   white-space: nowrap;

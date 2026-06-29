@@ -41,6 +41,7 @@ export function ContactSheet({ cells, active, verdict, onSelect }: ContactSheetP
         {verdict && (
           <span className={`${css.verdict} ${vClass}`}>{VERDICT_LABEL[verdict] ?? verdict}</span>
         )}
+        {verdict === 'VALID' && <span className={css.scope}>provenance + replay only</span>}
       </div>
       <div className={css.grid}>
         {cells.map((c, i) => (

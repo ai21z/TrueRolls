@@ -62,7 +62,10 @@ House rules taken from the live tokens (`src/theme/tokens.css`) and `RollSigil`:
   a whole pressed wax seal (witnessed), a dry unsealed stamp (not yet
   witnessed), or a cracked seal weeping ember + a severed strand (tampered).
 - Forensic state words, not "valid/invalid": e.g. Unsealed / Sealed / Severed.
-- The one warm focal (ember `--kd-focal`) is reserved for a cut (failure) only.
+- The warm focal (ember `--kd-focal`) marks the *cut in the fairness claim*: a
+  failure (`severed`) and the persistent honesty-limit callouts (standing banner,
+  per-stratum `Limit` tags). It is NOT neutral chrome - A's cycling phase label,
+  which passes through success phases too, uses a muted tone, never the focal.
 - Grain on every plate; hand-drawn ink borders (`InkFrame`/`inkRect`); the
   carved assay cell whose fill is its state; tiny mono "measure" captions.
 - Verified = fungal green `--kd-ember`; tamper = blood red `--kd-fail`;
@@ -175,6 +178,11 @@ The page reads `receipt.v`:
   receipt - no drand provenance." Never render a legacy receipt as if it had a
   verified beacon seed.
 
+**All three surfaces obey this from one predicate** (`hasBeacon` in
+`receiptFields.ts`): B and C mark the drand stratum absent, and A (the ceremony)
+marks the beacon stations (01/02/03/05) absent - they never seal, and their copy
+never asserts a verification that did not happen.
+
 This turns the legacy gap into a teaching moment instead of hiding it.
 
 ---
@@ -210,8 +218,9 @@ end-state must be fully legible without motion.
 |------|--------|
 | BLS-in-wasm proven (step 0) | done, commit `ebb0008` |
 | truerolls-drand-1 goldens + host tests | done |
-| This design note / honesty contract | drafted |
-| `/behind-a-roll` route + B (Specimen Plate) | not started |
-| A (custody strand + artifact animation) | not started |
-| C (contact sheet) | not started |
+| This design note / honesty contract | committed `bf15817` |
+| `/behind-a-roll` route + B (Specimen Plate) | done, commit `ddbbf23` |
+| A (custody strand + artifact animation), version-aware | done, commit `af53ad3` + holistic-review fixes |
+| C (contact sheet / custody index) | done, commit `8696b48` |
+| Holistic adversarial review + fixes (F1-F21 batch) | applied |
 | kappa = 0 / kappa toggle | not started |

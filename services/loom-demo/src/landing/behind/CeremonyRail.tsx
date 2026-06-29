@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { asRecord, hasBeacon, readField, shorten } from './receiptFields';
 import css from './CeremonyRail.module.css';
 
 /**
@@ -9,6 +10,10 @@ import css from './CeremonyRail.module.css';
  * client-side), an UNSEALED DRAFT crosses 04..08 (the record being built, not a
  * receipt yet), the Ed25519 stamp at 08 turns it into a SEALED RECEIPT that
  * rides into the browser at 09. A station only seals behind the artifact.
+ *
+ * Version-aware: a legacy truerolls-1 receipt has no drand beacon, so the
+ * beacon stations (01/02/03/05) are marked ABSENT - they never seal and their
+ * copy never asserts a verification that did not happen (design note Part 6).
  *
  * Honesty: this is ceremony, not verification. It is choreography over the real
  * receipt's fields; the actual pass/fail recompute is surface B (the Specimen
@@ -23,45 +28,79 @@ interface Station {
   zone: Zone;
   field: string;
   what: string;
+  absent?: boolean;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function field(o: Record<string, unknown>, key: string): string {
-  const v = o[key];
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return '';
-}
-
-function short(s: string, head = 8, tail = 4): string {
-  return s.length <= head + tail + 1 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`;
-}
-
-function buildStations(parsed: Record<string, unknown> | null): Station[] {
+function buildStations(parsed: Record<string, unknown> | null, beacon: boolean): Station[] {
   const proof = asRecord(parsed?.proof);
   const rng = asRecord(proof.rng);
   const drand = asRecord(proof.drand);
   const sig = asRecord(parsed?.sig);
   const dash = (s: string) => s || '-';
+
+  const seed: Station = {
+    n: '06 · Seed forged',
+    zone: 'server',
+    field: `drbg ${dash(shorten(readField(rng, 'drbg_key_hex'), 8, 4))}`,
+    what: beacon
+      ? 'HKDF derives the seed from the verified pulse.'
+      : 'The published seed re-seeds ChaCha20 (no drand derivation).',
+  };
+  const sample: Station = {
+    n: '07 · Outcome sampled',
+    zone: 'server',
+    field: `${dash(readField(parsed ?? {}, 'die'))} → face ${dash(readField(parsed ?? {}, 'face'))}`,
+    what: 'kd-core samples the face under the κ guards.',
+  };
+  const seal: Station = {
+    n: '08 · Seal pressed',
+    zone: 'server',
+    field: `Ed25519 · ${dash(readField(sig, 'kid'))}`,
+    what: 'The body is signed - the draft becomes a receipt.',
+  };
+  const custody: Station = {
+    n: '04 · Custody opened',
+    zone: 'server',
+    field: 'POST /v1/roll',
+    what: 'The server validates the request and opens a record.',
+  };
+  // Station 09 describes the ACTION, never a guaranteed pass - the rail does not
+  // read the verdict, so it must not assert "matches it" for a tampered receipt.
+  const reexamine: Station = {
+    n: '09 · Re-examined',
+    zone: 'browser',
+    field: 'verifyReceiptJson()',
+    what: 'Your browser re-runs every field check - the result is on the plate below.',
+  };
+
+  if (beacon) {
+    return [
+      { n: '01 · Nonce cast', zone: 'client', field: `nonce ${dash(shorten(readField(drand, 'client_nonce'), 8, 4))}`, what: 'A fresh private nonce is bound into the seed.' },
+      { n: '02 · Beacon observed', zone: 'client', field: `round ${dash(readField(drand, 'client_observed_round'))}`, what: 'The latest public drand pulse is read and verified.' },
+      { n: '03 · Target locked', zone: 'client', field: `target ${dash(readField(drand, 'target_round'))} = obs + 2`, what: 'The seed is bound to a pulse that does not exist yet.' },
+      custody,
+      { n: '05 · Beacon revealed', zone: 'server', field: `round ${dash(readField(drand, 'target_round'))} · BLS`, what: 'The target pulse publishes and is BLS-verified.' },
+      seed,
+      sample,
+      seal,
+      reexamine,
+    ];
+  }
+  // Legacy truerolls-1: no beacon. The drand stations are ABSENT, not narrated.
   return [
-    { n: '01 · Nonce cast', zone: 'client', field: `nonce ${dash(short(field(drand, 'client_nonce')))}`, what: 'A fresh private nonce is bound into the seed.' },
-    { n: '02 · Beacon observed', zone: 'client', field: `round ${dash(field(drand, 'client_observed_round'))}`, what: 'The latest public drand pulse is read and verified.' },
-    { n: '03 · Target locked', zone: 'client', field: `target ${dash(field(drand, 'target_round'))} = obs + 2`, what: 'The seed is bound to a pulse that does not exist yet.' },
-    { n: '04 · Custody opened', zone: 'server', field: 'POST /v1/roll', what: 'The server validates the proof and opens a record.' },
-    { n: '05 · Beacon revealed', zone: 'server', field: `round ${dash(field(drand, 'target_round'))} · BLS`, what: 'The target pulse publishes and is BLS-verified.' },
-    { n: '06 · Seed forged', zone: 'server', field: `drbg ${dash(short(field(rng, 'drbg_key_hex')))}`, what: 'HKDF derives the seed from the verified pulse.' },
-    { n: '07 · Outcome sampled', zone: 'server', field: `${dash(field(parsed ?? {}, 'die'))} → face ${dash(field(parsed ?? {}, 'face'))}`, what: 'kd-core samples the face under the κ guards.' },
-    { n: '08 · Seal pressed', zone: 'server', field: `Ed25519 · ${dash(field(sig, 'kid'))}`, what: 'The body is signed - the draft becomes a receipt.' },
-    { n: '09 · Re-examined', zone: 'browser', field: 'verifyReceiptJson()', what: 'Your browser replays every field and matches it - on the plate below.' },
+    { n: '01 · Nonce cast', zone: 'client', absent: true, field: '(no client nonce)', what: 'Legacy receipt: no client nonce was bound into the seed.' },
+    { n: '02 · Beacon observed', zone: 'client', absent: true, field: '(no beacon)', what: 'Not present - this legacy receipt has no drand beacon.' },
+    { n: '03 · Target locked', zone: 'client', absent: true, field: '(no target)', what: 'Not present - no future-beacon target binding.' },
+    custody,
+    { n: '05 · Beacon revealed', zone: 'server', absent: true, field: '(no beacon)', what: 'Not present - there is no drand pulse to verify.' },
+    seed,
+    sample,
+    seal,
+    reexamine,
   ];
 }
 
-// Geometry + timeline (ported from the design mockup).
+// Geometry + timeline.
 const N = 9;
 const X0 = 70;
 const X1 = 970;
@@ -97,7 +136,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   draft: 'Unsealed draft - not a receipt yet',
   seal: 'Sealing',
   sealed: 'Sealed receipt',
-  hold: 'Re-examined',
+  hold: 'Re-examining - result on the plate',
 };
 
 const ZONES: { a: number; b: number; t: string }[] = [
@@ -105,6 +144,8 @@ const ZONES: { a: number; b: number; t: string }[] = [
   { a: 3, b: 7, t: 'SERVER' },
   { a: 8, b: 8, t: 'YOUR BROWSER' },
 ];
+// Beacon-derived stations (drand-specific) - marked absent for a legacy receipt.
+const BEACON_STATIONS = [0, 1, 2, 4];
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -126,12 +167,17 @@ interface CeremonyRailProps {
 
 export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const stations = useMemo(() => buildStations(parsed), [parsed]);
+  const beacon = hasBeacon(parsed);
+  const stations = useMemo(() => buildStations(parsed, beacon), [parsed, beacon]);
   const reduced = usePrefersReducedMotion();
   const [playing, setPlaying] = useState(true);
   const [active, setActive] = useState(0);
   const [phase, setPhase] = useState<Phase>('die');
 
+  // The RAF loop reads NO station text (the readout below renders from `stations`
+  // on every commit), so the only animation-relevant input is `beacon` - which
+  // flips the absent-node set. Keep `parsed` OUT of the deps: adding it would
+  // restart the animation on every textarea keystroke.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -145,6 +191,7 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
     const nodes = Array.from(svg.querySelectorAll<SVGCircleElement>('[data-node]'));
     if (!die || !doc || !docPage || !docSeal || !loupe || !wake || !drop) return;
 
+    const absent = new Set<number>(beacon ? [] : BEACON_STATIONS);
     let lastIdx = -1;
     let lastPhase: Phase | null = null;
 
@@ -206,7 +253,15 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
           near = i;
         }
         const c = nodes[i];
-        if (isCur) {
+        if (absent.has(i)) {
+          // Beacon station on a legacy receipt: never seals, always reads absent.
+          c.setAttribute('r', '8.4');
+          c.setAttribute('fill', '#090a0c');
+          c.setAttribute('stroke', '#6e8478');
+          c.setAttribute('stroke-width', '1');
+          c.setAttribute('stroke-dasharray', '2 3');
+          c.setAttribute('opacity', '0.32');
+        } else if (isCur) {
           c.setAttribute('r', '10');
           c.setAttribute('fill', '#090a0c');
           c.setAttribute('stroke', '#7E9488');
@@ -255,7 +310,7 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [playing, reduced]);
+  }, [playing, reduced, beacon]);
 
   const current = stations[active] ?? stations[0];
 
@@ -263,9 +318,15 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
     <figure className={css.rail}>
       <div className={css.head}>
         <span className={css.eyebrow}>The ceremony</span>
+        {!beacon && <span className={css.legacyTag}>legacy · no drand beacon</span>}
         {!reduced && (
           <div className={css.ctrls}>
-            <button type="button" className={css.btn} onClick={() => setPlaying((p) => !p)}>
+            <button
+              type="button"
+              className={css.btn}
+              aria-pressed={playing}
+              onClick={() => setPlaying((p) => !p)}
+            >
               {playing ? '❚❚ Pause' : '▶ Play'}
             </button>
           </div>
@@ -277,9 +338,15 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
         className={css.svg}
         viewBox="0 0 1040 214"
         role="img"
-        aria-label="A roll travelling nine stations: a die over the client stations, an unsealed draft over the server, a sealed receipt into the browser."
+        aria-labelledby="cr-title cr-desc"
         xmlns="http://www.w3.org/2000/svg"
       >
+        <title id="cr-title">Behind a roll: the custody ceremony</title>
+        <desc id="cr-desc">
+          A roll travelling nine stations - a die over the client stations, an unsealed draft over the
+          server, a sealed receipt into the browser. Beacon stations are marked absent for a legacy
+          receipt.
+        </desc>
         <defs>
           <radialGradient id="cr-loupe-g" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="#7E9488" stopOpacity="0.10" />
@@ -288,7 +355,6 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
           </radialGradient>
         </defs>
 
-        {/* zones */}
         {ZONES.map((z) => {
           const lx = NODE_XS[z.a] - 22;
           const rx = NODE_XS[z.b] + 22;
@@ -316,11 +382,9 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
           );
         })}
 
-        {/* strand */}
         <line x1={X0} y1={Y_RAIL} x2={X1} y2={Y_RAIL} stroke="#6e8478" strokeWidth="1.2" strokeDasharray="2 6" opacity="0.4" />
         <line id="cr-wake" x1={X0} y1={Y_RAIL} x2={X0} y2={Y_RAIL} stroke="#3c5249" strokeWidth="2" opacity="0.8" />
 
-        {/* nodes */}
         {NODE_XS.map((x, i) => (
           <g key={i}>
             <circle data-node data-i={i} cx={x} cy={Y_RAIL} r="8.4" fill="#090a0c" stroke="#6e8478" strokeWidth="1" strokeDasharray="2 3" opacity="0.6" />
@@ -330,7 +394,6 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
           </g>
         ))}
 
-        {/* artifact */}
         <line id="cr-drop" x1={X0} y1={Y_ART + 4} x2={X0} y2={Y_RAIL - 10} stroke="#7E9488" strokeWidth="1" strokeDasharray="2 3" opacity="0.5" />
         <g id="cr-die" transform={`translate(${X0},${Y_ART})`}>
           <rect x="-12" y="-12" width="24" height="24" rx="4" fill="#1A1A16" stroke="#c9c2b3" strokeWidth="1.3" />
