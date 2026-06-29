@@ -109,40 +109,6 @@ export function computeRollReplayJson(die, kappa, draw) {
     }
 }
 
-/**
- * Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
- * DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
- * engine (identical to `kd verify --receipt`).
- *
- * - `receiptJson`: the raw receipt JSON string.
- * - `publicKeyB64`: base64 of the 32-byte Ed25519 verifying key (from
- *   `/.well-known/truerolls-keys.json`).
- *
- * Returns a JSON string:
- * `{"verdict": "VALID"|"INVALID"|"ERROR", "valid_signature", "valid_sampling",
- *   "face_ok", "metrics_ok", "details", "errors"}`. `ERROR` (with an `error`
- * field) is returned for structurally unverifiable input. Never throws.
- * @param {string} receipt_json
- * @param {string} public_key_b64
- * @returns {string}
- */
-export function verifyReceiptJson(receipt_json, public_key_b64) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(receipt_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(public_key_b64, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.verifyReceiptJson(ptr0, len0, ptr1, len1);
-        deferred3_0 = ret[0];
-        deferred3_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
-}
-
 let cachedFloat64ArrayMemory0 = null;
 
 function getFloat64ArrayMemory0() {
@@ -179,23 +145,6 @@ export function faceFromDraw(die, probs, draw) {
 }
 
 /**
- * Returns [`ENGINE_LABEL`].
- * @returns {string}
- */
-export function engineLabel() {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const ret = wasm.engineLabel();
-        deferred1_0 = ret[0];
-        deferred1_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-    }
-}
-
-/**
  * Returns `kd_core::PARAM_VERSION` ("roll.math.v1").
  * @returns {string}
  */
@@ -209,6 +158,40 @@ export function paramVersion() {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
+ * DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
+ * engine (identical to `kd verify --receipt`).
+ *
+ * - `receiptJson`: the raw receipt JSON string.
+ * - `publicKeyB64`: base64 of the 32-byte Ed25519 verifying key (from
+ *   `/.well-known/truerolls-keys.json`).
+ *
+ * Returns a JSON string:
+ * `{"verdict": "VALID"|"INVALID"|"ERROR", "valid_signature", "valid_sampling",
+ *   "face_ok", "metrics_ok", "details", "errors"}`. `ERROR` (with an `error`
+ * field) is returned for structurally unverifiable input. Never throws.
+ * @param {string} receipt_json
+ * @param {string} public_key_b64
+ * @returns {string}
+ */
+export function verifyReceiptJson(receipt_json, public_key_b64) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(receipt_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(public_key_b64, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.verifyReceiptJson(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -238,6 +221,23 @@ export function computeDistributionJson(die, kappa) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Returns [`ENGINE_LABEL`].
+ * @returns {string}
+ */
+export function engineLabel() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.engineLabel();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
     }
 }
 

@@ -7,6 +7,15 @@
  */
 export function computeRollReplayJson(die: string, kappa: number, draw: bigint): string;
 /**
+ * Map a 64-bit draw (JS BigInt) onto `probs` via prefix-CDF; returns the 1-based face.
+ * `probs.length` must equal the die size.
+ */
+export function faceFromDraw(die: string, probs: Float64Array, draw: bigint): number;
+/**
+ * Returns `kd_core::PARAM_VERSION` ("roll.math.v1").
+ */
+export function paramVersion(): string;
+/**
  * Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
  * DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
  * engine (identical to `kd verify --receipt`).
@@ -22,24 +31,15 @@ export function computeRollReplayJson(die: string, kappa: number, draw: bigint):
  */
 export function verifyReceiptJson(receipt_json: string, public_key_b64: string): string;
 /**
- * Map a 64-bit draw (JS BigInt) onto `probs` via prefix-CDF; returns the 1-based face.
- * `probs.length` must equal the die size.
- */
-export function faceFromDraw(die: string, probs: Float64Array, draw: bigint): number;
-/**
- * Returns [`ENGINE_LABEL`].
- */
-export function engineLabel(): string;
-/**
- * Returns `kd_core::PARAM_VERSION` ("roll.math.v1").
- */
-export function paramVersion(): string;
-/**
  * Compute the guarded distribution for `die` ("d4".."d100") at stance `kappa`.
  * Returns a JSON string:
  * `{"engine", "param_version", "probs", "alpha", "kl", "ev", "guards_applied"}`.
  */
 export function computeDistributionJson(die: string, kappa: number): string;
+/**
+ * Returns [`ENGINE_LABEL`].
+ */
+export function engineLabel(): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
