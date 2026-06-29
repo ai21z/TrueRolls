@@ -1,0 +1,142 @@
+/* ContactSheet - surface C. The compact custody index. Token-only. */
+
+.sheet {
+  position: relative;
+  max-width: var(--kd-maxw);
+  margin: 4px auto 0;
+  width: calc(100% - 2 * var(--kd-gutter));
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 9px;
+}
+
+.eyebrow {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--kd-text-muted);
+}
+
+.verdict {
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.vValid {
+  color: var(--kd-ember);
+}
+
+.vInvalid {
+  color: var(--kd-fail);
+}
+
+.vNeutral {
+  color: var(--kd-text-secondary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--nec-ground, #090a0c);
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius-sm);
+  cursor: pointer;
+  transition: border-color var(--kd-duration), background var(--kd-duration);
+}
+
+.cell:hover {
+  border-color: var(--kd-border-glow);
+}
+
+.cell.on {
+  border-color: var(--kd-border-accent);
+  background: var(--kd-surface-raised);
+}
+
+.cell:focus-visible {
+  outline: 2px solid var(--kd-accent);
+  outline-offset: 2px;
+}
+
+/* carved assay cell: state is its fill, never a glyph */
+.assay {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 1px solid var(--nec-node);
+  border-radius: var(--kd-radius-sm);
+  background: transparent;
+}
+
+.pass .assay {
+  border-color: var(--kd-ember);
+  background: var(--kd-ember-dim);
+}
+
+.fail .assay {
+  border-color: var(--kd-fail);
+  background: var(--kd-fail-dim);
+}
+
+.absent .assay {
+  border-color: var(--nec-node);
+  border-style: dashed;
+  background: transparent;
+}
+
+.label {
+  font-family: var(--kd-font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--kd-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.state {
+  margin-left: auto;
+  font-family: var(--kd-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pass .state {
+  color: var(--kd-ember);
+}
+
+.fail .state {
+  color: var(--kd-fail);
+}
+
+.absent .state,
+.pending .state {
+  color: var(--kd-text-muted);
+}
+
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .state {
+    display: none;
+  }
+}

@@ -4,6 +4,7 @@ import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
 import { CeremonyRail } from './CeremonyRail';
+import { ContactSheet } from './ContactSheet';
 import {
   initKdCoreWasm,
   isKdCoreWasmReady,
@@ -257,6 +258,15 @@ function stateWord(status: StratumStatus, key: string): string {
   return STATE_WORD[status];
 }
 
+// Short labels for the compact custody index (surface C).
+const SHORT_LABEL: Record<string, string> = {
+  signature: 'Signature',
+  drand: 'Drand',
+  seed: 'Seed',
+  face: 'Outcome',
+  metrics: 'Metrics',
+};
+
 export function BehindARoll() {
   const [receiptText, setReceiptText] = useState<string>(SAMPLE_DRAND_RECEIPT);
   const [publicKey, setPublicKey] = useState<string>(DEMO_TEST_KEY);
@@ -268,6 +278,16 @@ export function BehindARoll() {
 
   const parsed = useMemo(() => parseReceipt(receiptText), [receiptText]);
   const strata = useMemo(() => buildStrata(parsed, report), [parsed, report]);
+  const cells = strata.map((s) => ({
+    key: s.key,
+    label: SHORT_LABEL[s.key] ?? s.name,
+    status: s.status,
+    word: stateWord(s.status, s.key),
+  }));
+  const scrollToPlate = () =>
+    document
+      .getElementById('specimen-plate')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   const runWith = (text: string, key: string) => {
     if (!isKdCoreWasmReady()) {
@@ -400,14 +420,17 @@ export function BehindARoll() {
         </span>
       </div>
 
-      <CeremonyRail
-        parsed={parsed}
-        onReExamine={() =>
-          document
-            .getElementById('specimen-plate')
-            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
+      <ContactSheet
+        cells={cells}
+        active={active}
+        verdict={report?.verdict}
+        onSelect={(i) => {
+          setActive(i);
+          scrollToPlate();
+        }}
       />
+
+      <CeremonyRail parsed={parsed} onReExamine={scrollToPlate} />
 
       <div className={css.grid}>
         {/* Source */}
