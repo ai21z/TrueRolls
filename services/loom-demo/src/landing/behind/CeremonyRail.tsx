@@ -129,6 +129,18 @@ const SEG: Seg[] = [
   { f: 8, t: 8, d: 1300, p: 'hold' },
 ];
 const TOTAL = SEG.reduce((s, g) => s + g.d, 0);
+// Representative elapsed for each station (when the mover rests on it) - the
+// manual step controls paint this single frame, with no rAF.
+const STATION_ELAPSED: number[] = (() => {
+  const arr = new Array<number>(N).fill(0);
+  let acc = 0;
+  for (const s of SEG) {
+    acc += s.d;
+    arr[s.t] = acc;
+  }
+  arr[0] = 0;
+  return arr;
+})();
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const PHASE_LABEL: Record<Phase, string> = {
   die: 'Casting',
@@ -170,14 +182,15 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
   const beacon = hasBeacon(parsed);
   const stations = useMemo(() => buildStations(parsed, beacon), [parsed, beacon]);
   const reduced = usePrefersReducedMotion();
-  const [playing, setPlaying] = useState(true);
+  const [stepIndex, setStepIndex] = useState<number>(-1); // -1 = auto-play; 0..8 = paused on a station
   const [active, setActive] = useState(0);
   const [phase, setPhase] = useState<Phase>('die');
 
-  // The RAF loop reads NO station text (the readout below renders from `stations`
-  // on every commit), so the only animation-relevant input is `beacon` - which
-  // flips the absent-node set. Keep `parsed` OUT of the deps: adding it would
-  // restart the animation on every textarea keystroke.
+  // Drives the rail: auto-play via RAF when stepIndex < 0, else a single manual
+  // frame for the chosen station. The loop reads NO station text (the readout
+  // renders from `stations` each commit), so the only animation-relevant inputs
+  // are `beacon` (flips the absent-node set) and `stepIndex`. Keep `parsed` OUT
+  // of the deps: adding it would restart the animation on every keystroke.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -294,6 +307,12 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
       }
     };
 
+    if (stepIndex >= 0) {
+      // Manual step: a single frame for the chosen station, no rAF (so it works
+      // even in a backgrounded tab where requestAnimationFrame is paused).
+      paint(STATION_ELAPSED[Math.min(stepIndex, N - 1)]);
+      return;
+    }
     if (reduced) {
       paint(TOTAL - 1);
       return;
@@ -305,12 +324,16 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
       paint(ts - start);
       raf = requestAnimationFrame(loop);
     };
-    if (playing) raf = requestAnimationFrame(loop);
-    else paint(TOTAL - 1);
+    raf = requestAnimationFrame(loop);
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [playing, reduced, beacon]);
+  }, [reduced, beacon, stepIndex]);
+
+  const stepFrom = stepIndex < 0 ? active : stepIndex;
+  const stepBack = () => setStepIndex(Math.max(0, stepFrom - 1));
+  const stepNext = () => setStepIndex(Math.min(N - 1, stepFrom + 1));
+  const togglePlay = () => setStepIndex((s) => (s < 0 ? active : -1));
 
   const current = stations[active] ?? stations[0];
 
@@ -319,18 +342,24 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
       <div className={css.head}>
         <span className={css.eyebrow}>The ceremony</span>
         {!beacon && <span className={css.legacyTag}>legacy · no drand beacon</span>}
-        {!reduced && (
-          <div className={css.ctrls}>
+        <div className={css.ctrls}>
+          <button type="button" className={css.btn} aria-label="Previous station" onClick={stepBack}>
+            ◁ Back
+          </button>
+          {!reduced && (
             <button
               type="button"
               className={css.btn}
-              aria-pressed={playing}
-              onClick={() => setPlaying((p) => !p)}
+              aria-pressed={stepIndex < 0}
+              onClick={togglePlay}
             >
-              {playing ? '❚❚ Pause' : '▶ Play'}
+              {stepIndex < 0 ? '❚❚ Pause' : '▶ Play'}
             </button>
-          </div>
-        )}
+          )}
+          <button type="button" className={css.btn} aria-label="Next station" onClick={stepNext}>
+            Next ▷
+          </button>
+        </div>
       </div>
 
       <svg

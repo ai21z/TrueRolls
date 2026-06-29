@@ -5,6 +5,7 @@ import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
 import { CeremonyRail } from './CeremonyRail';
 import { ContactSheet } from './ContactSheet';
+import { KappaBaseline } from './KappaBaseline';
 import { asRecord, hasBeacon, readField, shorten } from './receiptFields';
 import {
   initKdCoreWasm,
@@ -363,6 +364,10 @@ export function BehindARoll() {
   const verdictClass = isError ? css.verdictError : isValid ? css.verdictValid : css.verdictInvalid;
   const beacon = hasBeacon(parsed);
   const isLegacy = parsed !== null && !beacon;
+  const dieVal = parsed?.die;
+  const kappaRaw = parsed?.kappa;
+  const die = typeof dieVal === 'string' ? dieVal : '';
+  const kappaNum = typeof kappaRaw === 'number' ? kappaRaw : NaN;
 
   return (
     <main className={css.page}>
@@ -565,6 +570,8 @@ export function BehindARoll() {
           )}
         </InkFrame>
       </div>
+
+      <KappaBaseline die={die} kappa={kappaNum} ready={report != null} />
 
       <section className={css.honest}>
         <h2 className={css.honestTitle}>What a sealed plate proves. And what it doesn't.</h2>

@@ -1,0 +1,141 @@
+/* KappaBaseline - the two readings of the die. Token-only. */
+
+.wrap {
+  position: relative;
+  max-width: var(--kd-maxw);
+  margin: clamp(20px, 3vw, 32px) auto 0;
+  width: calc(100% - 2 * var(--kd-gutter));
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.eyebrow {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kd-accent);
+}
+
+.sub {
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  color: var(--kd-text-muted);
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(12px, 2vw, 20px);
+}
+
+@media (max-width: 640px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  position: relative;
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-border);
+  border-radius: var(--kd-radius-sm);
+  padding: 14px 16px 12px;
+}
+
+.stancePanel {
+  border-color: var(--kd-border-accent);
+}
+
+.tag {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.k {
+  font-family: var(--kd-font-mono);
+  font-size: 13px;
+  color: var(--kd-accent);
+}
+
+.name {
+  font-family: var(--kd-font-display);
+  font-size: 16px;
+  color: var(--kd-text);
+}
+
+.caption {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  color: var(--kd-text-muted);
+  margin: 3px 0 0;
+}
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 92px;
+  margin-top: 14px;
+  padding-top: 4px;
+}
+
+.bar {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.fillFlat {
+  width: 100%;
+  border-radius: 1px 1px 0 0;
+  background: var(--kd-accent-dim);
+  border-top: 1px solid var(--kd-accent);
+}
+
+.fillStance {
+  width: 100%;
+  border-radius: 1px 1px 0 0;
+  background: var(--kd-ember-dim);
+  border-top: 1px solid var(--kd-ember);
+}
+
+.honest {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 13px 15px;
+  background: var(--nec-ground, #090a0c);
+  border: 1px solid var(--kd-border);
+  border-left: 2px solid var(--kd-focal);
+  border-radius: var(--kd-radius-sm);
+}
+
+.honestKey {
+  font-family: var(--kd-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kd-focal);
+  white-space: nowrap;
+}
+
+.honestVal {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--kd-text-secondary);
+}
+
+.honestVal b {
+  color: var(--kd-text);
+}
