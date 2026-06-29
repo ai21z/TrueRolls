@@ -223,4 +223,5 @@ end-state must be fully legible without motion.
 | A (custody strand + artifact animation), version-aware | done, commit `af53ad3` + holistic-review fixes |
 | C (contact sheet / custody index) | done, commit `8696b48` |
 | Holistic adversarial review + fixes (F1-F21 batch) | applied |
-| kappa = 0 / kappa toggle | not started |
+| kappa = 0 baseline panel ("two readings of the die") | done, commit `34730ed` |
+| Ceremony manual step controls (Back / Next) | done, commit `34730ed` |
