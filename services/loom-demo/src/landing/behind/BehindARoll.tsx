@@ -247,9 +247,19 @@ const STATE_CLASS: Record<StratumStatus, string> = {
   pending: 'pending',
 };
 
+// "sealed" is reserved for the literal Ed25519 seal (the Signature stratum). The
+// other strata are recomputations, so a held recomputation reads "holds", not
+// "sealed" - the word must not imply a stronger guarantee than a re-derivation
+// that matched. The carved-cell fill (STATE_CLASS) stays the same green either way.
+function stateWord(status: StratumStatus, key: string): string {
+  if (status === 'pass') return key === 'signature' ? 'sealed' : 'holds';
+  return STATE_WORD[status];
+}
+
 export function BehindARoll() {
   const [receiptText, setReceiptText] = useState<string>(SAMPLE_DRAND_RECEIPT);
   const [publicKey, setPublicKey] = useState<string>(DEMO_TEST_KEY);
+  const [keyEdited, setKeyEdited] = useState<boolean>(false);
   const [report, setReport] = useState<WasmVerifyReport | null>(null);
   const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
   const [active, setActive] = useState<number>(0);
@@ -276,8 +286,11 @@ export function BehindARoll() {
     return match?.public_key ?? DEMO_TEST_KEY;
   };
 
-  const verify = (text: string) => {
-    const key = resolveKeyFor(text, wellKnownKeys);
+  const verify = (text: string, edited: boolean = keyEdited) => {
+    // A key the user typed wins as-is; otherwise resolve well-known/demo by kid.
+    // `edited` is threaded explicitly so loadSample/onFile can force a re-resolve
+    // without waiting on the async keyEdited state update.
+    const key = edited ? publicKey : resolveKeyFor(text, wellKnownKeys);
     setPublicKey(key);
     runWith(text, key);
   };
@@ -314,7 +327,8 @@ export function BehindARoll() {
 
   const loadSample = () => {
     setReceiptText(SAMPLE_DRAND_RECEIPT);
-    verify(SAMPLE_DRAND_RECEIPT);
+    setKeyEdited(false);
+    verify(SAMPLE_DRAND_RECEIPT, false);
   };
 
   const onFile = async (file: File | undefined) => {
@@ -327,7 +341,8 @@ export function BehindARoll() {
       return;
     }
     setReceiptText(text);
-    verify(text);
+    setKeyEdited(false);
+    verify(text, false);
   };
 
   const step = (delta: number) => {
@@ -425,6 +440,7 @@ export function BehindARoll() {
             spellCheck={false}
             onChange={(e) => {
               setPublicKey(e.target.value);
+              setKeyEdited(true);
               setReport(null);
             }}
           />
@@ -456,7 +472,7 @@ export function BehindARoll() {
                 : isValid
                   ? isLegacy
                     ? 'Signed and replayable. Legacy receipt - no drand provenance.'
-                    : 'Signed, drand-seeded, and replayable in full.'
+                    : 'Signed, drand-seeded, and bit-for-bit replayable.'
                   : 'One or more strata did not hold.'}
             </span>
           </div>
@@ -478,7 +494,7 @@ export function BehindARoll() {
                     <div className={css.bandTop}>
                       <span className={css.bandName}>{s.name}</span>
                       <span className={css.bandTag}>{s.tag}</span>
-                      <span className={css.bandState}>{STATE_WORD[s.status]}</span>
+                      <span className={css.bandState}>{stateWord(s.status, s.key)}</span>
                     </div>
                     <div className={css.bandFields}>
                       {s.fields.map((f) => (
@@ -526,8 +542,8 @@ export function BehindARoll() {
       <section className={css.honest}>
         <h2 className={css.honestTitle}>What a sealed plate proves. And what it doesn't.</h2>
         <p>
-          When every stratum holds, the roll is <b>real, drand-seeded, and replayable</b> - and you
-          confirmed it yourself, with no server in the loop. It does <b>not</b> prove the operator
+          When every stratum holds, the roll is <b>drand-seeded and bit-for-bit replayable</b> - and
+          you confirmed it yourself, with no server in the loop. It does <b>not</b> prove the operator
           could not have privately failed an unfavourable attempt and published only this one.
           Strict witnessed fairness is the v2 protocol, not this per-roll drand receipt.
         </p>
