@@ -3,6 +3,7 @@ import { useKarmaState } from './hooks/useKarmaState';
 import { Landing } from './landing/Landing';
 import { Docs } from './landing/docs/Docs';
 import { Verify } from './landing/verify/Verify';
+import { BehindARoll } from './landing/behind/BehindARoll';
 import { EntropyNet } from './components/EntropyNet';
 import { useHashView } from './landing/useHashView';
 import css from './components/App.module.css';
@@ -38,7 +39,15 @@ export default function App() {
   }
 
   const page =
-    view === 'docs' ? <Docs /> : view === 'verify' ? <Verify /> : <Landing state={state} />;
+    view === 'docs' ? (
+      <Docs />
+    ) : view === 'verify' ? (
+      <Verify />
+    ) : view === 'behind' ? (
+      <BehindARoll />
+    ) : (
+      <Landing state={state} />
+    );
 
   return (
     <>
