@@ -14,21 +14,21 @@ import { SiteSignature } from './system/SiteSignature';
 import css from './Landing.module.css';
 
 // ── d20 (icosahedron, face-on) for the how-it-works diagram ──────────────────
-// The labelled front face is the Roll/Sign/Verify triangle; the rest of the die is
+// The labelled front face is the Roll/Sign/Verify triangle. The rest of the die is
 // drawn around it at the same scale. Face-on projection: the front + back faces are
-// an inner hexagon (radius RA); the equatorial belt is the outer hull (radius RA·φ),
+// an inner hexagon (radius RA). The equatorial belt is the outer hull (radius RA·φ),
 // at the same six angles. Static geometry. The apex (Roll) carries the lone ember.
 type Pt = { x: number; y: number };
 const TRI_O = { x: 300, y: 317 };
 const RA = 240;
-const RB = 388; // RA · φ - the icosahedron's projected radius ratio
+const RB = 388; // RA · φ, the icosahedron's projected radius ratio
 
 function vert(deg: number, r: number): Pt {
   const a = (deg * Math.PI) / 180;
   return { x: +(TRI_O.x + r * Math.cos(a)).toFixed(1), y: +(TRI_O.y - r * Math.sin(a)).toFixed(1) };
 }
 
-// front face (90/210/330) - the labelled triangle the boxes hang off
+// front face (90/210/330), the labelled triangle the boxes hang off
 const A = vert(90, RA);
 const B = vert(210, RA);
 const C = vert(330, RA);
@@ -42,7 +42,7 @@ const O150 = vert(150, RB);
 
 const APEX = A;
 
-// Deterministic spark dust at the roll vertex - engraving grain, not confetti.
+// Deterministic spark dust at the roll vertex, engraving grain, not confetti.
 function makeSparks(cx: number, cy: number, n = 20, seed = 71) {
   const rand = seedRng(seed);
   const out: { x: number; y: number; r: number; op: number }[] = [];
@@ -95,7 +95,7 @@ const D20 = {
     hyphaePath(C, O270, -6),
     hyphaePath(C, O30, 6),
   ],
-  // the labelled front face (bright) - base forks + rejoins (anastomosis)
+  // the labelled front face (bright), base forks + rejoins (anastomosis)
   central: [
     hyphaePath(C, A, -14),
     hyphaePath(A, B, -14),
@@ -115,7 +115,7 @@ const STEPS = [
   {
     n: '01',
     title: 'Roll',
-    body: 'A behavior-shaped, guard-capped roll. κ tilts the odds. KL and EV caps bound exactly how far it can move from fair.',
+    body: 'A uniform roll by default, seeded from a public drand beacon. An optional, signed κ stance can tilt the odds. KL and EV caps bound exactly how far.',
   },
   {
     n: '02',
@@ -209,7 +209,7 @@ export function Landing({ state }: Props) {
                     <stop offset="100%" stopColor="#b87242" stopOpacity="0" />
                   </radialGradient>
                 </defs>
-                {/* faceted shading - the die's other front faces */}
+                {/* faceted shading, the die's other front faces */}
                 {D20.facets.map((f, i) => (
                   <polygon key={`fc-${i}`} className={css.triadFacet} points={f.d} style={{ opacity: f.op }} />
                 ))}
@@ -223,7 +223,7 @@ export function Landing({ state }: Props) {
                     style={{ animationDelay: `${0.1 + i * 0.06}s` }}
                   />
                 ))}
-                {/* spokes - front-face corners out to the hull */}
+                {/* spokes, front-face corners out to the hull */}
                 {D20.spokes.map((d, i) => (
                   <path
                     key={`sk-${i}`}
@@ -271,6 +271,10 @@ export function Landing({ state }: Props) {
                   </Reveal>
                 </div>
               ))}
+
+              <a className={css.triadCenter} href="#behind-a-roll">
+                Behind a roll →
+              </a>
             </div>
           </div>
         </section>
@@ -313,7 +317,15 @@ export function Landing({ state }: Props) {
                 <div className={css.trustItem}>
                   <span className={css.trustDot} />
                   <span className={css.trustText}>
-                    <b>One verifier.</b> The same kd-core engine in Rust, CLI, and WASM -
+                    <b>Public drand seed.</b> The seed is tied to a client nonce and a verified
+                    future drand quicknet round. The verifier checks that source, not a
+                    server-made random value.
+                  </span>
+                </div>
+                <div className={css.trustItem}>
+                  <span className={css.trustDot} />
+                  <span className={css.trustText}>
+                    <b>One verifier.</b> The same kd-core engine in Rust, CLI, and WASM,
                     one path, bit-for-bit.
                   </span>
                 </div>
@@ -327,16 +339,16 @@ export function Landing({ state }: Props) {
                 <div className={css.trustItem}>
                   <span className={css.trustDot} />
                   <span className={css.trustText}>
-                    <b>Bounded math.</b> KL-divergence and EV caps cap how far any roll
-                    can bend. And the receipt proves it stayed inside them.
+                    <b>Uniform by default.</b> At κ 0 the die is uniform, and the receipt proves
+                    κ 0 was used. A signed stance is bounded by the KL and EV caps, with no hidden
+                    weighting.
                   </span>
                 </div>
                 <p className={css.honest}>
-                  VALID proves the roll seed came from a verified public drand beacon
-                  and the outcome replays from that seed. It does not prove the published
-                  outcome was unbiased: the operator can still grind - privately fail
-                  unfavorable attempts and publish only favorable completed receipts.
-                  Strict witnessed fairness is the v2 protocol, not this per-roll receipt.
+                  This proves the seed&apos;s public provenance and that the outcome replays from
+                  it. It does <b>not yet</b> prove the operator could not privately discard an
+                  unfavourable completed roll and publish only this one. Strict witnessed fairness
+                  is the v2 protocol, not this per-roll receipt.
                 </p>
               </div>
             </Reveal>

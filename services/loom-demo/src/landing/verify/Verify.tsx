@@ -15,18 +15,18 @@ import {
 import css from './Verify.module.css';
 
 /**
- * Client-side receipt verifier. The entire verdict - Ed25519 signature, DRBG
- * sampling replay, face, and metric caps - is computed in the browser by the
+ * Client-side receipt verifier. The entire verdict, Ed25519 signature, DRBG
+ * sampling replay, face, and metric caps, is computed in the browser by the
  * shared kd_receipt engine (wasm), the same code `kd verify --receipt` runs.
  * No receipt or key ever leaves the page.
  */
 
 // A signed sample receipt (kd-api ReceiptV2, d20 κ=0.6) so a first-time visitor
 // can verify something instantly. It is a verbatim copy of the committed golden
-// `goldens/golden_receipt_01_d20.json`, signed by the PUBLIC test key below
-// - never a production signer. If the goldens are ever regenerated, this sample
-// will visibly verify as INVALID on load (the mount auto-verify is the canary);
-// re-copy the golden when that happens.
+// `goldens/golden_receipt_01_d20.json`, signed by the PUBLIC test key below,
+// never a production signer. If the goldens are ever regenerated, this sample
+// will visibly verify as INVALID on load (the mount auto-verify is the canary).
+// Re-copy the golden when that happens.
 const SAMPLE_RECEIPT = `{
   "v": "truerolls-1",
   "id": "00000000-0000-0000-0000-00000000d201",
@@ -56,7 +56,7 @@ const SAMPLE_RECEIPT = `{
 }`;
 
 // PUBLIC test verifying key (base64, kid test-kid-1). Derived from the published
-// test seed; signs the sample receipt and the goldens. NEVER a production key.
+// test seed. Signs the sample receipt and the goldens. NEVER a production key.
 const DEMO_TEST_KEY = 'IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=';
 
 /** Read a receipt's signing key-id (`sig.kid`) without throwing on malformed input. */
@@ -124,9 +124,9 @@ export function Verify() {
     setReport(verifyReceiptWasm(text, key));
   };
 
-  // Pick the verifying key for a receipt: a manually-pasted key wins; otherwise the
+  // Pick the verifying key for a receipt: a manually-pasted key wins. Otherwise the
   // /.well-known key whose kid signed THIS receipt (so a real production receipt verifies
-  // against the production key); otherwise the bundled demo test key (so the test-signed
+  // against the production key). Otherwise the bundled demo test key (so the test-signed
   // sample still verifies VALID offline, or on a prod deploy that doesn't publish test-kid-1).
   const resolveKeyFor = (
     text: string,
@@ -166,12 +166,12 @@ export function Verify() {
       try {
         keys = (await getTruerollsKeys()).keys;
       } catch {
-        /* no live API - the bundled demo key verifies the sample offline */
+        /* no live API, the bundled demo key verifies the sample offline */
       }
       if (cancelled) return;
       setWellKnownKeys(keys);
       // Resolve against the just-fetched keys (state isn't committed yet). The sample is
-      // signed by the published test key; on a prod deploy that doesn't publish that kid
+      // signed by the published test key. On a prod deploy that doesn't publish that kid
       // this falls back to the bundled demo key, so the sample still verifies VALID.
       const sigKid = parseSigKid(SAMPLE_RECEIPT);
       const match = sigKid ? keys.find((k) => k.kid === sigKid) : undefined;
@@ -229,7 +229,7 @@ export function Verify() {
         setTimeout(() => setCopied(null), 1500);
       })
       .catch(() => {
-        /* clipboard blocked - no-op */
+        /* clipboard blocked, no-op */
       });
   };
 
@@ -505,12 +505,11 @@ export function Verify() {
       <section className={css.honest}>
         <h2 className={css.honestTitle}>What this proves. And what it doesn't.</h2>
         <p>
-          A VALID verdict proves the roll seed came from a verified public drand beacon when
-          <code>proof.drand</code> is present, and the outcome replays from that seed. It also
-          proves the receipt was signed by the holder of the key above. VALID does <b>not</b>{' '}
-          prove the published outcome was unbiased: the operator can still <b>grind</b> - privately
-          fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed
-          fairness is the v2 protocol, not this per-roll drand receipt.
+          A VALID verdict proves the receipt was signed by the holder of the published key, and,
+          when <code>proof.drand</code> is present, that the seed came from a verified public drand
+          beacon and the outcome replays from it. It does <b>not yet</b> prove the operator could not
+          privately discard an unfavourable completed roll and publish only this one. Strict witnessed
+          fairness is the v2 protocol, not this per-roll receipt.
         </p>
         <p className={css.honestLinks}>
           <a href="#docs">Read the docs</a> · <a href="#docs-threat-model">the threat model</a>

@@ -62,7 +62,7 @@ export function HeroCredential({ state, onPhase }: Props) {
         onPhase(allOk ? 'sealed' : 'settled');
       })
       .catch(() => {
-        /* leave unverified; phase stays settled */
+        /* leave unverified. Phase stays settled */
       });
     return () => {
       cancelled = true;
@@ -77,12 +77,12 @@ export function HeroCredential({ state, onPhase }: Props) {
       const faces = FACES[entry.die as Die] ?? 20;
       body.face = (entry.face % faces) + 1; // flip one byte
       const res = await postVerifyReceipt(body);
-      // Lift the break into shared state with the tampered body - the hero die, the
+      // Lift the break into shared state with the tampered body, the hero die, the
       // playground seed, the transcript row and the receipt modal all read it, so
       // the broken die is the SAME forged, failing artifact across the page.
       state.markTampered(entry.localId, body, res);
     } catch {
-      /* network error - leave state */
+      /* network error, leave state */
     } finally {
       setBusy(false);
     }

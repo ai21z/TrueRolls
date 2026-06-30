@@ -38,7 +38,7 @@ export function hasDrandProof(value: { proof?: unknown }): boolean {
 }
 
 /**
- * The values a tampered receipt body claims - what every broken-die surface shows
+ * The values a tampered receipt body claims, what every broken-die surface shows
  * (the forged face/κ), so the seed, the credential, the transcript row and the
  * receipt modal all display the same altered artifact instead of the pristine roll.
  */

@@ -1,13 +1,13 @@
 /**
- * DieScene - the TrueRolls hero's marquee 3D visual.
+ * DieScene, the TrueRolls hero's marquee 3D visual.
  *
  * Rendered as the children of <Canvas> (see HeroCanvas). A faceted d20-style
- * die floats, tumbles, settles, gets sealed by a glowing credential ring, and
- * - the money shot - shatters into shards when the credential is tampered.
+ * die floats, tumbles, settles, gets sealed by a glowing credential ring, and,
+ * the money shot, shatters into shards when the credential is tampered.
  *
  * All per-frame motion runs in a single `useFrame` state machine that eases
  * refs toward per-phase targets, so flipping `phase` mid-animation stays smooth.
- * React never re-renders per frame; phase changes only flip target values.
+ * React never re-renders per frame. Phase changes only flip target values.
  *
  * Decorative only (the literal rolled number + receipt live in HTML alongside).
  */
@@ -18,7 +18,7 @@ import { Float } from '@react-three/drei';
 import * as THREE from 'three';
 import type { DieSceneProps, HeroPhase } from './DieScene.types';
 
-/* ── Palette (mirrors theme/tokens.css; three.js needs real Color objects) ── */
+/* ── Palette (mirrors theme/tokens.css, three.js needs real Color objects) ── */
 const COL = {
   dieBase: '#1C1A16',     // accent-tinted dark fill
   dieHi: '#2A261E',       // slightly lifted facet tone
@@ -29,6 +29,16 @@ const COL = {
 } as const;
 
 const SHARD_COUNT = 36;
+
+/**
+ * Magic-numbered d20. Face index (in THREE.IcosahedronGeometry(1,0) order) maps to its
+ * pip number so that opposite faces sum to 21 (1 opposite 20, 2 opposite 19, and so on)
+ * AND every vertex's five faces sum to 52 or 53 (the 52.5 average split six and six). That
+ * is the numerically balanced arrangement that compensates for any physical bias in the
+ * solid. Derived offline against this exact geometry by a backtracking solver over the
+ * antipodal pairs (re-run that solver if the three version ever reorders the faces).
+ */
+const MAGIC_D20 = [1, 4, 14, 18, 15, 16, 12, 13, 2, 10, 3, 7, 17, 20, 6, 19, 11, 5, 9, 8];
 
 /** The pip on a face: where the number sits and how it's oriented, derived once. */
 interface FacePip {
@@ -78,7 +88,7 @@ function buildFacePips(geometry: THREE.BufferGeometry): FacePip[] {
     basis.makeBasis(right, up, normal);
     q.setFromRotationMatrix(basis);
     const p = centroid.addScaledVector(normal, 0.018); // lift off the face to avoid z-fighting
-    pips.push({ num: i + 1, position: [p.x, p.y, p.z], quaternion: [q.x, q.y, q.z, q.w] });
+    pips.push({ num: MAGIC_D20[i] ?? i + 1, position: [p.x, p.y, p.z], quaternion: [q.x, q.y, q.z, q.w] });
   }
   return pips;
 }
@@ -104,7 +114,7 @@ function makeNumberTexture(n: number, color: string): THREE.CanvasTexture {
   cv.height = 128;
   drawNumberGlyph(cv, n, color);
   const tex = new THREE.CanvasTexture(cv);
-  // The canvas is authored in sRGB; tag it so the accent renders as the exact
+  // The canvas is authored in sRGB. Tag it so the accent renders as the exact
   // #7E9488 of the Roll button (untagged it would be treated as linear → washed out).
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -147,7 +157,7 @@ function makeShards(): Shard[] {
   return shards;
 }
 
-/* Eased lerp helpers - frame-rate independent via exponential smoothing. */
+/* Eased lerp helpers, frame-rate independent via exponential smoothing. */
 function damp(current: number, target: number, lambda: number, dt: number): number {
   return THREE.MathUtils.damp(current, target, lambda, dt);
 }
@@ -178,7 +188,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
     [numberTextures, numberGeometry],
   );
 
-  // JetBrains Mono loads async (display=swap); if the glyphs baked in the fallback
+  // JetBrains Mono loads async (display=swap). If the glyphs baked in the fallback
   // monospace face, re-rasterise them once the real font is ready and ask for one
   // redraw (frameloop may be 'demand'/'never', so invalidate is required).
   useEffect(() => {
@@ -203,10 +213,13 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
   const landTarget = useRef(new THREE.Quaternion().setFromEuler(SETTLED_EULER));
   useEffect(() => {
     const t = new THREE.Quaternion();
-    if (face != null && face >= 1 && face <= facePips.length) {
-      // The inverse of the face's frame brings that face dead-on to the camera; the
+    // Find the face that actually carries this number (magic numbering is not sequential),
+    // not facePips[face - 1].
+    const pip = face != null ? facePips.find((p) => p.num === face) : undefined;
+    if (pip) {
+      // The inverse of the face's frame brings that face dead-on to the camera. The
       // tilt then angles the whole die so the number reads as the dominant front face.
-      const q = facePips[face - 1].quaternion;
+      const q = pip.quaternion;
       const inv = new THREE.Quaternion(q[0], q[1], q[2], q[3]).invert();
       const tilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.22, 0.18, 0.04));
       t.copy(tilt).multiply(inv);
@@ -323,7 +336,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
 
   /**
    * Compose a single static frame for reduced-motion. Pure target values, no
-   * easing - die settled, seal present, tamper shows a static red-cracked die.
+   * easing, die settled, seal present, tamper shows a static red-cracked die.
    */
   function composeStatic() {
     const s = sm.current;
@@ -356,12 +369,12 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
       rimLight.current.color.copy(accent);
       rimLight.current.intensity = 7 + kappa * 3;
     }
-    // Park the shards out of sight; in reduced motion we never animate them.
+    // Park the shards out of sight. In reduced motion we never animate them.
     if (shardInst.current) shardInst.current.visible = false;
     s.shatter = 0;
 
     // Thermal: cooled char for settled/sealed/idle, the anneal is motion so it
-    // never plays under reduced motion - we render its resting (cooled) frame.
+    // never plays under reduced motion, we render its resting (cooled) frame.
     s.cool = phase === 'rolling' ? 0 : 1;
     const dieShader = dieMaterial.userData.shader as
       | { uniforms: { uCool: { value: number } } }
@@ -442,7 +455,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
     if (dieGroup.current) {
       const g = dieGroup.current;
       if (isTumbling || s.tumble > 0.02) {
-        // Fast multi-axis tumble; magnitude scales with tumble energy.
+        // Fast multi-axis tumble. Magnitude scales with tumble energy.
         const e = s.tumble;
         g.rotation.x += dt * (1.2 + 7.5 * e);
         g.rotation.y += dt * (1.6 + 9.0 * e);
@@ -457,7 +470,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
         // settled / sealed / (pre-shatter): ease to the rolled face, toward camera.
         g.quaternion.slerp(landTarget.current, 1 - Math.exp(-6 * dt));
       }
-      // Hide the die once it has fully shattered; reveal as it re-forms.
+      // Hide the die once it has fully shattered. Reveal as it re-forms.
       const dieVisible = !(tampered && s.shatter > 0.6);
       if (dieMesh.current) dieMesh.current.visible = dieVisible;
       if (numbersGroup.current) numbersGroup.current.visible = dieVisible;
@@ -500,7 +513,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
       const inst = shardInst.current;
       if (s.shatter > 0.001 && s.shardsArmed) {
         inst.visible = true;
-        // Decay the shatter life; gravity + drag on each shard.
+        // Decay the shatter life. Gravity + drag on each shard.
         s.shatter = Math.max(0, s.shatter - dt * 0.85);
         for (let i = 0; i < s.shards.length; i++) {
           const sh = s.shards[i];
@@ -556,7 +569,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
       <pointLight position={[2, -3, 3]} intensity={0.8} color={COL.accentDeep} distance={14} />
 
       {/* ── The die. Float adds the elegant idle bob/sway (disabled in
-          reduced motion via `enabled`); the inner group does all rotation. ── */}
+          reduced motion via `enabled`). The inner group does all rotation. ── */}
       <Float
         enabled={!reducedMotion && (phase === 'idle')}
         speed={1.4}
@@ -566,24 +579,25 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
       >
         <group ref={dieGroup}>
           <mesh ref={dieMesh} geometry={dieGeometry} material={dieMaterial} />
-          {/* Hairline edge accent - reads premium without neon. Hidden with the
+          {/* Hairline edge accent, reads premium without neon. Hidden with the
               die on shatter so it doesn't ghost as a wireframe. */}
           <lineSegments ref={dieEdges}>
             <edgesGeometry args={[dieGeometry]} />
             <lineBasicMaterial color="#6e8478" transparent opacity={0.32} />
           </lineSegments>
-          {/* d20 face numbers - accent glyphs lifted just off each face, tumbling
+          {/* d20 face numbers, accent glyphs lifted just off each face, tumbling
               and scaling with the die, hidden with it on shatter. */}
           <group ref={numbersGroup}>
-            {facePips.map((p) => (
+            {facePips.map((p, i) => (
               <mesh
                 key={p.num}
                 geometry={numberGeometry}
                 position={p.position}
                 quaternion={p.quaternion}
               >
+                {/* numberTextures is indexed by face order (i), matching facePips. */}
                 <meshBasicMaterial
-                  map={numberTextures[p.num - 1]}
+                  map={numberTextures[i]}
                   transparent
                   depthWrite={false}
                   toneMapped={false}

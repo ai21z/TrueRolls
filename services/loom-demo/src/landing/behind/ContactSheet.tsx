@@ -1,10 +1,10 @@
 import css from './ContactSheet.module.css';
 
 /**
- * ContactSheet - surface C of Behind a TrueRoll (docs/design/behind-a-roll.md).
+ * ContactSheet, surface C of Behind a TrueRoll (docs/design/behind-a-roll.md).
  *
  * The verification chain compressed: a verdict pill plus one carved cell per
- * stratum, showing the real state from the verifier. It is the page index -
+ * stratum, showing the real state from the verifier. It is the page index,
  * clicking a cell focuses that stratum on the Specimen Plate (B) and scrolls to
  * it. Purely presentational: every state/word is passed in from B's real report.
  */
@@ -22,6 +22,8 @@ interface ContactSheetProps {
   cells: Cell[];
   active: number;
   verdict?: 'VALID' | 'INVALID' | 'ERROR';
+  /** Version-aware proof scope from B's proof model. Null unless VALID. */
+  scope?: string | null;
   onSelect: (index: number) => void;
 }
 
@@ -31,7 +33,7 @@ const VERDICT_LABEL: Record<string, string> = {
   ERROR: 'UNVERIFIABLE',
 };
 
-export function ContactSheet({ cells, active, verdict, onSelect }: ContactSheetProps) {
+export function ContactSheet({ cells, active, verdict, scope, onSelect }: ContactSheetProps) {
   const vClass =
     verdict === 'VALID' ? css.vValid : verdict === 'INVALID' ? css.vInvalid : css.vNeutral;
   return (
@@ -41,7 +43,7 @@ export function ContactSheet({ cells, active, verdict, onSelect }: ContactSheetP
         {verdict && (
           <span className={`${css.verdict} ${vClass}`}>{VERDICT_LABEL[verdict] ?? verdict}</span>
         )}
-        {verdict === 'VALID' && <span className={css.scope}>provenance + replay only</span>}
+        {scope && <span className={css.scope}>{scope}</span>}
       </div>
       <div className={css.grid}>
         {cells.map((c, i) => (

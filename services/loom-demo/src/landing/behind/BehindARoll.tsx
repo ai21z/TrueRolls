@@ -6,7 +6,7 @@ import { SiteSignature } from '../system/SiteSignature';
 import { CeremonyRail } from './CeremonyRail';
 import { ContactSheet } from './ContactSheet';
 import { KappaBaseline } from './KappaBaseline';
-import { asRecord, hasBeacon, readField, shorten } from './receiptFields';
+import { asRecord, hasBeacon, isLegacyReceipt, proofScope, readField, shorten } from './receiptFields';
 import {
   initKdCoreWasm,
   isKdCoreWasmReady,
@@ -16,7 +16,7 @@ import {
 import css from './BehindARoll.module.css';
 
 /**
- * Behind a TrueRoll - the Specimen Plate (surface B of the design note
+ * Behind a TrueRoll, the Specimen Plate (surface B of the design note
  * docs/design/behind-a-roll.md). The real WASM verifier runs in the browser and
  * its per-check booleans are rendered as a stepped, forensic evidence chain. No
  * server testimony: every stratum's pass/fail comes from the same kd_receipt
@@ -27,7 +27,7 @@ import css from './BehindARoll.module.css';
 // Bundled real truerolls-drand-1 sample: a verbatim copy of the committed golden
 // goldens/golden_receipt_03_d20_drand.json, signed by the PUBLIC test key below
 // (never a production signer). If the goldens are ever regenerated, this sample
-// will visibly verify INVALID on load - the mount auto-verify is the canary.
+// will visibly verify INVALID on load. The mount auto-verify is the canary.
 const SAMPLE_DRAND_RECEIPT = `{
   "alpha": 0.3213648106902838,
   "created_at": "2026-01-01T00:00:00Z",
@@ -117,16 +117,21 @@ function statusFrom(ok: boolean | undefined): StratumStatus {
 
 /**
  * Map the real verifier report + the receipt's own fields onto the forensic
- * strata. Each status comes straight from the engine's per-check booleans; the
+ * strata. Each status comes straight from the engine's per-check booleans. The
  * field values are read verbatim from the receipt. Nothing here re-judges the
- * receipt - it only arranges what the verifier already decided.
+ * receipt, it only arranges what the verifier already decided.
  */
 function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyReport | null): Stratum[] {
   const proof = asRecord(parsed?.proof);
   const rng = asRecord(proof.rng);
-  const drand = proof.drand != null ? asRecord(proof.drand) : null;
   const sig = asRecord(parsed?.sig);
-  const beacon = drand !== null;
+  // Version-gated (NOT field-presence): a legacy receipt with a stray proof.drand
+  // block is NOT beacon-backed. The engine never verified it. Mirrors hasBeacon
+  // so B's drand stratum can never disagree with A/C. `drand` fields are only read
+  // inside the `beacon` branch below. For legacy the absent branch ignores them.
+  const beacon = hasBeacon(parsed);
+  const legacy = isLegacyReceipt(parsed);
+  const drand = asRecord(proof.drand);
 
   const strata: Stratum[] = [
     {
@@ -139,8 +144,8 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
         { label: 'receipt_hash', value: shorten(readField(parsed ?? {}, 'receipt_hash')) || '-' },
       ],
       proves:
-        'The body, canonicalised (JCS / RFC 8785), verifies against the published Ed25519 key. Any edit cracks the seal.',
-      limit: 'Proves integrity and who signed - not when it was signed.',
+        'The body, canonicalised (JCS / RFC 8785), is checked against the Ed25519 public key shown below. Any edit cracks the seal.',
+      limit: 'Proves integrity and who signed, not when it was signed.',
     },
   ];
 
@@ -156,9 +161,9 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
         { label: 'chain', value: shorten(readField(drand, 'chain_hash')) || '-' },
       ],
       proves:
-        'Both the observed and target pulses BLS-verify against the pinned quicknet key, and randomness = SHA256(verified signature).',
+        'Both the observed and target pulses must BLS-verify against the pinned quicknet key, with randomness = SHA256 of the verified signature.',
       limit:
-        'Proves the seed came from a public future beacon - not that the operator could not refuse or suppress a completed roll.',
+        'Proves the seed came from a public future beacon, not that the operator could not refuse or suppress a completed roll.',
     });
   } else {
     strata.push({
@@ -167,9 +172,12 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
       tag: 'Absent',
       status: 'absent',
       fields: [{ label: 'proof.drand', value: 'not present' }],
-      proves:
-        'This is a legacy truerolls-1 receipt: signature and replay only, with no public-beacon seed provenance.',
-      limit: 'No drand provenance. Read it as signed and replayable, not beacon-backed.',
+      proves: legacy
+        ? 'This is a legacy truerolls-1 receipt: signature and replay only, with no public-beacon seed provenance.'
+        : 'No drand beacon is present in this receipt.',
+      limit: legacy
+        ? 'No drand provenance. Read it as signed and replayable, not beacon-backed.'
+        : 'No drand provenance. This receipt is not beacon-backed.',
     });
   }
 
@@ -184,9 +192,9 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
         { label: 'draw_u64', value: readField(proof, 'draw_u64') || '-' },
       ],
       proves: beacon
-        ? 'HKDF re-derives the seed from the verified pulse, then ChaCha20 replays the exact draw - bit for bit.'
-        : 'The published seed re-seeds ChaCha20 and replays the exact draw - bit for bit.',
-      limit: 'A pure function of public inputs - which is why you can redo it yourself.',
+        ? 'HKDF re-derives the seed from the pulse and ChaCha20 replays the draw, it must match the receipt bit for bit.'
+        : 'The published seed re-seeds ChaCha20 to replay the draw, it must match the receipt bit for bit.',
+      limit: 'A pure function of public inputs, which is why you can redo it yourself.',
     },
     {
       key: 'face',
@@ -200,8 +208,9 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
           : []),
       ],
       proves:
-        'kd-core rebuilds the guarded distribution from die and κ and lands on the same face. Prefix-CDF, no modulo bias.',
-      limit: 'κ shapes bounded risk only. It never moves the draw itself.',
+        'kd-core rebuilds the guarded distribution from die and κ. The recomputed face must match the receipt. Prefix-CDF, no modulo bias.',
+      limit:
+        'κ is a signed input to both the seed and the distribution, bounded by the KL/EV caps and recomputed here, never a hidden nudge.',
     },
     {
       key: 'metrics',
@@ -213,8 +222,8 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
         { label: 'KL', value: readField(parsed ?? {}, 'kl') || '-' },
         { label: 'EV', value: readField(parsed ?? {}, 'ev') || '-' },
       ],
-      proves: 'α, KL and EV recompute within the caps (tolerance 1e-9).',
-      limit: 'The bound is enforced and public; the stance is visible, not hidden.',
+      proves: 'α, KL and EV are recomputed and must fall within the caps (tolerance 1e-9).',
+      limit: 'The bound is enforced and public. The stance is visible, not hidden.',
     },
   );
 
@@ -236,7 +245,7 @@ const STATE_CLASS: Record<StratumStatus, string> = {
 
 // "sealed" is reserved for the literal Ed25519 seal (the Signature stratum). The
 // other strata are recomputations, so a held recomputation reads "holds", not
-// "sealed" - the word must not imply a stronger guarantee than a re-derivation
+// "sealed". The word must not imply a stronger guarantee than a re-derivation
 // that matched. The carved-cell fill (STATE_CLASS) stays the same green either way.
 function stateWord(status: StratumStatus, key: string): string {
   if (status === 'pass') return key === 'signature' ? 'sealed' : 'holds';
@@ -251,6 +260,12 @@ const SHORT_LABEL: Record<string, string> = {
   face: 'Outcome',
   metrics: 'Metrics',
 };
+
+// 'smooth' unless the user prefers reduced motion. CSS reduced-motion does not
+// override a JS behavior:'smooth' (WCAG 2.3.3 / honoring the OS setting).
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
 
 export function BehindARoll() {
   const [receiptText, setReceiptText] = useState<string>(SAMPLE_DRAND_RECEIPT);
@@ -270,10 +285,14 @@ export function BehindARoll() {
     status: s.status,
     word: stateWord(s.status, s.key),
   }));
-  const scrollToPlate = () =>
+  const scrollToPlate = () => {
     document
       .getElementById('specimen-plate')
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      ?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+    // Move keyboard focus to the plate so the rail's "re-examine" hand-off does
+    // not strand the user back at the rail (WCAG 2.4.3 focus order).
+    window.setTimeout(() => bandRefs.current[active]?.focus({ preventScroll: true }), 0);
+  };
 
   const runWith = (text: string, key: string) => {
     if (!isKdCoreWasmReady()) {
@@ -284,8 +303,8 @@ export function BehindARoll() {
     setActive(0);
   };
 
-  // A manually-pasted key is honoured as-is; otherwise the /.well-known key whose
-  // kid signed THIS receipt; otherwise the bundled demo test key (so the sample
+  // A manually-pasted key is honoured as-is, otherwise the /.well-known key whose
+  // kid signed THIS receipt, otherwise the bundled demo test key (so the sample
   // still verifies offline).
   const resolveKeyFor = (text: string, keys: TruerollsKey[]): string => {
     const sigKid = parseSigKid(text);
@@ -294,7 +313,7 @@ export function BehindARoll() {
   };
 
   const verify = (text: string, edited: boolean = keyEdited) => {
-    // A key the user typed wins as-is; otherwise resolve well-known/demo by kid.
+    // A key the user typed wins as-is, otherwise resolve well-known/demo by kid.
     // `edited` is threaded explicitly so loadSample/onFile can force a re-resolve
     // without waiting on the async keyEdited state update.
     const key = edited ? publicKey : resolveKeyFor(text, wellKnownKeys);
@@ -314,7 +333,7 @@ export function BehindARoll() {
       try {
         keys = (await getTruerollsKeys()).keys;
       } catch {
-        /* no live API - the bundled demo key verifies the sample offline */
+        /* no live API, the bundled demo key verifies the sample offline */
       }
       if (cancelled) return;
       setWellKnownKeys(keys);
@@ -363,7 +382,17 @@ export function BehindARoll() {
   const verdictWord = isError ? 'UNVERIFIABLE' : isValid ? 'VALID' : 'INVALID';
   const verdictClass = isError ? css.verdictError : isValid ? css.verdictValid : css.verdictInvalid;
   const beacon = hasBeacon(parsed);
-  const isLegacy = parsed !== null && !beacon;
+  // Precise version (NOT just "non-drand"): an unsupported-version or malformed
+  // receipt is neither drand nor legacy, and must not be narrated as legacy.
+  const isLegacy = isLegacyReceipt(parsed);
+  // Version-aware proof scope (null unless VALID): one source of truth shared by
+  // the B pill, the C pill, and the closing prose so they can never disagree.
+  const scopeText = proofScope(parsed, report);
+  // Artifact vs key provenance are distinct: the bundled sample is the committed
+  // golden text. The demo test key can also sign an UPLOADED receipt or be the
+  // offline fallback, so the badge must not call those a "bundled sample".
+  const isSample = receiptText === SAMPLE_DRAND_RECEIPT;
+  const isDemoKey = publicKey === DEMO_TEST_KEY;
   const dieVal = parsed?.die;
   const kappaRaw = parsed?.kappa;
   const die = typeof dieVal === 'string' ? dieVal : '';
@@ -411,19 +440,20 @@ export function BehindARoll() {
         </span>
       </div>
 
-      <CeremonyRail parsed={parsed} onReExamine={scrollToPlate} />
+      <CeremonyRail parsed={parsed} report={report} onReExamine={scrollToPlate} />
 
       <ContactSheet
         cells={cells}
         active={active}
         verdict={report?.verdict}
+        scope={scopeText}
         onSelect={(i) => {
           setActive(i);
           // setTimeout (not rAF) so focus still lands after the re-render even when
           // the tab is backgrounded, where requestAnimationFrame is paused.
           window.setTimeout(() => {
             const el = bandRefs.current[i];
-            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el?.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
             el?.focus({ preventScroll: true });
           }, 0);
         }}
@@ -451,6 +481,14 @@ export function BehindARoll() {
               />
             </div>
           </div>
+
+          {(isSample || isDemoKey) && (
+            <p className={css.testKeyBadge} role="note">
+              {isSample
+                ? '● bundled sample · public test key, demo only, not production evidence'
+                : '● public test key, not production evidence (the key in use is the demo key)'}
+            </p>
+          )}
 
           <textarea
             className={css.textarea}
@@ -496,13 +534,13 @@ export function BehindARoll() {
 
           <div className={`${css.verdict} ${verdictClass}`} role="status" aria-live="polite">
             <span className={css.verdictWord}>{verdictWord}</span>
-            {isValid && <span className={css.verdictScope}>seed provenance + replay only</span>}
+            {scopeText && <span className={css.verdictScope}>{scopeText}</span>}
             <span className={css.verdictSub}>
               {isError
                 ? report?.error
                 : isValid
                   ? isLegacy
-                    ? 'Signed and replayable. Legacy receipt - no drand provenance.'
+                    ? 'Signed and replayable. Legacy receipt, no drand provenance.'
                     : 'Signed, drand-seeded, and bit-for-bit replayable.'
                   : 'One or more strata did not hold.'}
             </span>
@@ -521,6 +559,7 @@ export function BehindARoll() {
                   type="button"
                   className={`${css.band} ${focused ? css.focus : ''} ${stateClass}`}
                   aria-expanded={focused}
+                  aria-controls={`stratum-detail-${s.key}`}
                   onClick={() => setActive(i)}
                 >
                   <span className={`${css.assay} ${stateClass}`} aria-hidden="true" />
@@ -537,7 +576,7 @@ export function BehindARoll() {
                         </span>
                       ))}
                     </div>
-                    <div className={css.bandDetail}>
+                    <div className={css.bandDetail} id={`stratum-detail-${s.key}`}>
                       {focused && <p className={css.proves}>{s.proves}</p>}
                       <p className={css.limit}>
                         <span className={css.limitTag}>Limit</span> {s.limit}
@@ -571,15 +610,31 @@ export function BehindARoll() {
         </InkFrame>
       </div>
 
-      <KappaBaseline die={die} kappa={kappaNum} ready={report != null} />
+      <KappaBaseline die={die} kappa={kappaNum} valid={isValid} beacon={beacon} />
 
       <section className={css.honest}>
         <h2 className={css.honestTitle}>What a sealed plate proves. And what it doesn't.</h2>
         <p>
-          When every stratum holds, the roll is <b>drand-seeded and bit-for-bit replayable</b> - and
-          you confirmed it yourself, with no server in the loop. It does <b>not</b> prove the operator
-          could not have privately failed an unfavourable attempt and published only this one.
-          Strict witnessed fairness is the v2 protocol, not this per-roll drand receipt.
+          {beacon ? (
+            <>
+              When every stratum holds, a drand receipt is <b>drand-seeded and bit-for-bit
+              replayable</b>, and you confirmed it yourself, with no server in the loop.
+            </>
+          ) : isLegacy ? (
+            <>
+              When every stratum holds, a legacy receipt is <b>signed and bit-for-bit replayable</b>,
+              and you confirmed it yourself, with no server in the loop. It carries{' '}
+              <b>no public-beacon seed provenance</b>.
+            </>
+          ) : (
+            <>
+              When every stratum holds, a receipt is <b>signed and bit-for-bit replayable</b>, and you
+              confirmed it yourself, with no server in the loop.
+            </>
+          )}{' '}
+          It does <b>not</b> prove the operator could not have privately failed an unfavourable attempt
+          and published only this one. Strict witnessed fairness is the v2 protocol, not this per-roll
+          drand receipt.
         </p>
         <p className={css.honestLinks}>
           <a href="#verify">Verify your own receipt</a> · <a href="#docs">read the docs</a>

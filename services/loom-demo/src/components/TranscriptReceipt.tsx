@@ -37,7 +37,7 @@ function statusPill(entry: TranscriptEntry, mock: boolean): { label: string; ton
   }
 }
 
-/** Check rows derived 1:1 from a ReceiptVerifyResponse - never fabricated. */
+/** Check rows derived 1:1 from a ReceiptVerifyResponse, never fabricated. */
 function receiptCheckRows(res: ReceiptVerifyResponse, hasDrandProof: boolean): VerifyCheckRow[] {
   const rows = [
     { id: 'signature', label: 'Signature (Ed25519)', ok: res.valid_signature },
@@ -60,7 +60,7 @@ function tamperSummary(res: ReceiptVerifyResponse, hasDrandProof: boolean): stri
     res.metrics_ok;
   if (allOk) {
     return hasDrandProof
-      ? 'VALID proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. VALID does not prove the published outcome was unbiased: the operator can still grind - privately fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed fairness is the v2 protocol.'
+      ? 'VALID: signed, the drand seed provenance verifies, and the outcome replays from that seed. It does not yet prove an unfavourable completed roll could not have been withheld. Strict witnessed fairness is the v2 protocol.'
       : 'VALID proves the signed receipt replays deterministically. This legacy receipt has no drand proof.';
   }
   if (!res.valid_signature) {
@@ -83,7 +83,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // A broken die reads broken here too: forged values, failed checks, and a
-  // copy/verify that uses the tampered body - never the pristine receipt. The break
+  // copy/verify that uses the tampered body, never the pristine receipt. The break
   // lives on the entry, so it persists across re-rolls and reloads.
   const tampered = entry.tampered ?? null;
   const broken = !!tampered;
@@ -91,7 +91,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
     ? tamperedView(tampered.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
     : { face: entry.face, kappa: entry.kappa, die: entry.die };
 
-  // Tamper demo is only shown for signed receipts from the live API; mock
+  // Tamper demo is only shown for signed receipts from the live API. Mock
   // receipts have no signature and nothing real to verify against.
   const isReceiptVersion = entry.v === 'truerolls-1' || entry.v === 'truerolls-drand-1';
   const isSignedLive = isReceiptVersion && !!entry.sig && !mock;
@@ -155,7 +155,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
         if (match) setPublicKey(match.public_key);
       })
       .catch(() => {
-        /* key fetch failed - the snippet keeps the placeholder */
+        /* key fetch failed, the snippet keeps the placeholder */
       });
     return () => {
       cancelled = true;
@@ -206,7 +206,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
       const res = await postVerifyReceipt(parsed);
       setTamperResult(res);
       // Lift the result into shared state so the hero die, the seed, this row and
-      // modal all agree. A failing edit breaks the die everywhere; reverting it back
+      // modal all agree. A failing edit breaks the die everywhere. Reverting it back
       // to a passing receipt restores the valid die. The stored receipt is untouched.
       const allOk =
         res.valid_signature &&
@@ -237,8 +237,8 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
 
   const klCap = KL_CAPS[entry.die as Die] ?? KL_CAPS.d20;
   // When broken, the verification block, the pill and the verdict all read the
-  // shared tamper result - never the stored (valid) checks. Old sessions may have
-  // persisted the pre-KD-029 object shape; only render response-derived rows.
+  // shared tamper result, never the stored (valid) checks. Old sessions may have
+  // persisted the pre-KD-029 object shape. Only render response-derived rows.
   const storedChecks = Array.isArray(entry.verifyChecks)
     ? entry.verifyChecks.filter((row) => hasDrandProof || row.id !== 'drand')
     : null;
@@ -252,7 +252,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
   const signedKid = entry.sig?.kid ?? null;
 
-  // Shareable receipt JSON - the tampered body when broken (so copy/verify genuinely
+  // Shareable receipt JSON, the tampered body when broken (so copy/verify genuinely
   // fail), else the canonical ReceiptV2 body, else the legacy subset.
   const receiptJson = broken && tampered
     ? JSON.stringify(tampered.body, null, 2)
@@ -304,7 +304,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
           </div>
         </div>
 
-        {/* Verifier checks - rendered 1:1 from the verifier response. */}
+        {/* Verifier checks, rendered 1:1 from the verifier response. */}
         {checks && checks.length > 0 && (
           <section className={css.section}>
             <div className={css.sectionLabel}>Verification</div>
@@ -404,19 +404,17 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
           </button>
         </div>
 
-        {/* ── Tamper demo - signed live receipts only ── */}
+        {/* ── Tamper demo, signed live receipts only ── */}
         {isSignedLive && (
           <section className={css.tamperSection}>
             <div className={css.tamperTitle}>Tamper demo</div>
             <p className={css.tamperNote}>
               Edit a copy of this signed receipt and re-verify it against the server.
               Ed25519 signature verification catches any post-signing edit. Deterministic
-              replay recomputes draw, face and metrics. For drand receipts, VALID proves
-              the roll seed came from a verified public drand beacon and the outcome replays
-              from that seed. VALID does not prove the published outcome was unbiased: the
-              operator can still grind - privately fail unfavorable attempts and publish only
-              favorable completed receipts. Strict witnessed fairness is the v2 protocol. The
-              original roll's status is never changed by this demo.
+              replay recomputes draw, face and metrics. For drand receipts, VALID also verifies
+              the public drand seed provenance and the replay from that seed. (It does not yet
+              prove an unfavourable completed roll could not have been withheld. That is the v2
+              protocol.) The original roll's status is never changed by this demo.
             </p>
 
             <div className={css.tamperBtnRow}>

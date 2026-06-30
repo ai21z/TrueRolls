@@ -1,4 +1,4 @@
-# Behind a TrueRoll - design note
+# Behind a TrueRoll, design note
 
 > **Provenance.** Design note, 2026-06-29. Locks the concept and the honesty
 > contract for an interactive educational page BEFORE any component code is
@@ -7,17 +7,17 @@
 > implementation is described here as shipped unless explicitly marked so.
 >
 > Build target: `services/loom-demo` in THIS repo (truerolls). The page is a new
-> route; the existing `/verify` page is left focused and untouched.
+> route. The existing `/verify` page is left focused and untouched.
 
 Companion notes:
 
-- [`../../crates/kd-receipt/src/lib.rs`](../../crates/kd-receipt/src/lib.rs) - the single shared verifier the page reuses.
+- [`../../crates/kd-receipt/src/lib.rs`](../../crates/kd-receipt/src/lib.rs), the single shared verifier the page reuses.
 - [`auth-and-key-lifecycle.md`](auth-and-key-lifecycle.md)
 - drand backing + replay scope: the receipt versions `truerolls-1` (legacy, no drand) and `truerolls-drand-1` (beacon-backed).
 
 ---
 
-## Part 0 - the honesty contract (governs everything below)
+## Part 0, the honesty contract (governs everything below)
 
 This page exists to make the trust chain visible. It must never make a roll look
 more fair than it is. These rules are non-negotiable and precede layout:
@@ -45,10 +45,10 @@ Every per-station detail panel also carries its own `Limit` line.
 
 ---
 
-## Part 1 - the metaphor and the aesthetic
+## Part 1, the metaphor and the aesthetic
 
 The page reads a roll as a forensic chain of custody. This is not imposed on the
-site; it extends the existing NECROGRAPHY vocabulary already used by
+site. It extends the existing NECROGRAPHY vocabulary already used by
 `RollSigil`: "a roll is a death; the receipt is its residue; read the residue as
 a forensic lineage."
 
@@ -64,11 +64,11 @@ House rules taken from the live tokens (`src/theme/tokens.css`) and `RollSigil`:
 - Forensic state words, not "valid/invalid": e.g. Unsealed / Sealed / Severed.
 - The warm focal (ember `--kd-focal`) marks the *cut in the fairness claim*: a
   failure (`severed`) and the persistent honesty-limit callouts (standing banner,
-  per-stratum `Limit` tags). It is NOT neutral chrome - A's cycling phase label,
+  per-stratum `Limit` tags). It is NOT neutral chrome, A's cycling phase label,
   which passes through success phases too, uses a muted tone, never the focal.
-- Grain on every plate; hand-drawn ink borders (`InkFrame`/`inkRect`); the
-  carved assay cell whose fill is its state; tiny mono "measure" captions.
-- Verified = fungal green `--kd-ember`; tamper = blood red `--kd-fail`;
+- Grain on every plate, hand-drawn ink borders (`InkFrame`/`inkRect`), the
+  carved assay cell whose fill is its state, tiny mono "measure" captions.
+- Verified = fungal green `--kd-ember`, tamper = blood red `--kd-fail`,
   structural accent = ashen green `--kd-accent`.
 
 Framing discipline: the die is witnessed and re-checked, not transformed by a
@@ -77,7 +77,7 @@ Framing discipline: the die is witnessed and re-checked, not transformed by a
 
 ---
 
-## Part 2 - three surfaces, one vocabulary
+## Part 2, three surfaces, one vocabulary
 
 | Surface | Role | What it is | Status |
 |---------|------|-----------|--------|
@@ -87,12 +87,12 @@ Framing discipline: the die is witnessed and re-checked, not transformed by a
 
 Route decision: a new dedicated route `/behind-a-roll`. The existing `/verify`
 stays a focused receipt verifier. Rationale: `/verify` does one job (verify a
-pasted/uploaded receipt); mixing in the full teaching flow would overload a
+pasted/uploaded receipt). Mixing in the full teaching flow would overload a
 working trust page.
 
 ---
 
-## Part 3 - the nine stations and the artifact
+## Part 3, the nine stations and the artifact
 
 Zones: 01-03 CLIENT, 04-08 SERVER, 09 YOUR BROWSER.
 
@@ -119,16 +119,19 @@ sealed receipt the Ed25519 stamp at 08 turns the draft into a solid receipt,
 ```
 
 Rule: nothing is drawn as a signed receipt before station 08. A station only
-seals (fungal green) behind the artifact; ahead is dotted/unwitnessed.
+seals (fungal green) behind the artifact. Ahead is dotted/unwitnessed.
 
-Animation honesty (station 07): show the seed fixed FIRST, then the draw landing
-in whichever prefix-CDF bucket. kappa only reshapes bucket widths, within the
-KL/EV caps drawn as visible walls, BEFORE the draw exists. Never show kappa
-nudging the die toward a "good" face.
+Animation honesty (station 07): kappa is a signed, public input bound into BOTH
+the seed derivation (kd-drand `hkdf_info` includes kappa) AND the guarded
+distribution, it is NOT applied "after" a kappa-independent seed. So a different
+kappa yields a different seed and a different draw, do not imply kappa is separable
+from the seed or that it "only reshapes buckets after the draw is fixed". Show the
+draw landing in whichever prefix-CDF bucket, with the KL/EV caps drawn as visible
+walls. Never show kappa nudging the die toward a "good" face.
 
 ---
 
-## Part 4 - what is real, and what is "confirmed by recompute"
+## Part 4, what is real, and what is "confirmed by recompute"
 
 Established by step 0 (commit `ebb0008`): the compiled `kd-core-wasm` bundle's
 drand BLS pulse verify RUNS in wasm32. It accepts a real `truerolls-drand-1`
@@ -140,10 +143,10 @@ pinned by host tests in `kd-core-wasm`.
 
 | Stations | Realness on the page | Why |
 |----------|----------------------|-----|
-| 01-03 client | real, live | browser mints nonce, fetches + BLS-verifies the frontier, locks observed+2 |
-| 05 beacon reveal | real, live | the browser independently fetches + BLS-verifies the target pulse when it publishes (proven runnable in wasm by step 0) |
+| 01-03 client | real, live (fetch only) | the browser mints the nonce, fetches the latest drand frontier and locks target = observed+2. At roll time the frontier is only **shape-checked** (`client.ts fetchLatestDrandPulse`), NOT BLS-verified - the BLS check of that pulse happens at station 09. Do not claim a client-side BLS check. |
+| 05 beacon reveal | server-side at mint, re-verified at 09 | the target pulse is revealed and BLS-verified **server-side** during minting; the browser independently re-verifies it (BLS) at station 09 when checking the receipt. It is NOT a live browser BLS check at roll time. |
 | 04, 06, 07, 08 server-internal | real by RECOMPUTE, not live | not watchable as they happen; station 09 re-derives seed/draw/face/sig in the browser and matches. This is stronger than server self-narration. |
-| 09 re-examine | real, now | `verifyReceiptJson` -> `kd_receipt::verify_receipt_str` runs the full check (Ed25519, drand BLS, HKDF, ChaCha20 replay, kd-core recompute) |
+| 09 re-examine | real, now | `verifyReceiptJson` -> `kd_receipt::verify_receipt_str` runs the full check (Ed25519, **drand BLS**, HKDF, ChaCha20 replay, kd-core recompute). This is the ONLY place the browser BLS-verifies the pulses; step 0 (commit `ebb0008`) proved that runs in wasm32. |
 
 Hard rule from Part 0: NO fake server testimony. The page must not stream
 invented "server is now deriving the seed" progress. Server-internal stations
@@ -152,7 +155,7 @@ browser's own recompute. No backend SSE/trace endpoint is built or implied.
 
 ---
 
-## Part 5 - the kappa = 0 baseline (educational, not proof of fairness)
+## Part 5, the kappa = 0 baseline (educational, not proof of fairness)
 
 The page can run at `kappa = 0` (the neutral die, uniform by construction) and at
 a non-zero stance. Purpose: let any observer see that the neutral die is flat,
@@ -160,39 +163,44 @@ then see a stance bend stay inside the KL/EV caps. The receipt carries the signe
 `kappa`, and the verifier recomputes the exact distribution for whatever kappa it
 is, so no reading is hidden.
 
-This is a transparency aid, NOT a fairness proof. `kappa = 0` being flat does not
-prove anything about whether the operator could suppress an attempt; it only
-shows that, given a roll that completed, the neutral stance does not weight the
-die. State this on the page; do not let the baseline imply more.
+This is a transparency aid, NOT a fairness proof, and NOT a same-roll
+counterfactual. kappa is bound into the seed derivation (kd-drand `hkdf_info`), so
+a different kappa would produce a different seed and a different draw, the two
+bars compare the DISTRIBUTIONS the engine produces for this die at each stance,
+not one fixed roll with the stance toggled. `kappa = 0` being flat does not prove
+anything about whether the operator could suppress an attempt, it only shows the
+neutral stance does not weight the die. The panel renders only for a receipt that
+verified VALID (never a rejected receipt's claimed stance). State this on the
+page, do not let the baseline imply more.
 
 ---
 
-## Part 6 - legacy receipts degrade honestly
+## Part 6, legacy receipts degrade honestly
 
 The page reads `receipt.v`:
 
 - `truerolls-drand-1`: the full beacon-backed chain above.
-- `truerolls-1` (legacy, no drand): show ONLY the honest reduced chain -
+- `truerolls-1` (legacy, no drand): show ONLY the honest reduced chain,
   signature + sampling/face/metrics replay. The drand stations (02, 05, and the
   beacon-provenance parts of 09) are explicitly marked "not present for this
-  receipt - no drand provenance." Never render a legacy receipt as if it had a
+  receipt, no drand provenance." Never render a legacy receipt as if it had a
   verified beacon seed.
 
 **All three surfaces obey this from one predicate** (`hasBeacon` in
 `receiptFields.ts`): B and C mark the drand stratum absent, and A (the ceremony)
-marks the beacon stations (01/02/03/05) absent - they never seal, and their copy
+marks the beacon stations (01/02/03/05) absent, they never seal, and their copy
 never asserts a verification that did not happen.
 
 This turns the legacy gap into a teaching moment instead of hiding it.
 
 ---
 
-## Part 7 - implementation boundary (first cut)
+## Part 7, implementation boundary (first cut)
 
 In scope for the first build (after this note):
 
 1. New route `/behind-a-roll` (hash-routed, consistent with the existing app).
-2. B - the Specimen Plate: instrument the existing WASM verify path
+2. B, the Specimen Plate: instrument the existing WASM verify path
    (`src/api/wasmEngine.ts` -> `verifyReceiptJson`) to surface one step per
    check, fed by a real `truerolls-drand-1` receipt (a bundled sample, then the
    user's own). Reuse, do not fork, the verifier.
@@ -201,13 +209,13 @@ In scope for the first build (after this note):
 
 Out of scope for the first cut (later steps, same note governs them):
 
-- A - the custody-strand ceremony + artifact animation (build second).
-- C - the contact-sheet index (build third).
-- The `kappa = 0 / kappa` toggle (can ship with A; Part 5 governs it).
+- A, the custody-strand ceremony + artifact animation (build second).
+- C, the contact-sheet index (build third).
+- The `kappa = 0 / kappa` toggle (can ship with A, Part 5 governs it).
 - Any backend change. There is none: the page is pure frontend over the existing
   WASM verifier and public drand relays.
 
-Reduced motion: all animation (A) gated by `prefers-reduced-motion`; the static
+Reduced motion: all animation (A) gated by `prefers-reduced-motion`. The static
 end-state must be fully legible without motion.
 
 ---
@@ -223,5 +231,7 @@ end-state must be fully legible without motion.
 | A (custody strand + artifact animation), version-aware | done, commit `af53ad3` + holistic-review fixes |
 | C (contact sheet / custody index) | done, commit `8696b48` |
 | Holistic adversarial review + fixes (F1-F21 batch) | applied |
-| kappa = 0 baseline panel ("two readings of the die") | done, commit `34730ed` |
+| kappa = 0 baseline panel ("two distributions for this die") | done, commit `34730ed` |
 | Ceremony manual step controls (Back / Next) | done, commit `34730ed` |
+| Trust-boundary + a11y hardening (QA review): version-aware proof model (`proofScope`/version-gated `hasBeacon`), kappa-in-seed copy fixed in page + this note, report-aware rail (severs failed stations), VALID-gated kappa panel, legacy-aware pills/closing, test-key badge, fail-text contrast, mobile state word, reduced-motion scroll, focus transfer | applied (commit pending) |
+| Claim-boundary hardening (2nd QA pass): rail + this note no longer claim client-side roll-time BLS (only station 09 / server-at-mint); neutral stratum "proves" copy (honest when a stratum is severed); legacy vs unsupported/malformed distinguished (no false "legacy" label); sample-aware vs demo-key test badge; kappa-chart text alternative + strata `aria-controls`; ASCII dashes only | applied (commit pending) |

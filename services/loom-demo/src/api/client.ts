@@ -19,7 +19,7 @@ export interface TruerollsKeys {
 }
 export async function initClient(): Promise<boolean> {
   // Kick off the kd-core wasm engine alongside the health probe. The engine
-  // is required for the distribution preview and for mock-mode rolls; an init
+  // is required for the distribution preview and for mock-mode rolls. An init
   // failure is surfaced (not silently swallowed into fallback math).
   const wasmInit = initKdCoreWasm().catch((err: unknown) => {
     console.error('[kd] kd-core wasm engine failed to initialize:', err);
@@ -87,13 +87,13 @@ function randomHex32(): string {
 }
 export async function postVerify(rollId: string): Promise<VerifyResponse> {
   if (_mockMode) return mockVerify();
-  // GET /v1/verify/:id - server fetches transcript from S3 and re-verifies
-  // (legacy math-only path; performs NO signature checking)
+  // GET /v1/verify/:id, server fetches transcript from S3 and re-verifies
+  // (legacy math-only path, performs NO signature checking)
   const res = await fetch(BASE + `/v1/verify/${rollId}`, { method: 'GET' });
   if (res.ok) {
     return res.json() as Promise<VerifyResponse>;
   }
-  // 422 = MISMATCH - the body is still a valid VerifyResponse
+  // 422 = MISMATCH, the body is still a valid VerifyResponse
   if (res.status === 422) {
     return res.json() as Promise<VerifyResponse>;
   }
@@ -103,7 +103,7 @@ export async function postVerify(rollId: string): Promise<VerifyResponse> {
  * POST /v1/verify with a full ReceiptV2 body ("v":"truerolls-1" or "truerolls-drand-1").
  * The server verifies the Ed25519 signature, replays the RNG draw, and
  * recomputes face/metrics. Failed checks still return HTTP 200 with false
- * flags; only malformed bodies return 400.
+ * flags. Only malformed bodies return 400.
  */
 export async function postVerifyReceipt(receipt: unknown): Promise<ReceiptVerifyResponse> {
   if (_mockMode) {
@@ -119,7 +119,7 @@ export async function postVerifyReceipt(receipt: unknown): Promise<ReceiptVerify
   }
   throw new Error(`Receipt verify failed (${res.status}): ${await res.text()}`);
 }
-/** GET /.well-known/truerolls-keys.json - published Ed25519 verification keys. */
+/** GET /.well-known/truerolls-keys.json, published Ed25519 verification keys. */
 export async function getTruerollsKeys(): Promise<TruerollsKeys> {
   if (_mockMode) {
     throw new Error('key fetch requires live API');

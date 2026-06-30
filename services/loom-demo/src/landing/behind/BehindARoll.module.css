@@ -1,4 +1,4 @@
-/* Behind a TrueRoll - the Specimen Plate (surface B). Token-only, forensic. */
+/* Behind a TrueRoll, the Specimen Plate (surface B). Token-only, forensic. */
 
 .page {
   min-height: 100vh;
@@ -229,6 +229,20 @@
   font-size: 11.5px;
   letter-spacing: 0.02em;
   color: var(--kd-ember);
+}
+
+/* Provenance badge: the bundled specimen is signed by a PUBLIC test key. */
+.testKeyBadge {
+  margin: 0 0 12px;
+  padding: 8px 11px;
+  background: var(--kd-focal-dim);
+  border: 1px solid var(--kd-border);
+  border-left: 2px solid var(--kd-focal);
+  border-radius: var(--kd-radius-sm);
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--kd-text-secondary);
 }
 
 .inkAccent {
@@ -491,7 +505,7 @@
 }
 
 .severed .bandState {
-  color: var(--kd-fail);
+  color: var(--kd-fail-text);
 }
 
 .absent .bandState,
@@ -573,7 +587,7 @@
   font-family: var(--kd-font-mono);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--kd-fail);
+  color: var(--kd-fail-text);
 }
 
 /* Honest scope */

@@ -1,4 +1,4 @@
-/* ContactSheet - surface C. The compact custody index. Token-only. */
+/* ContactSheet, surface C. The compact custody index. Token-only. */
 
 .sheet {
   position: relative;
@@ -136,7 +136,7 @@
 }
 
 .fail .state {
-  color: var(--kd-fail);
+  color: var(--kd-fail-text);
 }
 
 .absent .state,
@@ -148,7 +148,13 @@
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* Keep the state WORD visible, pass/fail must never be color-only (WCAG 1.4.1).
+     Shrink it and let the label ellipsis instead. */
   .state {
-    display: none;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+  .label {
+    font-size: 11px;
   }
 }

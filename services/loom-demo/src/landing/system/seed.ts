@@ -1,5 +1,5 @@
 /**
- * seed.ts - deterministic geometry of the rooting-seed glyph.
+ * seed.ts, deterministic geometry of the rooting-seed glyph.
  *
  * Two glyphs share this file:
  *  • The SOCKET aura rings used by the playground result well (Stage): `makeAura`.
@@ -8,7 +8,7 @@
  *    (the present roots) + `makeGhostTaproot` (the MISSING deep anchor).
  *
  * Every generator is seeded (mulberry32), so the same inputs always draw the same
- * engraving - no runtime randomness.
+ * engraving, no runtime randomness.
  */
 
 export function seedRng(seed: number): () => number {
@@ -30,7 +30,7 @@ export interface AuraRing {
   sw: number;
 }
 
-/** Concentric engraved aura around the socket - the carved register lines (legacy). */
+/** Concentric engraved aura around the socket, the carved register lines (legacy). */
 export function makeAura(cx: number, cy: number, vr: number, rings = 36, seed = 13): AuraRing[] {
   const rand = seedRng(seed);
   const out: AuraRing[] = [];
@@ -63,7 +63,7 @@ export interface RootSeg {
 export interface SeedGlyph {
   /** The reniform testa outline (the seed body). */
   body: string;
-  /** Curved hatch strokes following the coat - clip to `body`. */
+  /** Curved hatch strokes following the coat, clip to `body`. */
   hatch: string[];
   /** The oval hilum scar (the "eye"), on the concave side by the rooting pole. */
   hilum: { cx: number; cy: number; rx: number; ry: number; rot: number };
@@ -71,13 +71,13 @@ export interface SeedGlyph {
   micropyle: { cx: number; cy: number; r: number };
   /** Cracked-coat marks at the rooting pole: a lifted lip + split lines. */
   crack: string[];
-  /** The rooting pole - where the coat splits and roots emerge. */
+  /** The rooting pole, where the coat splits and roots emerge. */
   pole: { x: number; y: number };
 }
 
 /**
  * A germinating kidney seed centred at (cx, cy). The concave hilum notch sits on
- * the lower-left and is the rooting pole - the coat cracks there and roots descend,
+ * the lower-left and is the rooting pole, the coat cracks there and roots descend,
  * so the pole faces the feeding fact-cells to its left.
  */
 export function makeSeed(cx: number, cy: number, hw = 46, hh = 52, seed = 7): SeedGlyph {
@@ -162,7 +162,7 @@ export function makeFeederRoots(sx: number, sy: number, seed = 29, count = 5): R
 }
 
 /**
- * The MISSING dominant taproot: a single deep root the seed has NOT grown - drawn
+ * The MISSING dominant taproot: a single deep root the seed has NOT grown, drawn
  * as a faint dotted reach straight down from the pole, ending in an unfilled tip.
  * This is seed honesty: the anchor the proof cannot yet certify.
  */

@@ -2,29 +2,29 @@
 
 **Verifiable dice.** Every roll returns an Ed25519-signed receipt. Change a single
 byte of that receipt and the signature breaks. Anyone can re-verify a receipt
-offline - in the browser or from the command line - without trusting the server
+offline, in the browser or from the command line, without trusting the server
 that produced it.
 
-The dice are *behavior-weighted but bounded*: a stance parameter `κ` nudges the
-outcome distribution, and the nudge is hard-capped by KL-divergence and
-expected-value guards. Karma shapes **bounded** risk; it does not secretly pick
-winners.
+Live `truerolls-drand-1` rolls are seeded from a public drand quicknet beacon
+(BLS-verified), and the die is **uniform by default**. A game can opt into a signed
+stance parameter `κ` that nudges the distribution, hard-capped by KL-divergence and
+expected-value guards. Bounded risk, never a secret pick.
 
 > **Honest scope.** Live rolls mint `truerolls-drand-1` receipts. `VALID`
 > proves the roll seed came from a verified public drand quicknet beacon and the
-> outcome replays from that seed; it also proves the receipt was signed and the
+> outcome replays from that seed. It also proves the receipt was signed and the
 > bounded math replays. `VALID` does **not** prove the published outcome was
 > unbiased: because the operator's attempt is not publicly committed before the
-> target round resolves, the operator can still **grind** - privately fail/suppress
+> target round resolves, the operator can still **grind**, privately fail/suppress
 > unfavorable attempts (other nonces/rounds) and publish only a favorable completed
 > receipt. (Refusing or timing out a roll is the mechanism, so this is outcome-bias,
-> not just availability.) Strict witnessed fairness - binding the operator to one
-> committed attempt - is the v2 protocol, not this per-roll drand receipt. Legacy
+> not just availability.) Strict witnessed fairness, binding the operator to one
+> committed attempt, is the v2 protocol, not this per-roll drand receipt. Legacy
 > `truerolls-1` receipts remain verifiable only
 > for saved receipts and goldens. See
 > [docs/threat-model.md](docs/threat-model.md) for the precise limits.
 
-This repository is **proprietary** - see [LICENSE](LICENSE). No license is granted.
+This repository is **proprietary**. See [LICENSE](LICENSE). No license is granted.
 
 ---
 
@@ -51,10 +51,21 @@ docs/             this reference set
 
 ## Docs
 
-- [docs/receipt-format.md](docs/receipt-format.md) - the signed receipt JSON, field by field, and how `receipt_hash` is canonicalized.
-- [docs/verifying.md](docs/verifying.md) - how to verify a receipt offline (browser + CLI) and exactly what a VALID result does and does not prove.
-- [docs/threat-model.md](docs/threat-model.md) - what an attacker can and cannot do; what is proven vs roadmap.
-- [docs/api.md](docs/api.md) - the HTTP endpoints as implemented.
+- [docs/receipt-format.md](docs/receipt-format.md), the signed receipt JSON, field by field, and how `receipt_hash` is canonicalized.
+- [docs/verifying.md](docs/verifying.md), how to verify a receipt offline (browser + CLI) and exactly what a VALID result does and does not prove.
+- [docs/threat-model.md](docs/threat-model.md), what an attacker can and cannot do, what is proven vs roadmap.
+- [docs/api.md](docs/api.md), the HTTP endpoints as implemented.
+
+## Standards we use
+
+No house crypto. TrueRolls is built from public, well-specified primitives, each checkable against its spec:
+
+- **drand quicknet**. Public randomness beacon (BLS, scheme `bls-unchained-g1-rfc9380`). The roll seed derives from a future beacon round. The verifier checks a public drand source, not a server-made random value. (`kd-drand`)
+- **Ed25519** ([RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)). Signs the receipt body. Change one byte and it fails. (`kd-receipt`)
+- **JCS** ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)). Canonical JSON, so the signature is byte-reproducible. (`kd-receipt`)
+- **HKDF-SHA256** ([RFC 5869](https://www.rfc-editor.org/rfc/rfc5869)). Derives the per-roll seed from beacon randomness and client nonce. (`kd-drand`)
+- **SHA-256** ([FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final)). Randomness = `SHA-256(verified signature)`, and the receipt hash.
+- **ChaCha20** ([RFC 8439](https://www.rfc-editor.org/rfc/rfc8439)). Deterministic DRBG, `draw_u64` replays exactly. (`kd-core`)
 
 ## Quick start
 
@@ -62,7 +73,7 @@ Prerequisites: Rust (stable, pinned by [rust-toolchain.toml](rust-toolchain.toml
 Node ≥ 20.19 with pnpm 10, Docker (for the local API stack), and
 [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) only if you rebuild the wasm.
 
-### Rust - math + verifier
+### Rust, math + verifier
 
 ```powershell
 cargo test -p kd-core          # the bounded-math engine

@@ -13,7 +13,7 @@ export default function App() {
   const view = useHashView();
   const { isRolling, roll } = state;
 
-  // Global shortcut: Space to roll - only on the landing view, where the dice UI
+  // Global shortcut: Space to roll, only on the landing view, where the dice UI
   // is mounted. On Docs/Verify this would otherwise fire invisible rolls and
   // swallow the page's Space-to-scroll.
   useEffect(() => {

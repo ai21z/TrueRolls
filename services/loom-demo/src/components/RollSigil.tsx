@@ -4,22 +4,22 @@ import { hyphaePath } from '../landing/system/hyphae';
 import css from './RollSigil.module.css';
 
 /**
- * RollSigil - a Necrography provenance graph of a TrueRolls receipt.
+ * RollSigil, a Necrography provenance graph of a TrueRolls receipt.
  *
- * A roll is a death: fixed the instant it is cast; the receipt is its residue. This
- * graph reads that residue as a forensic lineage - the facts of the roll (seed, die,
+ * A roll is a death: fixed the instant it is cast. The receipt is its residue. This
+ * graph reads that residue as a forensic lineage, the facts of the roll (seed, die,
  * κ, face, hash, signature, metrics) as nodes, the derivations between them as mycelial
  * bonds. Four of those bonds are the verification checks (sampling, face, metrics,
- * signature): each that passes is tied into the central seal; each that fails is
+ * signature): each that passes is tied into the central seal. Each that fails is
  * severed with a blood-red tear. Grown deterministically from the receipt hash, so the
  * same receipt always draws the same map.
  *
- * NOT a force-directed physics graph - that mechanical bounce is the generic look this
- * style rejects. The layout is hand-excavated; the edges are grown, not sprung.
+ * NOT a force-directed physics graph, that mechanical bounce is the generic look this
+ * style rejects. The layout is hand-excavated. The edges are grown, not sprung.
  *
- * The two real tamper levers - `face` and `κ` - are inline-editable. Editing one re-runs
+ * The two real tamper levers, `face` and `κ`, are inline-editable. Editing one re-runs
  * the WASM verifier (via the parent's tamper path) and you watch the bonds sever live.
- * Every other node is derived or cryptographic, so it is read-only - editing a hash or a
+ * Every other node is derived or cryptographic, so it is read-only, editing a hash or a
  * signature would be a lie about how the system works. Motion is gated by
  * prefers-reduced-motion in the stylesheet.
  */

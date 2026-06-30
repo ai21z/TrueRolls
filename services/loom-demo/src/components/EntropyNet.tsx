@@ -2,19 +2,19 @@ import { useEffect, useRef } from 'react';
 import css from './EntropyNet.module.css';
 
 /**
- * Ambient "entropy net" - a calm, very-low-presence fractal mesh painted behind
+ * Ambient "entropy net", a calm, very-low-presence fractal mesh painted behind
  * the whole site. It is a standing design reminder that TrueRolls rolls are not
  * yet bound to a true, unpredictable entropy source (commit-reveal + client seed
- * → drand beacon - the roadmap). Purely decorative:
+ * → drand beacon, the roadmap). Purely decorative:
  *
  * - fixed, pointer-events: none, z-index below all content (shows through the
- *   transparent page surfaces, hidden behind opaque cards);
+ *   transparent page surfaces, hidden behind opaque cards).
  * - multi-scale nodes (fractal density) with gentle signals that cascade between
- *   neighbours and fade;
+ *   neighbours and fade.
  * - throttled to ~30fps, paused when the tab is hidden, and rendered as a single
  *   static frame under prefers-reduced-motion.
  *
- * Presence stays low - felt, not seen - but each ignition detonates as a bright
+ * Presence stays low, felt, not seen, but each ignition detonates as a bright
  * core flash that swells the ball, chaining down the cascade, with a rare
  * ominous red one. Nudge PRESENCE (cap ~0.2) to shift the ambient floor.
  */
@@ -107,7 +107,7 @@ export function EntropyNet() {
       const idx = (Math.random() * nodes.length) | 0;
       const n = nodes[idx];
       n.lit = 1;
-      // Detonate. Rare ignitions are "hot" - ominous red.
+      // Detonate. Rare ignitions are "hot", ominous red.
       const hot = Math.random() < 0.16;
       burst(n.x, n.y, 1, hot);
       for (const e of edges) {
@@ -145,7 +145,7 @@ export function EntropyNet() {
 
       if (!animate) return;
 
-      // Detonations - a bright core flash only (no shockwave rings).
+      // Detonations, a bright core flash only (no shockwave rings).
       const liveBursts: Burst[] = [];
       for (const bu of bursts) {
         bu.age += 0.045;

@@ -1,24 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { asRecord, hasBeacon, readField, shorten } from './receiptFields';
+import type { WasmVerifyReport } from '../../api/wasmEngine';
 import css from './CeremonyRail.module.css';
 
 /**
- * CeremonyRail - surface A of Behind a TrueRoll (docs/design/behind-a-roll.md).
+ * CeremonyRail, surface A of Behind a TrueRoll (docs/design/behind-a-roll.md).
  *
  * A presentational walkthrough of the protocol the roll takes: an artifact
- * travels nine stations - a die rolls 01..03 and parks (the cast is fixed
+ * travels nine stations, a die rolls 01..03 and parks (the cast is fixed
  * client-side), an UNSEALED DRAFT crosses 04..08 (the record being built, not a
  * receipt yet), the Ed25519 stamp at 08 turns it into a SEALED RECEIPT that
  * rides into the browser at 09. A station only seals behind the artifact.
  *
  * Version-aware: a legacy truerolls-1 receipt has no drand beacon, so the
- * beacon stations (01/02/03/05) are marked ABSENT - they never seal and their
+ * beacon stations (01/02/03/05) are marked ABSENT, they never seal and their
  * copy never asserts a verification that did not happen (design note Part 6).
  *
- * Honesty: this is ceremony, not verification. It is choreography over the real
- * receipt's fields; the actual pass/fail recompute is surface B (the Specimen
- * Plate) below, which station 09 hands off to. Motion is gated by
- * prefers-reduced-motion; the static end-state is fully legible without it.
+ * Honesty: this is ceremony, not verification, choreography over the protocol
+ * every roll takes. The authoritative pass/fail recompute is surface B (the
+ * Specimen Plate) below, which station 09 hands off to. But it must never CLAIM a
+ * check that failed: when the verifier report is in, any station whose check the
+ * engine REJECTED is rendered severed (blood red), not sealed green, so A can
+ * never contradict B. Motion is gated by prefers-reduced-motion. The static
+ * end-state is fully legible without it.
  */
 
 type Zone = 'client' | 'server' | 'browser';
@@ -43,7 +47,7 @@ function buildStations(parsed: Record<string, unknown> | null, beacon: boolean):
     zone: 'server',
     field: `drbg ${dash(shorten(readField(rng, 'drbg_key_hex'), 8, 4))}`,
     what: beacon
-      ? 'HKDF derives the seed from the verified pulse.'
+      ? 'HKDF re-derives the seed from the carried drand fields. ChaCha20 then replays the draw. (Whether the pulse verified is checked at 05 and on the plate.)'
       : 'The published seed re-seeds ChaCha20 (no drand derivation).',
   };
   const sample: Station = {
@@ -56,7 +60,7 @@ function buildStations(parsed: Record<string, unknown> | null, beacon: boolean):
     n: '08 · Seal pressed',
     zone: 'server',
     field: `Ed25519 · ${dash(readField(sig, 'kid'))}`,
-    what: 'The body is signed - the draft becomes a receipt.',
+    what: 'The body is signed, the draft becomes a receipt.',
   };
   const custody: Station = {
     n: '04 · Custody opened',
@@ -64,22 +68,22 @@ function buildStations(parsed: Record<string, unknown> | null, beacon: boolean):
     field: 'POST /v1/roll',
     what: 'The server validates the request and opens a record.',
   };
-  // Station 09 describes the ACTION, never a guaranteed pass - the rail does not
+  // Station 09 describes the ACTION, never a guaranteed pass. The rail does not
   // read the verdict, so it must not assert "matches it" for a tampered receipt.
   const reexamine: Station = {
     n: '09 · Re-examined',
     zone: 'browser',
     field: 'verifyReceiptJson()',
-    what: 'Your browser re-runs every field check - the result is on the plate below.',
+    what: 'Your browser re-runs every field check, the result is on the plate below.',
   };
 
   if (beacon) {
     return [
       { n: '01 · Nonce cast', zone: 'client', field: `nonce ${dash(shorten(readField(drand, 'client_nonce'), 8, 4))}`, what: 'A fresh private nonce is bound into the seed.' },
-      { n: '02 · Beacon observed', zone: 'client', field: `round ${dash(readField(drand, 'client_observed_round'))}`, what: 'The latest public drand pulse is read and verified.' },
+      { n: '02 · Beacon observed', zone: 'client', field: `round ${dash(readField(drand, 'client_observed_round'))}`, what: 'The latest public drand pulse is read and its round recorded, the seed will bind to it. (The browser BLS-verifies it later, at station 09.)' },
       { n: '03 · Target locked', zone: 'client', field: `target ${dash(readField(drand, 'target_round'))} = obs + 2`, what: 'The seed is bound to a pulse that does not exist yet.' },
       custody,
-      { n: '05 · Beacon revealed', zone: 'server', field: `round ${dash(readField(drand, 'target_round'))} · BLS`, what: 'The target pulse publishes and is BLS-verified.' },
+      { n: '05 · Beacon revealed', zone: 'server', field: `round ${dash(readField(drand, 'target_round'))} · BLS`, what: 'The target pulse publishes. Its BLS signature must verify against the pinned quicknet key before the seed is derived. (Re-verified in your browser at station 09.)' },
       seed,
       sample,
       seal,
@@ -89,10 +93,10 @@ function buildStations(parsed: Record<string, unknown> | null, beacon: boolean):
   // Legacy truerolls-1: no beacon. The drand stations are ABSENT, not narrated.
   return [
     { n: '01 · Nonce cast', zone: 'client', absent: true, field: '(no client nonce)', what: 'Legacy receipt: no client nonce was bound into the seed.' },
-    { n: '02 · Beacon observed', zone: 'client', absent: true, field: '(no beacon)', what: 'Not present - this legacy receipt has no drand beacon.' },
-    { n: '03 · Target locked', zone: 'client', absent: true, field: '(no target)', what: 'Not present - no future-beacon target binding.' },
+    { n: '02 · Beacon observed', zone: 'client', absent: true, field: '(no beacon)', what: 'Not present, this legacy receipt has no drand beacon.' },
+    { n: '03 · Target locked', zone: 'client', absent: true, field: '(no target)', what: 'Not present, no future-beacon target binding.' },
     custody,
-    { n: '05 · Beacon revealed', zone: 'server', absent: true, field: '(no beacon)', what: 'Not present - there is no drand pulse to verify.' },
+    { n: '05 · Beacon revealed', zone: 'server', absent: true, field: '(no beacon)', what: 'Not present, there is no drand pulse to verify.' },
     seed,
     sample,
     seal,
@@ -129,7 +133,7 @@ const SEG: Seg[] = [
   { f: 8, t: 8, d: 1300, p: 'hold' },
 ];
 const TOTAL = SEG.reduce((s, g) => s + g.d, 0);
-// Representative elapsed for each station (when the mover rests on it) - the
+// Representative elapsed for each station (when the mover rests on it). The
 // manual step controls paint this single frame, with no rAF.
 const STATION_ELAPSED: number[] = (() => {
   const arr = new Array<number>(N).fill(0);
@@ -145,10 +149,10 @@ const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) /
 const PHASE_LABEL: Record<Phase, string> = {
   die: 'Casting',
   birth: 'Cast · building the record',
-  draft: 'Unsealed draft - not a receipt yet',
+  draft: 'Unsealed draft, not a receipt yet',
   seal: 'Sealing',
   sealed: 'Sealed receipt',
-  hold: 'Re-examining - result on the plate',
+  hold: 'Re-examining, result on the plate',
 };
 
 const ZONES: { a: number; b: number; t: string }[] = [
@@ -156,7 +160,7 @@ const ZONES: { a: number; b: number; t: string }[] = [
   { a: 3, b: 7, t: 'SERVER' },
   { a: 8, b: 8, t: 'YOUR BROWSER' },
 ];
-// Beacon-derived stations (drand-specific) - marked absent for a legacy receipt.
+// Beacon-derived stations (drand-specific), marked absent for a legacy receipt.
 const BEACON_STATIONS = [0, 1, 2, 4];
 
 function usePrefersReducedMotion(): boolean {
@@ -174,15 +178,34 @@ function usePrefersReducedMotion(): boolean {
 
 interface CeremonyRailProps {
   parsed: Record<string, unknown> | null;
+  report?: WasmVerifyReport | null;
   onReExamine?: () => void;
 }
 
-export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
+// Map the verifier's per-check booleans onto the station node indices they govern
+// (positions 01..09 -> 0..8). A station the engine REJECTED is severed, never
+// sealed, so the ceremony cannot testify to a check that failed below.
+function failedNodes(report: WasmVerifyReport | null | undefined): Set<number> {
+  const failed = new Set<number>();
+  if (!report || report.verdict === 'ERROR') return failed;
+  if (report.valid_signature === false) failed.add(7); // 08 Seal pressed
+  if (report.valid_drand === false) {
+    failed.add(1); // 02 Beacon observed
+    failed.add(2); // 03 Target locked
+    failed.add(4); // 05 Beacon revealed
+  }
+  if (report.valid_sampling === false) failed.add(5); // 06 Seed forged
+  if (report.face_ok === false || report.metrics_ok === false) failed.add(6); // 07 Outcome sampled
+  if (report.verdict === 'INVALID') failed.add(8); // 09 Re-examined
+  return failed;
+}
+
+export function CeremonyRail({ parsed, report, onReExamine }: CeremonyRailProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const beacon = hasBeacon(parsed);
   const stations = useMemo(() => buildStations(parsed, beacon), [parsed, beacon]);
   const reduced = usePrefersReducedMotion();
-  const [stepIndex, setStepIndex] = useState<number>(-1); // -1 = auto-play; 0..8 = paused on a station
+  const [stepIndex, setStepIndex] = useState<number>(-1); // -1 = auto-play, 0..8 = paused on a station
   const [active, setActive] = useState(0);
   const [phase, setPhase] = useState<Phase>('die');
 
@@ -205,6 +228,7 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
     if (!die || !doc || !docPage || !docSeal || !loupe || !wake || !drop) return;
 
     const absent = new Set<number>(beacon ? [] : BEACON_STATIONS);
+    const failed = failedNodes(report);
     let lastIdx = -1;
     let lastPhase: Phase | null = null;
 
@@ -274,6 +298,17 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
           c.setAttribute('stroke-width', '1');
           c.setAttribute('stroke-dasharray', '2 3');
           c.setAttribute('opacity', '0.32');
+        } else if (failed.has(i)) {
+          // The engine REJECTED this station's check: severed, never sealed. The
+          // ceremony must not testify to a check that failed below. A DOTTED ring
+          // (vs a passed node's solid ring) carries the state by shape too, so
+          // pass/fail is not red-vs-green hue alone (WCAG 1.4.1).
+          c.setAttribute('r', '9');
+          c.setAttribute('fill', 'rgba(181,71,77,0.16)');
+          c.setAttribute('stroke', '#B5474D');
+          c.setAttribute('stroke-width', '1.6');
+          c.setAttribute('stroke-dasharray', '1.5 1.8');
+          c.setAttribute('opacity', '1');
         } else if (isCur) {
           c.setAttribute('r', '10');
           c.setAttribute('fill', '#090a0c');
@@ -328,7 +363,7 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [reduced, beacon, stepIndex]);
+  }, [reduced, beacon, stepIndex, report]);
 
   const stepFrom = stepIndex < 0 ? active : stepIndex;
   const stepBack = () => setStepIndex(Math.max(0, stepFrom - 1));
@@ -372,9 +407,9 @@ export function CeremonyRail({ parsed, onReExamine }: CeremonyRailProps) {
       >
         <title id="cr-title">Behind a roll: the custody ceremony</title>
         <desc id="cr-desc">
-          A roll travelling nine stations - a die over the client stations, an unsealed draft over the
+          A roll travelling nine stations, a die over the client stations, an unsealed draft over the
           server, a sealed receipt into the browser. Beacon stations are marked absent for a legacy
-          receipt.
+          receipt. A station whose check the verifier rejected is marked severed (a dotted red ring).
         </desc>
         <defs>
           <radialGradient id="cr-loupe-g" cx="50%" cy="50%" r="50%">

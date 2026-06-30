@@ -1,9 +1,9 @@
 /**
- * HeroCanvas - public host for the TrueRolls hero's marquee 3D visual.
+ * HeroCanvas, public host for the TrueRolls hero's marquee 3D visual.
  *
- * The landing hero mounts <HeroCanvas phase={...} /> inside a sized container;
- * the canvas fills that parent (100% × 100%) and is purely decorative
- * (`aria-hidden`) - the literal rolled number + receipt live in the HTML next
+ * The landing hero mounts <HeroCanvas phase={...} /> inside a sized container.
+ * The canvas fills that parent (100% × 100%) and is purely decorative
+ * (`aria-hidden`), the literal rolled number + receipt live in the HTML next
  * to it. The wrapper is `pointer-events: none` so it never blocks the hero UI.
  *
  * Responsibilities kept here (out of the scene):
@@ -35,7 +35,7 @@ function usePrefersReducedMotion(): boolean {
     if (typeof window === 'undefined' || !window.matchMedia) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
-    // addEventListener is the modern API; guard for older Safari (addListener).
+    // addEventListener is the modern API. Guard for older Safari (addListener).
     if (mq.addEventListener) mq.addEventListener('change', onChange);
     else mq.addListener(onChange);
     return () => {
@@ -53,7 +53,7 @@ const wrapperStyle: React.CSSProperties = {
   inset: 0,
   width: '100%',
   height: '100%',
-  pointerEvents: 'none', // decorative - never intercept the hero UI
+  pointerEvents: 'none', // decorative, never intercept the hero UI
 };
 
 export function HeroCanvas({ phase, kappa = 0, face = null, className }: HeroCanvasProps) {
@@ -87,7 +87,7 @@ export function HeroCanvas({ phase, kappa = 0, face = null, className }: HeroCan
         // Otherwise drive the idle float / roll / shatter continuously.
         frameloop={!visible ? 'never' : reducedMotion ? 'demand' : 'always'}
         gl={{
-          alpha: true,            // transparent - page near-black shows through
+          alpha: true,            // transparent, page near-black shows through
           antialias: true,
           powerPreference: 'high-performance',
         }}

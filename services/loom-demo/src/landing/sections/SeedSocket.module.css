@@ -1,4 +1,4 @@
-/* SeedSocket - an interactive specimen explainer, split in two.
+/* SeedSocket, an interactive specimen explainer, split in two.
    Left: the seed in its own inked box, the width of the offline-verify card.
    Right: the explanation, unboxed, the width of the trust text above it.
    The grid mirrors .verifyGrid (1.1fr / 0.9fr) so the two stack into clean columns.
@@ -217,7 +217,7 @@
   opacity: 0.85;
 }
 
-/* the freshly split coat - slightly warmer/brighter than the testa line */
+/* the freshly split coat, slightly warmer/brighter than the testa line */
 .crack path {
   fill: none;
   stroke: #a87a4c;
@@ -254,7 +254,7 @@
   transition: stroke var(--kd-duration), opacity var(--kd-duration);
 }
 
-/* active 'seed honesty' - warm the coat + the missing taproot (override the generic
+/* active 'seed honesty', warm the coat + the missing taproot (override the generic
    .itemActive path greening so the seed group stays warm, not nec-tip) */
 .itemActive .testa {
   stroke: var(--nec-ember);

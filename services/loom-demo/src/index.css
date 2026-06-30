@@ -74,7 +74,7 @@ button {
   cursor: pointer;
   font-family: inherit;
   font-size: inherit;
-  /* no UA border by default; class borders still win, InkFrame draws the rest */
+  /* no UA border by default. Class borders still win, InkFrame draws the rest */
   border: 0;
 }
 

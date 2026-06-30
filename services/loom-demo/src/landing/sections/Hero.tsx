@@ -23,8 +23,8 @@ interface Props {
 }
 
 export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
-  // The credential drives idle/settled/sealed; rolling overrides live. The header
-  // die is roll-agnostic until a roll is recorded - but if THAT roll is broken by a
+  // The credential drives idle/settled/sealed. Rolling overrides live. The header
+  // die is roll-agnostic until a roll is recorded, but if THAT roll is broken by a
   // tamper anywhere on the page, the die shatters here too (shared tamper state).
   const [credPhase, setCredPhase] = useState<HeroPhase>('idle');
   const latestRoll = state.rolls.length > 0 ? state.rolls[0] : null;
@@ -33,7 +33,7 @@ export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
 
   const reduce = useReducedMotion();
   const progress = usePageScrollProgress();
-  // The hero is the first viewport; parallax the die over the early scroll range.
+  // The hero is the first viewport. Parallax the die over the early scroll range.
   const dieY = useTransform(progress, [0, 0.16], ['0%', '-24%']);
   const dieOpacity = useTransform(progress, [0, 0.15], [1, 0.3]);
 
@@ -45,14 +45,15 @@ export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
           {...enter}
           transition={{ duration: 0.7, ease: [0.32, 0.72, 0, 1] }}
         >
-          <span className={css.eyebrow}>Verifiable dice · TrueRolls</span>
+          <span className={css.eyebrow}>Verifiable dice receipts for games</span>
           <h1 className={css.title}>
             Roll. Sign.<br />
             <span className={css.titleAccent}>Try to fake it.</span>
           </h1>
           <p className={css.lead}>
-            Every roll returns an Ed25519-signed receipt. Change a single byte and the
-            signature shatters. And you can verify it yourself, offline.
+            Every completed roll returns a signed, drand-backed receipt players can verify
+            locally. Public beacon seed, Ed25519 signature, deterministic offline replay.
+            Change one byte and it shatters.
           </p>
           <div className={css.ctaRow}>
             <InkButton
@@ -69,9 +70,9 @@ export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
             </InkButton>
           </div>
           <p className={css.trust}>
-            Bounded by KL + EV caps · deterministic replay · in-browser verifier.
+            Public drand seed · deterministic offline replay · in-browser verifier.
             <br className={css.trustBreak} />
-            Not a fairness claim, yet, and we say so.
+            Uniform at κ 0, bounded only when a stance is signed in the open.
           </p>
         </motion.div>
 

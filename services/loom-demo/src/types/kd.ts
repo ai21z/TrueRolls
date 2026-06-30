@@ -84,7 +84,7 @@ export interface VerifyResponse {
   };
 }
 
-/** Details block of POST /v1/verify (receipt body) - mirrors kd-api ReceiptVerifyDetails. */
+/** Details block of POST /v1/verify (receipt body), mirrors kd-api ReceiptVerifyDetails. */
 export interface ReceiptVerifyDetails {
   sig: string; // "valid" | "invalid"
   recomputed_face: number;
@@ -95,9 +95,9 @@ export interface ReceiptVerifyDetails {
 }
 
 /**
- * Response of POST /v1/verify with a ReceiptV2 body ("v":"truerolls-1" or "truerolls-drand-1") -
+ * Response of POST /v1/verify with a ReceiptV2 body ("v":"truerolls-1" or "truerolls-drand-1"),
  * mirrors kd-api ReceiptVerifyResponse. Failed checks still return HTTP 200
- * with false flags; `errors` is omitted when empty.
+ * with false flags, `errors` is omitted when empty.
  */
 export interface ReceiptVerifyResponse {
   valid_signature: boolean;
@@ -129,7 +129,7 @@ export interface VerifyCheckRow {
 
 /** The forged artifact for a tampered die: the edited receipt body + the verifier's
  * real failing response. Stored ON the entry it broke (and persisted with it), so a
- * tampered die stays broken across re-rolls and reloads - a tampered receipt is
+ * tampered die stays broken across re-rolls and reloads, a tampered receipt is
  * permanently invalid. */
 export interface EntryTamper {
   body: Record<string, unknown>;
@@ -142,6 +142,6 @@ export interface TranscriptEntry extends RollResponse {
   verifyDetail?: string;
   verifyChecks?: VerifyCheckRow[];
   /** Present iff this die was broken by a tamper (see EntryTamper). Cleared by
-   * reverting the edit; a fresh roll is a new entry and is never auto-broken. */
+   * reverting the edit. A fresh roll is a new entry and is never auto-broken. */
   tampered?: EntryTamper;
 }

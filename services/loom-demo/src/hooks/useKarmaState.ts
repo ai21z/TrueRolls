@@ -47,7 +47,9 @@ function initialNextId(rolls: TranscriptEntry[]): number {
 
 export function useKarmaState() {
   const [die, setDie] = useState<Die>('d20');
-  const [kappa, setKappa] = useState(0.6);
+  // Uniform by default: TrueRolls leads with a verifiable, fair (kappa = 0) die.
+  // kappa is an advanced/educational stance, not the default impression.
+  const [kappa, setKappa] = useState(0);
   const [rolls, setRolls] = useState<TranscriptEntry[]>(loadRolls);
   const [isRolling, setIsRolling] = useState(false);
   const [rollStatus, setRollStatus] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export function useKarmaState() {
     });
   }, []);
 
-  // A fresh roll is a new entry; it never alters earlier dice. A die broken by a
+  // A fresh roll is a new entry. It never alters earlier dice. A die broken by a
   // tamper stays broken (its `tampered` artifact lives on its own entry).
   const roll = useCallback(async () => {
     setIsRolling(true);
@@ -131,11 +133,11 @@ export function useKarmaState() {
           res.metrics_ok;
         status = allOk ? 'verified_server' : 'mismatch';
         detail = allOk
-          ? 'VALID proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. VALID does not prove the published outcome was unbiased: the operator can still grind - privately fail unfavorable attempts and publish only favorable completed receipts. Strict witnessed fairness is the v2 protocol.'
+          ? 'VALID: signed, the drand seed provenance verifies, and the outcome replays from that seed. It does not yet prove an unfavourable completed roll could not have been withheld. Strict witnessed fairness is the v2 protocol.'
           : (res.errors ?? []).join('; ');
       } else if (!isMock && entry.v === 'truerolls-1' && entry.sig) {
         // Signed live receipt → POST /v1/verify with the full ReceiptV2 body.
-        // Check rows are derived 1:1 from the server response - never fabricated.
+        // Check rows are derived 1:1 from the server response, never fabricated.
         const res = await postVerifyReceipt(buildReceiptBody(entry));
         checks = [
           { id: 'signature', label: 'Signature (Ed25519)', ok: res.valid_signature },
@@ -151,7 +153,7 @@ export function useKarmaState() {
           : (res.errors ?? []).join('; ');
       } else if (!isMock) {
         // Unsigned/legacy entry, live API → GET /v1/verify/:id.
-        // This path recomputes the math only; it performs NO signature check,
+        // This path recomputes the math only. It performs NO signature check,
         // so no signature row is shown.
         const res = await postVerify(entry.id);
         checks = [
@@ -171,7 +173,7 @@ export function useKarmaState() {
         await postVerify(entry.id);
         checks = [];
         status = 'verified_local';
-        detail = 'DEMO - no cryptographic verification performed';
+        detail = 'DEMO, no cryptographic verification performed';
       }
 
       setRolls((prev) =>
@@ -205,7 +207,7 @@ export function useKarmaState() {
   // Record that a die was broken by a tamper: store the forged body + the verifier's
   // real failing result ON the entry, so every surface (hero, seed, transcript, modal)
   // renders the same broken artifact AND it survives re-rolls and reloads. The roll's
-  // pristine fields are untouched; reverting the edit clears `tampered`.
+  // pristine fields are untouched. Reverting the edit clears `tampered`.
   const markTampered = useCallback(
     (localId: number, body: Record<string, unknown>, result: ReceiptVerifyResponse) => {
       setRolls((prev) =>

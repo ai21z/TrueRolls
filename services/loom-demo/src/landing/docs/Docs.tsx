@@ -15,6 +15,7 @@ const TOC: TocItem[] = [
   { id: 'verify', label: 'Verify it yourself' },
   { id: 'threat-model', label: "What's proven. And what isn't" },
   { id: 'api', label: 'API & transparency' },
+  { id: 'references', label: 'Standards & references' },
 ];
 
 /** Active-section highlight in the TOC (optional nicety). */
@@ -32,7 +33,7 @@ function useActiveSection(ids: string[]): string {
     if (els.length === 0) return;
 
     // The active section is the last one whose top has scrolled above a line
-    // just below the sticky bar - robust regardless of section length. We use
+    // just below the sticky bar, robust regardless of section length. We use
     // an IntersectionObserver purely as the trigger (it fires on any scroll,
     // including programmatic), then recompute from live geometry.
     const LINE = 120;
@@ -50,7 +51,7 @@ function useActiveSection(ids: string[]): string {
     // ("rootMargin must be specified in pixels or percent") and unmounts the app.
     const bottom = Math.max(0, window.innerHeight - LINE - 1);
     const observer = new IntersectionObserver(recompute, {
-      // Thin tracking band at the LINE; fires as each section crosses it.
+      // Thin tracking band at the LINE. Fires as each section crosses it.
       rootMargin: `-${LINE}px 0px -${bottom}px 0px`,
     });
     els.forEach((el) => observer.observe(el));
@@ -146,14 +147,16 @@ export function Docs() {
             <span className={css.eyebrow}>Overview</span>
             <h1 className={css.h1}>What is TrueRolls</h1>
             <p className={css.lead}>
-              TrueRolls is a deterministic, signed, independently replayable dice
-              system. Behaviour can shape bounded risk through pure math. But every
-              roll returns an Ed25519-signed receipt that anyone can verify, offline.
+              TrueRolls is a verifiable dice system. Every completed roll returns an
+              Ed25519-signed receipt anyone can verify offline. On live{' '}
+              <code className={css.code}>truerolls-drand-1</code> rolls the seed comes from a
+              public drand quicknet beacon, BLS-verified. The die is uniform by default.
             </p>
             <p className={css.p}>
-              Today it proves deterministic replay and signing. It does <em>not</em>{' '}
-              yet claim provable fairness against a malicious server. And we say so
-              plainly (see{' '}
+              Today a receipt proves Ed25519 receipt integrity, verified drand seed provenance,
+              deterministic replay of the draw, face recomputation, and bounded math, all
+              checkable offline. It does <em>not</em> yet prove the operator could not withhold an
+              unfavourable completed roll. Strict witnessed fairness is the v2 protocol (see{' '}
               <a
                 className={css.inlineLink}
                 href="#docs-threat-model"
@@ -403,7 +406,7 @@ export function Docs() {
                 <ul className={css.calloutList}>
                   <li>
                     That the published outcome was unbiased. The operator can still{' '}
-                    <b>grind</b> - privately fail/suppress unfavorable attempts after seeing
+                    <b>grind</b>, privately fail/suppress unfavorable attempts after seeing
                     each drand-derived outcome, and publish only a favorable completed receipt.
                     Per-roll drand fixes the seed source; it does not publicly bind the operator
                     to a single attempt before the beacon resolves. That needs strict witnessed fairness.
@@ -461,6 +464,65 @@ export function Docs() {
               the point for a trust system. The Studio scenario tool is the separate,
               closed product.
             </p>
+          </section>
+
+          {/* ── 7. Standards & references ─────────────────────────────── */}
+          <section id="references" className={css.section}>
+            <span className={css.eyebrow}>Standards</span>
+            <h2 className={css.h2}>Standards we use, and why</h2>
+            <p className={css.p}>
+              TrueRolls is built from public, well-specified primitives, with no house crypto.
+              Each standard below is checkable against its spec.
+            </p>
+            <dl className={css.defList}>
+              <div className={css.defRow}>
+                <dt className={css.dt}>drand quicknet</dt>
+                <dd className={css.dd}>
+                  Public randomness beacon (BLS, scheme{' '}
+                  <code className={css.code}>bls-unchained-g1-rfc9380</code>). The roll seed is
+                  derived from a future beacon round. The verifier checks a public drand source,
+                  not a server-made random value. Verified in{' '}
+                  <code className={css.code}>kd-drand</code>.
+                </dd>
+              </div>
+              <div className={css.defRow}>
+                <dt className={css.dt}>Ed25519 (RFC 8032)</dt>
+                <dd className={css.dd}>
+                  Signs the receipt body. Change one byte and verification fails (
+                  <code className={css.code}>kd-receipt</code>).
+                </dd>
+              </div>
+              <div className={css.defRow}>
+                <dt className={css.dt}>JCS (RFC 8785)</dt>
+                <dd className={css.dd}>
+                  JSON Canonicalization Scheme: a deterministic, byte-exact encoding of the body,
+                  so the signature is reproducible by anyone.
+                </dd>
+              </div>
+              <div className={css.defRow}>
+                <dt className={css.dt}>HKDF-SHA256 (RFC 5869)</dt>
+                <dd className={css.dd}>
+                  Derives the per-roll seed from the beacon randomness, the client nonce, and a
+                  salt (<code className={css.code}>kd-drand</code>).
+                </dd>
+              </div>
+              <div className={css.defRow}>
+                <dt className={css.dt}>SHA-256 (FIPS 180-4)</dt>
+                <dd className={css.dd}>
+                  The beacon randomness is{' '}
+                  <code className={css.code}>SHA-256(verified signature)</code>, and also the
+                  receipt hash.
+                </dd>
+              </div>
+              <div className={css.defRow}>
+                <dt className={css.dt}>ChaCha20 (RFC 8439)</dt>
+                <dd className={css.dd}>
+                  Deterministic DRBG seeded from the derived key. The published{' '}
+                  <code className={css.code}>draw_u64</code> replays exactly (
+                  <code className={css.code}>kd-core</code>).
+                </dd>
+              </div>
+            </dl>
           </section>
 
           <footer className={css.footer}>

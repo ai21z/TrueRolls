@@ -1,5 +1,5 @@
-/* InkFrame - the hand-drawn border overlay. The wrapper holds the box's own
-   background/padding; the absolutely-positioned SVG inks just the edges. */
+/* InkFrame, the hand-drawn border overlay. The wrapper holds the box's own
+   background/padding. The absolutely-positioned SVG inks just the edges. */
 
 .block {
   position: relative;

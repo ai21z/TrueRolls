@@ -265,7 +265,7 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* registration tick - the record's catalog corner */
+/* registration tick, the record's catalog corner */
 .stepCard::before {
   content: "";
   position: absolute;
@@ -334,7 +334,7 @@
   stroke-linecap: round;
 }
 
-/* the die's other faces - quieter than the labelled front face */
+/* the die's other faces, quieter than the labelled front face */
 .triadFacet {
   fill: var(--nec-bone);
   stroke: none;
@@ -399,6 +399,30 @@
   top: 63%;
 }
 
+/* a small button at the d20 centroid, linking to the Behind a roll page */
+.triadCenter {
+  position: absolute;
+  left: 50%;
+  top: 49.6%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  display: inline-block;
+  padding: 8px 15px;
+  border-radius: var(--kd-radius);
+  background: var(--kd-accent-dim);
+  border: 1px solid var(--kd-border-accent);
+  color: var(--kd-text);
+  font-family: var(--kd-font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  transition: background var(--kd-duration), color var(--kd-duration);
+}
+
+.triadCenter:hover {
+  background: rgba(126, 148, 136, 0.22);
+}
+
 @media (max-width: 820px) {
   .triad {
     aspect-ratio: auto;
@@ -416,6 +440,12 @@
     width: auto;
     max-width: none;
     transform: none;
+  }
+  /* no triangle to center on when stacked: fall back to inline flow */
+  .triadCenter {
+    position: static;
+    transform: none;
+    margin: 2px auto 0;
   }
 }
 

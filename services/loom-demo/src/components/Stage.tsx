@@ -75,7 +75,7 @@ interface Props {
   kappa: number;
   /** The latest die has been broken by a tamper anywhere on the page. */
   broken: boolean;
-  /** The forged face the tampered receipt carries - shown in place of the roll when broken. */
+  /** The forged face the tampered receipt carries, shown in place of the roll when broken. */
   brokenFace: number | null;
 }
 
@@ -96,14 +96,14 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, di
   const klCap = KL_CAPS[die];
 
   // Bars always live-track the current slider for visual feedback.
-  // The preview shows the GUARDED distribution from kd-core (wasm) - the
-  // same caps-applied probabilities the server samples from - not the raw
+  // The preview shows the GUARDED distribution from kd-core (wasm), the
+  // same caps-applied probabilities the server samples from, not the raw
   // softmax, which would overstate the tilt once guards engage.
   const probs = useMemo(() => {
     try {
       return computeGuardedDistributionWasm(die, kappa).probs;
     } catch (err) {
-      // Engine not initialized (init failure) - render no bars rather than
+      // Engine not initialized (init failure), render no bars rather than
       // falling back to duplicated TS math.
       console.error('[kd] distribution preview unavailable:', err);
       return [];

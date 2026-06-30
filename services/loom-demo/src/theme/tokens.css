@@ -1,10 +1,10 @@
-/* TrueRolls - NECROGRAPHY tokens (Vissarion's house style).
-   Variable names kept stable so every component re-skins at once; only the values
+/* TrueRolls, NECROGRAPHY tokens (Vissarion's house style).
+   Variable names kept stable so every component re-skins at once. Only the values
    changed: from instrument-grade indigo to forensic/archival blackwork. A textured
    near-black substrate, ashen-green as the cool structural accent, ONE rare ember
    focal, dirtied bone ink, and an engraved serif type system. Death as information,
    not dark SaaS. NOTE: --kd-ember is the legacy *success/verified* token (now a
-   fungal green); the rare WARM focal is --kd-focal. */
+   fungal green). The rare WARM focal is --kd-focal. */
 
 :root {
   /* ── Surfaces: textured near-black, warm-neutral char (never pure #000) ── */
@@ -14,14 +14,14 @@
   --kd-surface-raised: #1A1A16;
   --kd-atmosphere:     #100F0E;
 
-  /* ── Accent: ashen-green - the cool structural glow (one per surface) ── */
+  /* ── Accent: ashen-green, the cool structural glow (one per surface) ── */
   --kd-indigo:  #181E1A;  /* accent-tinted dark fill (active chips) */
   --kd-ritual:  #4F5F54;  /* accent, pressed/deep */
-  --kd-void:    #7E9488;  /* PRIMARY ACCENT - focus, active, CTA */
+  --kd-void:    #7E9488;  /* PRIMARY ACCENT, focus, active, CTA */
   --kd-accent:     #7E9488;
   --kd-accent-dim: rgba(126, 148, 136, 0.16);
 
-  /* ── Ember: the ONE rare warm focal - use sparingly (<10% of a surface) ── */
+  /* ── Ember: the ONE rare warm focal, use sparingly (<10% of a surface) ── */
   --kd-focal:     #B87242;
   --kd-focal-dim: rgba(184, 114, 66, 0.16);
 
@@ -31,11 +31,12 @@
   --kd-text-muted:     #8C8676;
 
   /* ── Semantic (verified = fungal green, tamper/fail = blood red) ── */
-  --kd-ember:      #8FAA8A;  /* success / verified - fungal green, not acid */
+  --kd-ember:      #8FAA8A;  /* success / verified, fungal green, not acid */
   --kd-ember-dim:  rgba(143, 170, 138, 0.15);
   --kd-ember-glow: none;
-  --kd-fail:       #B5474D;  /* danger / tampered - blood red */
+  --kd-fail:       #B5474D;  /* danger / tampered, blood red (fills, borders, large text) */
   --kd-fail-dim:   rgba(181, 71, 77, 0.15);
+  --kd-fail-text:  #D9777C;  /* readable blood red for SMALL failure copy (>=4.5:1 on bg/surface) */
 
   /* ── Necrography engraved layer: the forensic-plate palette, promoted from the
      RollSigil/SeedSocket modules so every engraved surface draws from one source.

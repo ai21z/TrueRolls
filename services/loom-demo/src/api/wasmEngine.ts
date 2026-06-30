@@ -59,7 +59,7 @@ export function isKdCoreWasmReady(): boolean {
 
 /**
  * Idempotent async initialization of the kd-core wasm engine.
- * Rejects (and allows retry) if the wasm asset cannot be loaded; callers must
+ * Rejects (and allows retry) if the wasm asset cannot be loaded. Callers must
  * surface that failure honestly instead of falling back to other math.
  */
 export async function initKdCoreWasm(): Promise<void> {
@@ -127,7 +127,7 @@ export function computeRollReplayWasm(die: Die, kappa: number, draw: bigint): Kd
 export type ReceiptVerdict = 'VALID' | 'INVALID' | 'ERROR';
 
 /**
- * Result of {@link verifyReceiptWasm}. Mirrors the `kd_receipt` engine output -
+ * Result of {@link verifyReceiptWasm}. Mirrors the `kd_receipt` engine output,
  * the *same* verification the CLI runs (`kd verify --receipt`). On `ERROR`
  * (structurally unverifiable input) only `verdict` and `error` are meaningful.
  */
@@ -152,7 +152,7 @@ export interface WasmVerifyReport {
 /**
  * Verify a signed TrueRolls receipt entirely in the browser via the shared
  * `kd_receipt` engine (Ed25519 signature + JCS canon + DRBG replay + metric
- * caps). No network call, no server trust - the verdict is computed locally.
+ * caps). No network call, no server trust, the verdict is computed locally.
  * Never throws: unverifiable input returns `{ verdict: 'ERROR', error }`.
  */
 export function verifyReceiptWasm(receiptJson: string, publicKeyB64: string): WasmVerifyReport {

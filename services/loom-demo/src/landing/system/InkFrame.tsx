@@ -3,7 +3,7 @@ import { inkRect } from './ink';
 import css from './InkFrame.module.css';
 
 /**
- * InkFrame - a hand-drawn border for any HTML box, card, button, or cell.
+ * InkFrame, a hand-drawn border for any HTML box, card, button, or cell.
  *
  * Measures itself and lays an inked rectangle (two passes via inkRect) over its own
  * edges. The ink is aria-hidden and pointer-events:none, so the wrapped content stays

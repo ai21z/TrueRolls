@@ -57,7 +57,7 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
 
   // A tampered die overrides the stored status everywhere: the break lives on the
   // entry, so this row reads broken and shows the forged value until the edit is
-  // reverted. A tampered receipt stays broken - no path back to "Verified".
+  // reverted. A tampered receipt stays broken, no path back to "Verified".
   const tampered = entry.tampered ?? null;
   const broken = !!tampered;
   const view = tampered
