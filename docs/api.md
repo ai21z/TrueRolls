@@ -4,38 +4,38 @@ This is the reference for the TrueRolls HTTP API as **implemented** in the servi
 
 > **Proprietary. All rights reserved.** This document and the service it describes are not open source.
 
-> All example values below - UUIDs, key ids (e.g. `kd-dev-1`), `drbg_key_hex`, `draw_u64`, `signature_b64`, `receipt_hash`, `public_key` - are **illustrative placeholders**, not real or reproducible cryptographic artifacts. Actual values are produced at runtime; the signing key id is configured per deployment.
+> All example values below, UUIDs, key ids (e.g. `kd-dev-1`), `drbg_key_hex`, `draw_u64`, `signature_b64`, `receipt_hash`, `public_key`, are **illustrative placeholders**, not real or reproducible cryptographic artifacts. Actual values are produced at runtime. The signing key id is configured per deployment.
 
 ## Scope and honesty notes
 
-Read these before integrating - they bound what the API guarantees.
+Read these before integrating. They bound what the API guarantees.
 
 - **No authentication.** None of the endpoints require or check credentials. There is no API key, token, or session.
-- **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` is throttled per client IP. Every other route - all GETs, both verify routes, `/healthz`, `/.well-known/*` - is unthrottled. Do not treat the throttle as access control.
+- **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` is throttled per client IP. Every other route, all GETs, both verify routes, `/healthz`, `/.well-known/*`, is unthrottled. Do not treat the throttle as access control.
 - **What is proven today:**
   - **Tamper-evidence** of a signed receipt via an Ed25519 signature over the canonicalized receipt body.
   - **Drand seed provenance** for live `truerolls-drand-1` receipts: anyone with the receipt can verify the pinned drand quicknet BLS pulses and re-derive the seed from the target pulse.
   - **Deterministic replay** of the draw: anyone with the receipt can re-derive the same `face` from the disclosed seed.
   - **Bounded math**: the rolled distribution is recomputable and is held within KL-divergence and EV caps relative to uniform.
 - **What is NOT implemented and is NOT claimed:** commit/reveal, VRF, Merkle anchoring, witnessed transparency-log anchoring, on-chain anything, authentication, or strict public fairness.
-- **Drand provenance is not strict witnessed fairness.** `VALID` proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. It does **not** prove the published outcome was unbiased: the operator can still **grind** - privately fail/suppress unfavorable attempts and publish only a favorable completed receipt (withholding/timeout is the mechanism). Binding the operator to one committed attempt requires v2 witnessed fairness.
+- **Drand provenance is not strict witnessed fairness.** `VALID` proves the roll seed came from a verified public drand beacon and the outcome replays from that seed. It does **not** prove the published outcome was unbiased: the operator can still **grind**, privately fail/suppress unfavorable attempts and publish only a favorable completed receipt (withholding/timeout is the mechanism). Binding the operator to one committed attempt requires v2 witnessed fairness.
 - **The site's demo/mock verification is not cryptographic verification.** Only the receipt-mode signature + replay path described here performs real checks.
 
 ## Conventions
 
 - **Base path:** roll/verify endpoints live under `/v1`. `/healthz` and `/.well-known/*` are unversioned.
-- **Content types:** request and success bodies are `application/json`. Most validation/storage error bodies (400 / 404 / 409 / 422 / 500) are **plain-text messages**, not JSON. Protective overload/timeout responses are JSON - see `POST /v1/roll`. (The 422 legacy-verify body is a special case - see that endpoint.)
+- **Content types:** request and success bodies are `application/json`. Most validation/storage error bodies (400 / 404 / 409 / 422 / 500) are **plain-text messages**, not JSON. Protective overload/timeout responses are JSON, see `POST /v1/roll`. (The 422 legacy-verify body is a special case, see that endpoint.)
 - **Dice:** the roll path accepts `d6`, `d20`, `d100`. The receipt verifier's die parser additionally accepts `d4`, `d8`, `d10`, `d12`, but only `d6` / `d20` / `d100` are reachable through `POST /v1/roll`.
-- **kappa (`κ`):** a signed stance. It is validated to be **finite and in `[-1, 1]`** on `POST /v1/roll` and on the **legacy** verify paths. In **receipt** verify mode κ is *not* range-checked at the request layer; an out-of-range κ instead fails inside the math recompute and is returned as a `400` (see receipt mode below).
+- **kappa (`κ`):** a signed stance. It is validated to be **finite and in `[-1, 1]`** on `POST /v1/roll` and on the **legacy** verify paths. In **receipt** verify mode κ is *not* range-checked at the request layer. An out-of-range κ instead fails inside the math recompute and is returned as a `400` (see receipt mode below).
 - **`draw_u64`** is a **stringified `u64`** everywhere it appears (JSON numbers cannot represent every `u64` exactly).
 
 ---
 
 ## GET /healthz
 
-Liveness/readiness probe. Always returns **200**; the body reports per-dependency status.
+Liveness/readiness probe. Always returns **200**. The body reports per-dependency status.
 
-**Response - `200`**
+**Response, `200`**
 
 ```json
 { "status": "ok", "db": true, "redis": true, "s3": true }
@@ -54,7 +54,7 @@ Liveness/readiness probe. Always returns **200**; the body reports per-dependenc
 
 Compute a karma-weighted roll and return a **signed receipt** (when a signing key is configured).
 
-**Request body - `RollRequest`**
+**Request body, `RollRequest`**
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -78,12 +78,12 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 
 - The key may come from the `Idempotency-Key` **header** or the `idempotency_key` **body field**. If both are present and differ → **400**. The header is preferred.
 - If neither is present, the server generates a random key (so retries do not dedup).
-- Reusing a key whose recorded canonical payload hash - over `(die, kappa, client_nonce, drand)` - differs from the new request → **409**.
+- Reusing a key whose recorded canonical payload hash, over `(die, kappa, client_nonce, drand)`, differs from the new request → **409**.
 - A concurrent in-flight request holding the same key → **202** with a retry hint. Once completed, the same key returns the stored final receipt with the same target/result, not a fresh target.
 
 **Responses**
 
-- **`201` - new roll.** Body is the flattened receipt envelope (`ReceiptV2` fields at top level) plus `deduplicated: false`. When a signer is configured the receipt includes `receipt_hash` and `sig`; when no signer is configured **both fields are absent** and the receipt is unsigned.
+- **`201`, new roll.** Body is the flattened receipt envelope (`ReceiptV2` fields at top level) plus `deduplicated: false`. When a signer is configured the receipt includes `receipt_hash` and `sig`. When no signer is configured **both fields are absent** and the receipt is unsigned.
 
   ```json
   {
@@ -155,21 +155,21 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 
   The signature and `receipt_hash` are computed over the **JCS / RFC 8785** canonicalization of the receipt body **with the `sig` and `receipt_hash` fields removed**.
 
-- **`200` - deduplicated.** The idempotency key already resolved to a completed roll with a matching payload. The body is the stored receipt envelope with `deduplicated: true`. It is the same target/result as the original request.
+- **`200`, deduplicated.** The idempotency key already resolved to a completed roll with a matching payload. The body is the stored receipt envelope with `deduplicated: true`. It is the same target/result as the original request.
 
-- **`202` - processing.** Another request with the same key is still computing.
+- **`202`, processing.** Another request with the same key is still computing.
 
   ```json
   { "status": "processing", "idem_key": "<key>", "retry_hint_ms": 150 }
   ```
 
-- **`400`** - invalid `die`; `kappa` non-finite or outside `[-1, 1]`; missing/invalid `client_nonce`; missing/invalid drand proof; stale client drand frontier; target round not equal to observed+2; target round not future versus the API's freshness frontier; legacy `seed` present; or header/body idempotency keys both present and different. Plain text.
-- **`409`** - idempotency key reused with a different payload. Plain text.
-- **`413`** - POST body exceeds the `POST /v1/roll` body cap.
-- **`429`** - per-client-IP token bucket exhausted. Carries `x-ratelimit-after` from `tower_governor`.
-- **`503`** - global in-flight roll limit is saturated. JSON: `{ "error": "overloaded" }`; includes `Retry-After: 1`.
-- **`504`** - whole-roll handler timeout. JSON: `{ "error": "timeout" }`; includes `Retry-After: 1`.
-- **`500`** - DB / Redis / object-store failure. Plain text.
+- **`400`**, invalid `die`, `kappa` non-finite or outside `[-1, 1]`, missing/invalid `client_nonce`, missing/invalid drand proof, stale client drand frontier, target round not equal to observed+2, target round not future versus the API's freshness frontier, legacy `seed` present, or header/body idempotency keys both present and different. Plain text.
+- **`409`**, idempotency key reused with a different payload. Plain text.
+- **`413`**, POST body exceeds the `POST /v1/roll` body cap.
+- **`429`**, per-client-IP token bucket exhausted. Carries `x-ratelimit-after` from `tower_governor`.
+- **`503`**, global in-flight roll limit is saturated. JSON: `{ "error": "overloaded" }`, includes `Retry-After: 1`.
+- **`504`**, whole-roll handler timeout. JSON: `{ "error": "timeout" }`, includes `Retry-After: 1`.
+- **`500`**, DB / Redis / object-store failure. Plain text.
 
 **Drand derivation note.** The browser observes a quicknet frontier and sends a client nonce plus `target_round = observed_round + 2`. The API verifies the observed pulse, rejects targets that are not future versus `max(server latest relay round, local wall-clock quicknet schedule round)`, waits for the target pulse, verifies the target BLS signature, computes `randomness = SHA256(signature)`, and derives the 32-byte ChaCha20 seed with HKDF-SHA256 bound to the canonical request hash. There is no production fallback to local server RNG in drand mode.
 
@@ -179,9 +179,9 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 
 Look up a roll by its idempotency key.
 
-- **`200`** - `RollResponse` (legacy shape, `deduplicated: true`).
-- **`400`** - `idem_key` missing/empty. Plain text.
-- **`404`** - no roll for that key. Plain text.
+- **`200`**, `RollResponse` (legacy shape, `deduplicated: true`).
+- **`400`**, `idem_key` missing/empty. Plain text.
+- **`404`**, no roll for that key. Plain text.
 
 This endpoint does **not** return the signed receipt. The receipt is emitted only once, by `POST /v1/roll` on 201.
 
@@ -191,15 +191,15 @@ This endpoint does **not** return the signed receipt. The receipt is emitted onl
 
 Fetch a stored roll by its public UUID.
 
-- **`200`** - `RollResponse` (legacy shape, `deduplicated: true`).
-- **`400`** - malformed UUID. Plain text.
-- **`404`** - roll not found. Plain text.
+- **`200`**, `RollResponse` (legacy shape, `deduplicated: true`).
+- **`400`**, malformed UUID. Plain text.
+- **`404`**, roll not found. Plain text.
 
 Like the idem lookup, this returns the legacy shape, not the receipt.
 
 ### `RollResponse` (legacy shape)
 
-Returned by the `POST /v1/roll` dedup path (200) and both roll GETs. Not signed; carries no RNG proof material.
+Returned by the `POST /v1/roll` dedup path (200) and both roll GETs. Not signed, carries no RNG proof material.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -218,12 +218,12 @@ Returned by the `POST /v1/roll` dedup path (200) and both roll GETs. Not signed;
 
 Return the stored transcript JSON for a roll, served verbatim over HTTP so a verifier needs no object-store credentials.
 
-- **`200`** - `application/json`, the transcript bytes exactly as stored.
-- **`400`** - malformed UUID. Plain text.
-- **`404`** - roll not found, or transcript not yet uploaded. Plain text.
-- **`500`** - object-store fetch failure. Plain text.
+- **`200`**, `application/json`, the transcript bytes exactly as stored.
+- **`400`**, malformed UUID. Plain text.
+- **`404`**, roll not found, or transcript not yet uploaded. Plain text.
+- **`500`**, object-store fetch failure. Plain text.
 
-The transcript holds the flat math fields the legacy verify path consumes (`die`, `kappa`, `face`, `draw_u64`, `alpha`, `kl`, `ev`, `probs`) plus `sampling` and `rng` provenance metadata. **The derived DRBG key is not in the transcript** - it appears only in the receipt's `proof.rng.drbg_key_hex`. Provenance inputs in the transcript are redacted hashes (first 12 hex chars of SHA-256 over the respective input), not raw values.
+The transcript holds the flat math fields the legacy verify path consumes (`die`, `kappa`, `face`, `draw_u64`, `alpha`, `kl`, `ev`, `probs`) plus `sampling` and `rng` provenance metadata. **The derived DRBG key is not in the transcript**, it appears only in the receipt's `proof.rng.drbg_key_hex`. Provenance inputs in the transcript are redacted hashes (first 12 hex chars of SHA-256 over the respective input), not raw values.
 
 > **Transcript availability:** this endpoint exposes the stored transcript over plain HTTP with no authentication. Treat any transcript reachable through it as readable by anyone who has the roll id.
 
@@ -233,7 +233,7 @@ The transcript holds the flat math fields the legacy verify path consumes (`die`
 
 Fetch and verify the latest drand quicknet pulse through the server's configured relays. This is an operational/provenance health endpoint, not a roll.
 
-**Response - `200`**
+**Response, `200`**
 
 ```json
 {
@@ -261,17 +261,17 @@ Verify a receipt or a legacy transcript body. The handler **auto-detects** the f
 
 The raw body is passed to the shared offline verifier (the same code path used by the CLI and the WASM verifier, so the signer and verifier cannot drift). The verifier:
 
-1. for `truerolls-drand-1`, verifies the pinned quicknet drand proof and re-derives the receipt seed;
-2. checks the Ed25519 signature over the JCS/RFC8785-canonicalized body (sig + receipt_hash excluded), using the server's **own published key**;
-3. replays ChaCha20 from `proof.rng.drbg_key_hex` (one `next_u64`) and confirms it reproduces `proof.draw_u64`;
-4. recomputes the guarded distribution and face from `(die, kappa)` and checks the face;
+1. for `truerolls-drand-1`, verifies the pinned quicknet drand proof and re-derives the receipt seed,
+2. checks the Ed25519 signature over the JCS/RFC8785-canonicalized body (sig + receipt_hash excluded), using the server's **own published key**,
+3. replays ChaCha20 from `proof.rng.drbg_key_hex` (one `next_u64`) and confirms it reproduces `proof.draw_u64`,
+4. recomputes the guarded distribution and face from `(die, kappa)` and checks the face,
 5. checks recomputed `alpha`, `kl`, `ev` against the receipt within a fixed tolerance (`1e-9`).
 
-**Failed checks still return `200`** - the outcome is reported via boolean flags and `errors`, not via HTTP status. `400` is reserved for input the verifier cannot process at all (see below).
+**Failed checks still return `200`**, the outcome is reported via boolean flags and `errors`, not via HTTP status. `400` is reserved for input the verifier cannot process at all (see below).
 
 The signature is verified against the server's currently published key. A receipt signed by any other key fails the signature check softly: `valid_signature: false`, verdict reported in flags, still **200**. If the server has no signing key configured, the signature check fails softly (recorded in `errors`) while sampling/face/metrics still run.
 
-**Response - `200`, `ReceiptVerifyResponse`**
+**Response, `200`, `ReceiptVerifyResponse`**
 
 ```json
 {
@@ -304,15 +304,15 @@ The signature is verified against the server's currently published key. A receip
 | `details.tol` | number | Absolute tolerance for metric comparisons (currently `1e-9`). |
 | `errors` | string[] | Human-readable failures. Omitted from the JSON when all checks pass. |
 
-(There is no top-level `verdict` field on this response - derive the overall outcome from all boolean flags.)
+(There is no top-level `verdict` field on this response, derive the overall outcome from all boolean flags.)
 
-**`400` (receipt mode)** - body that cannot be verified at all. The verifier maps every hard error to `400`: undeserializable receipt; unsupported `proof.math_param_version`; invalid or wrong-length `drbg_key_hex`; unparsable `draw_u64`; unsupported die; **and any math-recompute error, including a `kappa` outside `[-1, 1]`** (out-of-range κ hard-fails the recompute rather than returning a soft INVALID). Plain text.
+**`400` (receipt mode)**, body that cannot be verified at all. The verifier maps every hard error to `400`: undeserializable receipt, unsupported `proof.math_param_version`, invalid or wrong-length `drbg_key_hex`, unparsable `draw_u64`, unsupported die, **and any math-recompute error, including a `kappa` outside `[-1, 1]`** (out-of-range κ hard-fails the recompute rather than returning a soft INVALID). Plain text.
 
 ### Legacy transcript mode (no `v` discriminator)
 
 The body is parsed as a flat `VerifyRequest`. The server recomputes the distribution from `(die, kappa)`, replays sampling with `draw_u64`, and compares `face`, `alpha`, `kl`, `ev`, and `probs` against the submitted values.
 
-**Request - `VerifyRequest`**
+**Request, `VerifyRequest`**
 
 | Field | Type | Notes |
 |---|---|---|
@@ -324,7 +324,7 @@ The body is parsed as a flat `VerifyRequest`. The server recomputes the distribu
 | `alpha`, `kl`, `ev` | number | Claimed metrics. |
 | `probs` | number[] | Claimed probability vector; length must match the die. |
 
-**Response - `200`, `VerifyResponse`** (verdict `OK`)
+**Response, `200`, `VerifyResponse`** (verdict `OK`)
 
 ```json
 {
@@ -334,12 +334,12 @@ The body is parsed as a flat `VerifyRequest`. The server recomputes the distribu
 }
 ```
 
-`mismatches` and `warnings` are omitted when empty. A diff over `1e-12` is a hard mismatch; a difference visible only at the bit level is a harmless `warnings` entry.
+`mismatches` and `warnings` are omitted when empty. A diff over `1e-12` is a hard mismatch. A difference visible only at the bit level is a harmless `warnings` entry.
 
-- **`422` - MISMATCH (quirk).** On mismatch the response is the `VerifyResponse` JSON **serialized as a plain-text string** (Content-Type `text/plain`). Parse the text body as JSON to recover the structured verdict.
-- **`400`** - unsupported `math_param_version`, unsupported die, `kappa` non-finite/out of range, unparsable `draw_u64`, or `probs` length mismatch. Plain text.
+- **`422`, MISMATCH (quirk).** On mismatch the response is the `VerifyResponse` JSON **serialized as a plain-text string** (Content-Type `text/plain`). Parse the text body as JSON to recover the structured verdict.
+- **`400`**, unsupported `math_param_version`, unsupported die, `kappa` non-finite/out of range, unparsable `draw_u64`, or `probs` length mismatch. Plain text.
 
-**Verification scope (both modes):** drand receipt mode proves verified public-beacon seed provenance plus replay. It does not prove the published outcome was unbiased - the operator can still grind by failing/suppressing unfavorable attempts and publishing only favorable completed receipts (closing that is v2 witnessed fairness). Legacy transcript mode proves deterministic replay consistency only.
+**Verification scope (both modes):** drand receipt mode proves verified public-beacon seed provenance plus replay. It does not prove the published outcome was unbiased, the operator can still grind by failing/suppressing unfavorable attempts and publishing only favorable completed receipts (closing that is v2 witnessed fairness). Legacy transcript mode proves deterministic replay consistency only.
 
 ---
 
@@ -347,13 +347,13 @@ The body is parsed as a flat `VerifyRequest`. The server recomputes the distribu
 
 Convenience endpoint. The server looks up the roll, fetches its stored transcript from object storage, parses the flat math fields, and runs the **same legacy verification** as `POST /v1/verify` legacy mode.
 
-- **`200`** - `VerifyResponse`, verdict `OK`.
-- **`400`** - malformed UUID, or the stored transcript fails validation (e.g. written under a different `math_param_version` than the server now runs). Plain text.
-- **`404`** - roll not found, or transcript not yet uploaded. Plain text.
-- **`422`** - MISMATCH, same plain-text-JSON-string quirk as legacy POST.
-- **`500`** - object-store fetch failure, or a stored transcript that does not parse. Plain text.
+- **`200`**, `VerifyResponse`, verdict `OK`.
+- **`400`**, malformed UUID, or the stored transcript fails validation (e.g. written under a different `math_param_version` than the server now runs). Plain text.
+- **`404`**, roll not found, or transcript not yet uploaded. Plain text.
+- **`422`**, MISMATCH, same plain-text-JSON-string quirk as legacy POST.
+- **`500`**, object-store fetch failure, or a stored transcript that does not parse. Plain text.
 
-This checks the server's **own** stored transcript against the server's **own** math - a consistency check, not an independent audit. For an independent check, verify the receipt (and transcript) with your own verifier rather than trusting this endpoint.
+This checks the server's **own** stored transcript against the server's **own** math, a consistency check, not an independent audit. For an independent check, verify the receipt (and transcript) with your own verifier rather than trusting this endpoint.
 
 ---
 
@@ -361,7 +361,7 @@ This checks the server's **own** stored transcript against the server's **own** 
 
 Publishes the server's Ed25519 verifying key(s) so receipts can be verified offline.
 
-**Response - `200`, `KeysResponse`**
+**Response, `200`, `KeysResponse`**
 
 ```json
 {
@@ -377,7 +377,7 @@ Publishes the server's Ed25519 verifying key(s) so receipts can be verified offl
 | `keys[].alg` | string | `"Ed25519"`. |
 | `keys[].public_key` | string | Base64 of the 32-byte verifying key. |
 
-- **`404`** - no signing key configured. In that mode receipts are emitted unsigned (without `sig`/`receipt_hash`). Plain text.
+- **`404`**, no signing key configured. In that mode receipts are emitted unsigned (without `sig`/`receipt_hash`). Plain text.
 
 To verify a receipt offline: take its `sig.kid`, look up the matching `public_key` here, and check `sig.signature_b64` over the JCS/RFC8785 canonicalization of the receipt body with `sig` and `receipt_hash` removed.
 
@@ -403,6 +403,6 @@ To verify a receipt offline: take its `sig.kid`, look up the matching `public_ke
 
 These are points where the OpenAPI reference and the running code diverge. **The code is authoritative.**
 
-- **Rate limiting and L2 overload statuses are undocumented in OpenAPI.** The code applies a per-IP token-bucket limiter (`tower_governor`) scoped to `POST /v1/roll` only. It now keys the client IP through `KD_TRUSTED_PROXY`: default `peer` ignores forwarded headers, `xff:<hops>` takes the Nth IP from the right, and `cloudflare` / `fly` read the provider's authoritative client-IP header. Under `KD_ENV=prod`, `peer` mode fails closed unless `KD_ALLOW_PEER_IP=1` is set deliberately. When the token bucket is exceeded the request gets **`429 Too Many Requests`** with `x-ratelimit-after`. Separately, `POST /v1/roll` has a body cap, global in-flight cap, and whole-handler timeout; overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. GET roll lookup, verify, health, drand health, and well-known routes are not wrapped in the heavy stack. Treat all of this as abuse/load protection, not authentication.
+- **Rate limiting and L2 overload statuses are undocumented in OpenAPI.** The code applies a per-IP token-bucket limiter (`tower_governor`) scoped to `POST /v1/roll` only. It now keys the client IP through `KD_TRUSTED_PROXY`: default `peer` ignores forwarded headers, `xff:<hops>` takes the Nth IP from the right, and `cloudflare` / `fly` read the provider's authoritative client-IP header. Under `KD_ENV=prod`, `peer` mode fails closed unless `KD_ALLOW_PEER_IP=1` is set deliberately. When the token bucket is exceeded the request gets **`429 Too Many Requests`** with `x-ratelimit-after`. Separately, `POST /v1/roll` has a body cap, global in-flight cap, and whole-handler timeout. Overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. GET roll lookup, verify, health, drand health, and well-known routes are not wrapped in the heavy stack. Treat all of this as abuse/load protection, not authentication.
 
 Aside from the rate-limit/body-cap/overload statuses named above, the OpenAPI's endpoint set, request/response shapes, status codes, and the documented quirks (the 200-on-failed-check receipt path, the 422 plain-text-JSON-string legacy body, the receipt-vs-legacy response asymmetry) match the code at the time of writing. Note that example key ids and crypto values in both this doc and the OpenAPI are placeholders, not code constants.

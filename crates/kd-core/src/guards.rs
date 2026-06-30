@@ -20,14 +20,14 @@ fn mix_with_uniform<const N: usize>(p_tilde: &[f64; N], alpha: f64) -> [f64; N] 
     out
 }
 
-/// Check caps (EV & KL) after ε-floor+renorm; return (ok, ev, kl).
+/// Check caps (EV & KL) after ε-floor+renorm, return (ok, ev, kl).
 #[inline]
 fn guards_ok<const N: usize>(p: &[f64; N], params: &Params) -> (bool, f64, f64) {
     let mu = Die::<N>::ev_uniform();
     let sd = Die::<N>::sd_uniform();
     let ev_p = ev::<N>(p);
     let kl_p = dkl_to_uniform::<N>(p);
-    // Small slack on KL for FP noise; EV bound is tight using the same epsilon-renormed p.
+    // Small slack on KL for FP noise. EV bound is tight using the same epsilon-renormed p.
     let ev_ok = (ev_p - mu).abs() <= params.ev_cap_sd * sd;
     let kl_ok = kl_p <= params.kl_cap_nats + 1e-15;
     (ev_ok && kl_ok, ev_p, kl_p)

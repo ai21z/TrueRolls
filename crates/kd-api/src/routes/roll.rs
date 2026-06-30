@@ -76,7 +76,7 @@ pub async fn get_roll_by_idem(
     }
 }
 
-/// GET /v1/roll/:id/transcript - return transcript JSON via HTTP (not s3://)
+/// GET /v1/roll/:id/transcript, return transcript JSON via HTTP (not s3://)
 #[tracing::instrument(name = "roll.transcript", skip(state), fields(id = %public_id))]
 pub async fn get_transcript_by_id(
     State(state): State<Arc<AppState>>,
@@ -172,7 +172,7 @@ pub async fn post_roll(
         .as_ref()
         .ok_or_else(|| bad_request("drand proof is required for drand-backed rolls"))?;
 
-    // ---- idempotency: header preferred; if both present and differ -> 400 ---
+    // ---- idempotency: header preferred, if both present and differ -> 400 ---
     let header_key = headers
         .get("Idempotency-Key")
         .and_then(|v| v.to_str().ok())
@@ -292,9 +292,9 @@ pub async fn post_roll(
 
     // ---- global mint cap: bound TOTAL receipts minted per window (OPS-AUTH-01) ----
     // The drand proof is now validated and we hold the idempotency lock, so we are committed to a
-    // *new* mint. Reserve global budget here - AFTER validation (an invalid proof has already 400'd
-    // above without spending budget) and BEFORE the expensive target-round wait + signing + DB + S3
-    // - so the counter tracks validated reservation attempts at the mint-commit point, an over-cap
+    // *new* mint. Reserve global budget here, AFTER validation (an invalid proof has already 400'd
+    // above without spending budget) and BEFORE the expensive target-round wait + signing + DB + S3,
+    // so the counter tracks validated reservation attempts at the mint-commit point, an over-cap
     // request is rejected before the ~6s wait, and a legitimate idempotent retry (which dedups)
     // never charges.
     // Fail-closed: a Redis error -> 500 (the roll path already requires Redis for the idem lock).

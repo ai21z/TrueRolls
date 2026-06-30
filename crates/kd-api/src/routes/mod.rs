@@ -35,7 +35,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     // proxy/header mode configured by KD_TRUSTED_PROXY. ConnectInfo is provided by main.rs via
     // into_make_service_with_connect_info.
     //
-    // On 429 the layer sets `x-ratelimit-after` (seconds) - tower_governor's header, not
+    // On 429 the layer sets `x-ratelimit-after` (seconds), tower_governor's header, not
     // `Retry-After`.
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
@@ -72,7 +72,7 @@ pub fn router(state: Arc<AppState>) -> Router {
                 16 * 1024,
             )
             .get(roll::get_roll_by_idem)
-            .layer(roll_governor), // limits POST only (methods=[POST]); GET passes through
+            .layer(roll_governor), // limits POST only (methods=[POST]), GET passes through
         )
         .route("/v1/roll/:id", get(roll::get_roll_by_id))
         .route("/v1/roll/:id/transcript", get(roll::get_transcript_by_id))
@@ -367,7 +367,7 @@ mod tests {
                 .status(),
             StatusCode::OK
         );
-        // A different IP is independent - its first request still passes.
+        // A different IP is independent, its first request still passes.
         assert_eq!(
             app.clone()
                 .oneshot(post_from_peer("2.2.2.2"))

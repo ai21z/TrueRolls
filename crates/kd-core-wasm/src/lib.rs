@@ -5,12 +5,12 @@
 //!   `default_for_die`, `prefix_cdf_index_from_u64`). This crate only dispatches die strings
 //!   to const-generic `N` and serializes results to JSON.
 //! - **Host-testable core.** All logic lives in plain-Rust `*_impl` functions returning
-//!   `Result<_, String>`; the `#[wasm_bindgen]` exports are thin wrappers converting errors
+//!   `Result<_, String>`. The `#[wasm_bindgen]` exports are thin wrappers converting errors
 //!   to `JsError`. Unit tests run on the host target against the `*_impl` functions and
-//!   assert *exact* (`f64 ==`) parity with direct `kd_core` calls - same code path,
+//!   assert *exact* (`f64 ==`) parity with direct `kd_core` calls, same code path,
 //!   serde_json f64 round-trips are bit-exact.
-//! - kd-core stays untouched; defaults come from `default_for_die(N)` (λ fixed at the
-//!   per-die default; no λ override in v1 of these bindings).
+//! - kd-core stays untouched. Defaults come from `default_for_die(N)` (λ fixed at the
+//!   per-die default, no λ override in v1 of these bindings).
 
 use kd_core::die::Die;
 use kd_core::distribution::compute_distribution;
@@ -167,7 +167,7 @@ pub fn compute_distribution_json(die: &str, kappa: f64) -> Result<String, JsErro
     compute_distribution_json_impl(die, kappa).map_err(|e| JsError::new(&e))
 }
 
-/// Map a 64-bit draw (JS BigInt) onto `probs` via prefix-CDF; returns the 1-based face.
+/// Map a 64-bit draw (JS BigInt) onto `probs` via prefix-CDF. Returns the 1-based face.
 /// `probs.length` must equal the die size.
 #[wasm_bindgen(js_name = faceFromDraw)]
 pub fn face_from_draw(die: &str, probs: &[f64], draw: u64) -> Result<u32, JsError> {
@@ -182,8 +182,8 @@ pub fn compute_roll_replay_json(die: &str, kappa: f64, draw: u64) -> Result<Stri
     compute_roll_replay_json_impl(die, kappa, draw).map_err(|e| JsError::new(&e))
 }
 
-/// Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
-/// DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
+/// Verify a signed TrueRolls receipt entirely client-side, Ed25519 signature,
+/// DRBG sampling replay, face, and metric caps, using the shared `kd_receipt`
 /// engine (identical to `kd verify --receipt`).
 ///
 /// - `receiptJson`: the raw receipt JSON string.
@@ -282,14 +282,14 @@ mod tests {
 
     #[test]
     fn face_from_draw_edge_draws_agree_with_prefix_cdf() {
-        // d6, shaped distribution; draws 0 and u64::MAX.
+        // d6, shaped distribution, draws 0 and u64::MAX.
         let out6 = compute_distribution::<6>(Die::<6>, 0.6, &default_for_die(6)).unwrap();
         for draw in [0_u64, u64::MAX] {
             let expected = (prefix_cdf_index_from_u64::<6>(&out6.probs, draw) + 1) as u32;
             let got = face_from_draw_impl("d6", &out6.probs, draw).unwrap();
             assert_eq!(got, expected, "d6 draw={draw}");
         }
-        // d20, negative stance; same edges plus a mid draw.
+        // d20, negative stance, same edges plus a mid draw.
         let out20 = compute_distribution::<20>(Die::<20>, -0.5, &default_for_die(20)).unwrap();
         for draw in [0_u64, u64::MAX / 2, u64::MAX] {
             let expected = (prefix_cdf_index_from_u64::<20>(&out20.probs, draw) + 1) as u32;
@@ -351,7 +351,7 @@ mod tests {
 
     // --- verifyReceiptJson: the browser verifier IS the kd_receipt engine ----
 
-    /// PUBLIC test signing seed (never production) - same as the goldens.
+    /// PUBLIC test signing seed (never production), same as the goldens.
     const TEST_SIGNING_SEED_HEX: &str =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn verify_receipt_json_drand_golden_is_valid() {
         // truerolls-drand-1: real pinned quicknet pulses (rounds 121/123). The
-        // shared verifier - the same engine the browser runs via wasm - must
+        // shared verifier, the same engine the browser runs via wasm, must
         // accept it, INCLUDING the drand BLS pulse verification.
         let out = verify_receipt_json_impl(
             &golden_str("golden_receipt_03_d20_drand.json"),
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn verify_receipt_json_drand_tampered_sig_isolates_bls_failure() {
         // The Ed25519 signature still covers this body (valid_signature=true) and
-        // sampling/face/metrics all pass; ONLY the drand BLS pulse verify fails.
+        // sampling/face/metrics all pass. ONLY the drand BLS pulse verify fails.
         // Pins that the BLS rejection path is reached, not short-circuited.
         let out = verify_receipt_json_impl(
             &golden_str("golden_receipt_04_d20_drand_tampered_sig.json"),

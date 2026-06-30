@@ -14,7 +14,7 @@ Companion notes:
 
 ---
 
-## Part 0 - the two reframes
+## Part 0, the two reframes
 
 Two findings need precise wording:
 
@@ -39,7 +39,7 @@ an authenticated principal in a new receipt version. Never echo such fields from
 
 ---
 
-## Part 1 - OPS-AUTH-01: bound cost, keep it anonymous
+## Part 1, OPS-AUTH-01: bound cost, keep it anonymous
 
 ### Tiered model
 
@@ -103,7 +103,7 @@ out.
 
 ---
 
-## Part 2 - OPS-KEY-01/02: rotation and revocation
+## Part 2, OPS-KEY-01/02: rotation and revocation
 
 Status: designed, not implemented.
 

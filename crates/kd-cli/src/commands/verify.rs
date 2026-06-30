@@ -82,7 +82,7 @@ pub fn execute(args: VerifyArgs) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Parameter mode - check caps hold across κ values
+// Parameter mode, check caps hold across κ values
 // ---------------------------------------------------------------------------
 
 fn verify_params(args: &VerifyArgs) -> Result<()> {
@@ -244,7 +244,7 @@ fn get_probs(faces: u32, kappa: f64, params: &Params) -> Result<Vec<f64>> {
 }
 
 // ---------------------------------------------------------------------------
-// Transcript mode - verify a transcript JSON file
+// Transcript mode, verify a transcript JSON file
 // ---------------------------------------------------------------------------
 
 fn verify_transcript(args: &VerifyArgs, path: &PathBuf) -> Result<()> {
@@ -302,7 +302,7 @@ impl EntryReport {
 }
 
 fn verify_transcript_local(args: &VerifyArgs, transcript: &serde_json::Value) -> Result<()> {
-    // `kd roll -c N --output` writes a JSON array of entries; verify each
+    // `kd roll -c N --output` writes a JSON array of entries, verify each
     // entry independently and aggregate the verdict.
     if let Some(entries) = transcript.as_array() {
         return verify_transcript_local_array(args, entries);
@@ -375,7 +375,7 @@ fn verify_transcript_local_array(args: &VerifyArgs, entries: &[serde_json::Value
 
 fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport> {
     // Version gate 1: if a transcript_version is declared, it must be one we
-    // understand. (Server transcripts do not carry this key - that is fine.)
+    // understand. (Server transcripts do not carry this key, that is fine.)
     if let Some(tv) = transcript.get("transcript_version") {
         let tv_str = tv.as_str().unwrap_or("");
         if tv_str != crate::commands::roll::TRANSCRIPT_VERSION {
@@ -495,7 +495,7 @@ fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport
 
     // Face policy: a face claim is only verifiable when draw_u64 is present
     // and replayable. A face without a valid draw is a MISMATCH, not a
-    // silent pass - otherwise tampered faces would verify as OK.
+    // silent pass, otherwise tampered faces would verify as OK.
     match transcript.get("face").and_then(|v| v.as_u64()) {
         None => {
             mismatches.push("face: missing from transcript".to_string());
@@ -543,12 +543,12 @@ fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport
 /// server's `POST /v1/verify` expects (kd-api `models/dto.rs`).
 ///
 /// The server branches on `"v": "truerolls-1"` for receipts and otherwise
-/// deserializes the body as a flat `VerifyRequest` - a wrapped
+/// deserializes the body as a flat `VerifyRequest`, a wrapped
 /// `{"transcript": ...}` envelope always 400s (F-02).
 ///
 /// Refusal policy: the server recomputes with FIXED default params (λ=0.5)
 /// and supports only d6/d20/d100. A transcript the server cannot faithfully
-/// verify is refused here with a clear message instead of being sent - an
+/// verify is refused here with a clear message instead of being sent, an
 /// honest refusal beats a false MISMATCH.
 fn remote_verify_body(transcript: &serde_json::Value) -> Result<serde_json::Value> {
     if transcript.is_array() {
@@ -566,7 +566,7 @@ fn remote_verify_body(transcript: &serde_json::Value) -> Result<serde_json::Valu
 
     // λ: the server recomputes with the fixed per-die default λ=0.5. A
     // transcript rolled with a different λ would recompute differently
-    // server-side and falsely MISMATCH; refuse instead.
+    // server-side and falsely MISMATCH. Refuse instead.
     if let Some(lv) = transcript.get("lambda") {
         let lambda = lv.as_f64().context("transcript 'lambda' is not a number")?;
         if (lambda - 0.5).abs() > 1e-12 {
@@ -576,7 +576,7 @@ fn remote_verify_body(transcript: &serde_json::Value) -> Result<serde_json::Valu
         }
     }
 
-    // draw_u64: mandatory, stringified u64 - without it the server cannot
+    // draw_u64: mandatory, stringified u64, without it the server cannot
     // replay the face.
     let draw_str = match transcript.get("draw_u64") {
         None => bail!("transcript missing 'draw_u64' - the server cannot replay the face"),
@@ -626,7 +626,7 @@ fn remote_verify_body(transcript: &serde_json::Value) -> Result<serde_json::Valu
         .or_else(|| transcript.get("param_version").and_then(|v| v.as_str()))
         .context("transcript missing math_param_version")?;
 
-    // Exactly the 9 VerifyRequest fields; local-only keys (transcript_version,
+    // Exactly the 9 VerifyRequest fields. Local-only keys (transcript_version,
     // lambda, seed, sampling, rng, ...) are dropped.
     Ok(json!({
         "math_param_version": math_param_version,
@@ -660,7 +660,7 @@ fn verify_transcript_remote(args: &VerifyArgs, transcript: &serde_json::Value) -
     let text = resp.text()?;
 
     match status.as_u16() {
-        // OK - body is the VerifyResponse JSON.
+        // OK, body is the VerifyResponse JSON.
         200 => {
             let v: serde_json::Value =
                 serde_json::from_str(&text).context("server returned 200 with non-JSON body")?;
@@ -677,7 +677,7 @@ fn verify_transcript_remote(args: &VerifyArgs, transcript: &serde_json::Value) -
             }
             Ok(())
         }
-        // MISMATCH - the 422 body is the VerifyResponse JSON serialized as a
+        // MISMATCH, the 422 body is the VerifyResponse JSON serialized as a
         // plain-text string (kd-api routes/verify.rs `run_verification`).
         422 => {
             let v: serde_json::Value = serde_json::from_str(&text)
@@ -698,7 +698,7 @@ fn verify_transcript_remote(args: &VerifyArgs, transcript: &serde_json::Value) -
             }
             bail!("remote transcript verification FAILED (server verdict: MISMATCH)")
         }
-        // Contract rejection - surface the server's error text verbatim.
+        // Contract rejection, surface the server's error text verbatim.
         400 => bail!("server rejected request (400): {text}"),
         _ => bail!("server returned {status}: {text}"),
     }
@@ -759,7 +759,7 @@ fn replay_face(faces: u32, probs: &[f64], draw_u64: u64) -> Result<u32> {
 }
 
 // ---------------------------------------------------------------------------
-// Receipt mode - verify a signed ReceiptV2 offline
+// Receipt mode, verify a signed ReceiptV2 offline
 // ---------------------------------------------------------------------------
 
 fn verify_receipt_offline(args: &VerifyArgs, path: &PathBuf) -> Result<()> {
@@ -784,12 +784,12 @@ fn verify_receipt_offline(args: &VerifyArgs, path: &PathBuf) -> Result<()> {
                     eprintln!("Fetching public key from {}", args.server);
                     fetch_public_key(&args.server, kid)?
                 }
-                None => String::new(), // unsigned receipt - key unused
+                None => String::new(), // unsigned receipt, key unused
             }
         }
     };
 
-    // Single shared verifier - the exact same engine the browser runs through
+    // Single shared verifier, the exact same engine the browser runs through
     // kd-core-wasm. Hard (unverifiable) failures map back to a CLI error/exit 1.
     let report =
         verify_receipt(&receipt_value, &public_key_b64).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -858,7 +858,7 @@ fn fetch_public_key(server: &str, kid: &str) -> Result<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests - remote_verify_body (no server required)
+// Tests, remote_verify_body (no server required)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -890,7 +890,7 @@ mod remote_tests {
         let body = remote_verify_body(&local_v2_entry()).expect("should build body");
         let obj = body.as_object().expect("body must be a JSON object");
 
-        // Exactly the 9 VerifyRequest keys - nothing else.
+        // Exactly the 9 VerifyRequest keys, nothing else.
         let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
         keys.sort_unstable();
         assert_eq!(

@@ -1,13 +1,13 @@
-//! kd-worker-wasm - wasm-bindgen bindings for the TrueRolls Cloudflare Worker.
+//! kd-worker-wasm, wasm-bindgen bindings for the TrueRolls Cloudflare Worker.
 //!
 //! One call, [`rollAndSign`], does a full server-side roll: replay the draw from a
 //! CSPRNG seed, compute the guarded face + metrics via `kd_core`, then sign the
-//! receipt with the shared `kd_receipt` signer - the SAME JCS canonicalization the
+//! receipt with the shared `kd_receipt` signer, the SAME JCS canonicalization the
 //! verifier (browser/CLI) checks, so a Worker receipt verifies bit-for-bit.
 //!
 //! This crate is **server-side only**. The signing key is supplied per-call from a
 //! Worker secret and never leaves the Worker. The browser bundle is the separate
-//! `kd-core-wasm` (math preview + verify) - sign code never ships to the client.
+//! `kd-core-wasm` (math preview + verify), sign code never ships to the client.
 //!
 //! Design mirrors `kd-core-wasm`: a host-testable `*_impl` returning
 //! `Result<_, String>` plus a thin `#[wasm_bindgen]` wrapper. The Worker supplies
@@ -25,8 +25,8 @@ use wasm_bindgen::prelude::*;
 
 /// How the published `drbg_key_hex` relates to the draw: the 32-byte key is used
 /// directly as the ChaCha20 seed (the Worker draws it from a CSPRNG). The verifier
-/// only needs this relationship to replay; it does not depend on how the key was
-/// generated. (kd-api uses `HKDF(SHA-256)->ChaCha20Rng`; both replay identically.)
+/// only needs this relationship to replay. It does not depend on how the key was
+/// generated. (kd-api uses `HKDF(SHA-256)->ChaCha20Rng`, both replay identically.)
 pub const RNG_ALGO: &str = "csprng->ChaCha20Rng";
 
 /// Dispatch a die string ("d4".."d100") to a const-generic call with `N`.
@@ -48,7 +48,7 @@ macro_rules! dispatch_die {
 }
 
 /// Replay the 1-based face + guard metrics for a draw at stance `kappa`
-/// (every number comes from `kd_core`; this crate adds no math).
+/// (every number comes from `kd_core`, this crate adds no math).
 fn roll_face<const N: usize>(kappa: f64, draw: u64) -> Result<(u32, f64, f64, f64), String> {
     let params = default_for_die(N);
     let out = compute_distribution::<N>(Die::<N>, kappa, &params).map_err(|e| e.to_string())?;
@@ -67,7 +67,7 @@ fn roll_and_sign_impl(
     secret_hex: &str,
     kid: &str,
 ) -> Result<String, String> {
-    // 1. Replay the draw from the 32-byte CSPRNG seed - identical to the verifier.
+    // 1. Replay the draw from the 32-byte CSPRNG seed, identical to the verifier.
     let drbg =
         hex::decode(drbg_key_hex.trim()).map_err(|e| format!("drbg_key_hex not hex: {e}"))?;
     if drbg.len() != 32 {
@@ -83,7 +83,7 @@ fn roll_and_sign_impl(
     // 2. Guarded face + metrics from kd-core.
     let (face, alpha, kl, ev) = dispatch_die!(die, roll_face, kappa, draw)?;
 
-    // 3. Receipt body (pre-sig) - the ReceiptV2 shape kd-api emits and the verifier reads.
+    // 3. Receipt body (pre-sig), the ReceiptV2 shape kd-api emits and the verifier reads.
     let body = json!({
         "v": kd_receipt::RECEIPT_VERSION,
         "id": id,
@@ -121,11 +121,11 @@ fn roll_and_sign_impl(
 
 /// Roll a die and return a signed TrueRolls receipt (JSON string).
 ///
-/// - `die`: "d4".."d100"; `kappa`: stance in [-1, 1].
-/// - `drbgKeyHex`: 32 random bytes (hex) from the Worker's CSPRNG - the ChaCha20
+/// - `die`: "d4".."d100". `kappa`: stance in [-1, 1].
+/// - `drbgKeyHex`: 32 random bytes (hex) from the Worker's CSPRNG, the ChaCha20
 ///   seed the verifier replays.
 /// - `id`, `createdAt`, `transcriptUrl`: receipt provenance the Worker supplies.
-/// - `secretHex`, `kid`: the Ed25519 signing seed + key id (a Worker secret;
+/// - `secretHex`, `kid`: the Ed25519 signing seed + key id (a Worker secret,
 ///   never exposed to the browser).
 ///
 /// Returns the full receipt (`{…, receipt_hash, sig}`) the shared verifier accepts

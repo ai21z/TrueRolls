@@ -12,7 +12,7 @@ use kd_core::{
 };
 use rand::RngCore;
 
-/// What the route expects; if you already have this type, keep your version
+/// What the route expects. If you already have this type, keep your version
 /// and adapt the return mapping below.
 pub struct ComputeResult {
     pub face: u32,
@@ -103,7 +103,7 @@ pub fn compute_roll_with_rng_labeled(
     })
 }
 
-/// Backward-compat: existing call sites can keep calling this variant; it will
+/// Backward-compat: existing call sites can keep calling this variant. It will
 /// mark `sampling.rng = "unknown"`. Prefer the `_labeled` variant above.
 #[allow(dead_code)]
 pub fn compute_roll_with_rng(
@@ -115,14 +115,14 @@ pub fn compute_roll_with_rng(
     compute_roll_with_rng_labeled(die, kappa, rng, params_override, "unknown")
 }
 
-/// Convenience wrapper used by older call sites; keep it compiling but use rand 0.9 API.
+/// Convenience wrapper used by older call sites. Keep it compiling but use rand 0.9 API.
 #[allow(dead_code)]
 pub fn compute_roll(die: &str, kappa: f64, _seed: Option<&str>) -> anyhow::Result<ComputeResult> {
     let mut rng = rand::rng(); // temporary fallback
     compute_roll_with_rng_labeled(die, kappa, &mut rng, None, "thread_rng")
 }
 
-/// Internal enum to hold Output<N> of any supported die; lets us extract common scalars.
+/// Internal enum to hold Output<N> of any supported die. Lets us extract common scalars.
 #[allow(clippy::large_enum_variant)]
 enum OutAny {
     D6(Output<6>),

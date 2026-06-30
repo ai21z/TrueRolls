@@ -1,6 +1,6 @@
 //! Die helpers, generic over N (faces 1..=N).
 //! Face scores are standardized to mean 0 and variance 1 under the uniform.
-//! μ_u = (N+1)/2; σ_u^2 = (N^2 - 1)/12.
+//! μ_u = (N+1)/2. σ_u^2 = (N^2 - 1)/12.
 
 pub struct Die<const N: usize>;
 

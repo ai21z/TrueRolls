@@ -8,7 +8,7 @@ use serde_json::Value;
 /// payload from the roll response fields + recomputing probs via kd-core.
 /// But actually the verify endpoint only needs the fields in VerifyRequest;
 /// we can get `face`, `alpha`, `kl`, `ev` from the roll response, and
-/// we need `draw_u64` + `probs` which aren't in the roll response - they're
+/// we need `draw_u64` + `probs` which aren't in the roll response, they're
 /// only in the S3 transcript.
 ///
 /// Strategy: POST /v1/roll → get face/alpha/kl/ev, then recompute distribution

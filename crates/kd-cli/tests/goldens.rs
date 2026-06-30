@@ -1,4 +1,4 @@
-//! KD-026 - Golden consumer tests (run in CI, never ignored).
+//! KD-026, Golden consumer tests (run in CI, never ignored).
 //!
 //! Every `expected_local` verdict in `goldens/goldens.csv` is enforced
 //! here by invoking the real `kd` binary against the committed fixtures.
@@ -12,7 +12,7 @@ use assert_cmd::Command;
 use base64::Engine;
 use std::path::Path;
 
-/// PUBLIC test signing seed - identical to the one in kd-api
+/// PUBLIC test signing seed, identical to the one in kd-api
 /// `src/services/signing.rs` unit tests and `tests/gen_goldens.rs`.
 /// NEVER a production key.
 const TEST_SIGNING_SEED_HEX: &str =
@@ -48,7 +48,7 @@ fn test_public_key_b64() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Transcript goldens - local CLI verification
+// Transcript goldens, local CLI verification
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -105,7 +105,7 @@ fn golden_bad_version_errors() {
 }
 
 // ---------------------------------------------------------------------------
-// Receipt goldens - offline signed-receipt verification
+// Receipt goldens, offline signed-receipt verification
 // ---------------------------------------------------------------------------
 
 #[test]

@@ -23,8 +23,8 @@ pub struct AppState {
 }
 
 pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
-    // SIG-2 (fail-fast): validate config - incl. refusing the published TEST signer under
-    // KD_ENV=prod - BEFORE any DB / Redis / S3 I/O, so a misconfigured prod boot aborts
+    // SIG-2 (fail-fast): validate config, incl. refusing the published TEST signer under
+    // KD_ENV=prod, BEFORE any DB / Redis / S3 I/O, so a misconfigured prod boot aborts
     // without connecting to (or migrating) the production database.
     cfg.validate()?;
 
@@ -87,7 +87,7 @@ mod tests {
     use crate::services::signing::PUBLISHED_TEST_SEED_HEX;
 
     /// A Config that violates SIG-2 (prod + published test seed) with EMPTY connection
-    /// strings. `build_state` must refuse at `cfg.validate()` - its FIRST line - before any
+    /// strings. `build_state` must refuse at `cfg.validate()`, its FIRST line, before any
     /// DB/Redis/S3 I/O, so this test needs no running services. If the `validate()` call is
     /// ever removed from `build_state`, it would instead fail later at the DB connect with a
     /// different error, and the message assertion below catches that regression.

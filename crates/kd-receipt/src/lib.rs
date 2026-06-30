@@ -1,27 +1,27 @@
-//! kd-receipt - the shared offline ReceiptV2 signer + verifier.
+//! kd-receipt, the shared offline ReceiptV2 signer + verifier.
 //!
 //! This is the *single* implementation of TrueRolls receipt signing AND
 //! verification. The CLI (`kd verify --receipt`), the browser (via
 //! `kd-core-wasm`), and the server (`kd-api`) all run this same compiled code,
 //! bit-for-bit. A verifier that drifts from the signer is worse than no verifier
 //! (it can bless a forgery), so sign and verify live in one crate and both go
-//! through the single [`canonical_signing_bytes`] - they cannot disagree on what
+//! through the single [`canonical_signing_bytes`], they cannot disagree on what
 //! bytes a signature covers. The signer lives in [`mod@sign`].
 //!
 //! Verification, in order (mirrors the server's `run_receipt_verification`):
-//!   1. **Signature** - Ed25519 over the JCS/RFC8785 canonicalization of the
+//!   1. **Signature**, Ed25519 over the JCS/RFC8785 canonicalization of the
 //!      receipt body with `sig` and `receipt_hash` removed (soft: a bad/missing
 //!      signature is recorded, not fatal, so the rest of the report still fills).
-//!   2. **Drand** - for `truerolls-drand-1`, verify pinned quicknet BLS pulses,
+//!   2. **Drand**, for `truerolls-drand-1`, verify pinned quicknet BLS pulses,
 //!      target binding, randomness, and HKDF seed derivation.
-//!   3. **Sampling** - reseed `ChaCha20Rng` from `proof.rng.drbg_key_hex`, take
+//!   3. **Sampling**, reseed `ChaCha20Rng` from `proof.rng.drbg_key_hex`, take
 //!      one `next_u64()`, and compare against `proof.draw_u64`.
-//!   4. **Face** - recompute the guarded distribution from `(die, kappa)` via
+//!   4. **Face**, recompute the guarded distribution from `(die, kappa)` via
 //!      `kd_core`, map the draw with `prefix_cdf_index_from_u64`, compare to
 //!      `face`.
-//!   5. **Metrics** - recompute `alpha`/`kl`/`ev` and compare within `1e-9`.
+//!   5. **Metrics**, recompute `alpha`/`kl`/`ev` and compare within `1e-9`.
 //!
-//! All math comes from `kd_core` - this crate adds no math of its own.
+//! All math comes from `kd_core`, this crate adds no math of its own.
 //!
 //! Honest scope: `truerolls-drand-1` proves verified drand seed provenance and
 //! deterministic replay for a completed receipt. It does **not** prove the
@@ -56,7 +56,7 @@ pub const METRIC_TOL: f64 = 1e-9;
 /// The exact bytes a receipt signature covers: the JCS (RFC 8785) serialization
 /// of the receipt body with `sig` and `receipt_hash` removed (both are attached
 /// *after* signing, so they are not part of the signed bytes). This is the single
-/// canonicalization - both [`ReceiptSigner::sign_receipt`] and signature
+/// canonicalization, both [`ReceiptSigner::sign_receipt`] and signature
 /// verification call it, so the signer and verifier can never disagree on what
 /// was signed. Stripping is defensive: callers that pass a pre-`sig` body get an
 /// identical result, so existing goldens and newly-signed receipts match. The
@@ -135,8 +135,8 @@ struct ReceiptSig {
 }
 
 // ---------------------------------------------------------------------------
-// Errors - the "cannot even attempt verification" cases (hard failures).
-// Signature problems are NOT here; they are recorded softly in VerifyReport.
+// Errors, the "cannot even attempt verification" cases (hard failures).
+// Signature problems are NOT here. They are recorded softly in VerifyReport.
 // ---------------------------------------------------------------------------
 
 /// A receipt that is structurally unverifiable (malformed or out-of-scope).
@@ -192,7 +192,7 @@ impl fmt::Display for VerifyError {
 impl std::error::Error for VerifyError {}
 
 // ---------------------------------------------------------------------------
-// VerifyReport - the check result of a verifiable receipt.
+// VerifyReport, the check result of a verifiable receipt.
 // ---------------------------------------------------------------------------
 
 /// The outcome of verifying a (structurally valid) signed receipt. `verdict`
@@ -223,7 +223,7 @@ impl VerifyReport {
             && self.metrics_ok
     }
 
-    /// The CLI/`--json` and WASM result shape - one schema everywhere.
+    /// The CLI/`--json` and WASM result shape, one schema everywhere.
     pub fn to_result_json(&self) -> Value {
         json!({
             "verdict": if self.is_valid() { "VALID" } else { "INVALID" },
@@ -262,7 +262,7 @@ pub fn verify_receipt_str(
 /// Verify a signed ReceiptV2 (`receipt_value`) against `public_key_b64`.
 ///
 /// Returns a [`VerifyReport`] for any *structurally valid* receipt (even if the
-/// signature is missing or wrong - those are recorded in the report). Returns a
+/// signature is missing or wrong, those are recorded in the report). Returns a
 /// [`VerifyError`] only when the receipt cannot be verified at all (malformed,
 /// wrong version, bad DRBG key, unparseable draw, version-gated, unknown die).
 pub fn verify_receipt(
@@ -437,7 +437,7 @@ fn verify_ed25519_sig(
     let signature = Signature::from_bytes(&sig_arr);
 
     // The signature covers the shared canonicalization (body WITHOUT sig and
-    // receipt_hash) - the exact bytes `ReceiptSigner::sign_receipt` signed.
+    // receipt_hash), the exact bytes `ReceiptSigner::sign_receipt` signed.
     let canonical_bytes = canonical_signing_bytes(receipt_value)?;
 
     match vk.verify(&canonical_bytes, &signature) {
@@ -578,7 +578,7 @@ fn recompute(faces: u32, kappa: f64, draw: u64) -> Result<(u32, f64, f64, f64), 
 }
 
 // ---------------------------------------------------------------------------
-// Tests - exercised against the committed receipt goldens (bit-for-bit proof).
+// Tests, exercised against the committed receipt goldens (bit-for-bit proof).
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -588,7 +588,7 @@ mod tests {
     use std::path::Path;
 
     fn test_public_key_b64() -> String {
-        // The shared PUBLIC test seed ([`PUBLISHED_TEST_SEED_HEX`]) - one source of
+        // The shared PUBLIC test seed ([`PUBLISHED_TEST_SEED_HEX`]), one source of
         // truth across the signer, kd-cli's gen_goldens, and these tests.
         let seed_bytes = hex::decode(PUBLISHED_TEST_SEED_HEX).unwrap();
         let mut seed = [0u8; 32];
@@ -744,7 +744,7 @@ mod tests {
     fn kappa_out_of_range_receipt_is_refused_not_valid() {
         // A receipt claiming κ outside the [-1, 1] contract must NOT verify VALID.
         // The verifier recomputes via kd_core, which now rejects out-of-range κ,
-        // so the receipt is structurally unverifiable (a hard error) - the signer
+        // so the receipt is structurally unverifiable (a hard error), the signer
         // (kd-api) and verifier share this one kd_core check and cannot drift.
         let mut receipt = golden("golden_receipt_01_d20.json");
         receipt["kappa"] = json!(50.0);
@@ -760,7 +760,7 @@ mod tests {
     fn tampered_die_breaks_face_and_metrics_independently() {
         // Swapping the die (a signed field, κ in range) breaks the signature
         // AND the recomputed face/metrics for the wrong die independently
-        // disagree - three layers reject the swap; verdict INVALID (not a hard
+        // disagree, three layers reject the swap. Verdict INVALID (not a hard
         // error, since κ stays within the contract).
         let mut receipt = golden("golden_receipt_01_d20.json");
         receipt["die"] = json!("d6");
@@ -782,7 +782,7 @@ mod tests {
             verify_receipt(&bad_hex, &pk),
             Err(VerifyError::BadDrbgHex(_))
         ));
-        // (b) wrong-length DRBG key (30 bytes, not 32) - guards a seed-length
+        // (b) wrong-length DRBG key (30 bytes, not 32), guards a seed-length
         // mishandling that would change the ChaCha20 replay.
         let mut bad_len = golden("golden_receipt_01_d20.json");
         bad_len["proof"]["rng"]["drbg_key_hex"] = json!("ab".repeat(30));

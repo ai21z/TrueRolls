@@ -1,4 +1,4 @@
-# Global Mint Cap (OPS-AUTH-01) - Review Outcome and Follow-up Brief
+# Global Mint Cap (OPS-AUTH-01), Review Outcome and Follow-up Brief
 
 > **What this is.** A current review brief for the uncommitted global mint-cap work on
 > `freature/drand-per-roll`. It replaces the earlier byte-exact diff brief, which became stale after
@@ -42,7 +42,7 @@ Trust-spine invariants:
 
 ## Tickets to verify
 
-### T-CAP-1 - `quota::reserve_mint`
+### T-CAP-1, `quota::reserve_mint`
 
 **What.** `crates/kd-api/src/services/quota.rs` exposes:
 
@@ -65,7 +65,7 @@ and rejects when `window_count > cap`.
 - The counter is monotonic. It records validated reservation attempts in the window, including
   rejected over-cap attempts. Rejected attempts are not minted receipts.
 
-### T-CAP-2 - Config and prod gate
+### T-CAP-2, Config and prod gate
 
 **What.** `Config` adds:
 
@@ -82,7 +82,7 @@ Under `KD_ENV=prod`, `Config::validate()` refuses `roll_global_cap == 0` unless
 - Prod requires a finite cap or explicit opt-out.
 - `build_state` still calls `cfg.validate()?` before DB, Redis, S3, or signer setup.
 
-### T-CAP-3 - Handler placement
+### T-CAP-3, Handler placement
 
 **What.** `post_roll` reserves mint budget after:
 
@@ -99,7 +99,7 @@ It reserves before target-round wait, signing, DB insert, and S3 upload.
 - Invalid drand proofs 400 before reserve.
 - Failure after reserve consumes budget intentionally, because the costly attempt already started.
 
-### T-CAP-4 - Ownership-safe idempotency release
+### T-CAP-4, Ownership-safe idempotency release
 
 **What.** `acquire_lock` returns an `IdempotencyLock { key, token }`. Redis stores the token with:
 
@@ -125,7 +125,7 @@ end
   a 500.
 - The normal successful mint path still does not release the lock.
 
-### T-CAP-5 - 429 response
+### T-CAP-5, 429 response
 
 **What.** Over-cap requests return `429 Too Many Requests`, `Retry-After: <seconds>`, and body:
 
@@ -138,7 +138,7 @@ end
 - `Retry-After` is derived from fixed-window math and is at least 1.
 - Response is built inline so the header is preserved.
 
-### T-CAP-6 - Redis-gated tests
+### T-CAP-6, Redis-gated tests
 
 **What.** Optional Redis-backed tests are gated by `KD_REDIS_TEST_URL` and return early when absent.
 
@@ -148,7 +148,7 @@ end
 - Quota test proves cap 2 gives allowed counts 1 and 2, then rejected count 3.
 - Normal local tests do not require Redis.
 
-### T-CAP-7 - Truthfulness of `auth-and-key-lifecycle.md`
+### T-CAP-7, Truthfulness of `auth-and-key-lifecycle.md`
 
 **Verify the note says all of the following.**
 

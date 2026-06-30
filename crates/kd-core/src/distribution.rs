@@ -23,7 +23,7 @@ mod serde_impls {
     use super::Output;
     use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
-    // Serialize Output<N> manually; probs is emitted as a sequence.
+    // Serialize Output<N> manually. Probs is emitted as a sequence.
     impl<const N: usize> Serialize for Output<N> {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             let mut st = serializer.serialize_struct("Output", 5)?;
@@ -36,7 +36,7 @@ mod serde_impls {
         }
     }
 
-    // Helper for deserializing; use Vec<f64> then copy into [f64; N]
+    // Helper for deserializing, use Vec<f64> then copy into [f64; N]
     #[derive(Deserialize)]
     struct OutputHelper {
         probs: Vec<f64>,
@@ -81,9 +81,9 @@ pub fn compute_distribution<const N: usize>(
     if !kappa.is_finite() || !params.validate() {
         return Err(CoreError::NonFiniteInput);
     }
-    // κ is a stance in [-1, 1] by the math contract. Reject out-of-range κ here -
+    // κ is a stance in [-1, 1] by the math contract. Reject out-of-range κ here,
     // the single place both the signer (kd-api) and the offline verifier
-    // (kd-receipt) route through - so neither can bless a κ outside the contract.
+    // (kd-receipt) route through, so neither can bless a κ outside the contract.
     // A κ=50 receipt is therefore refused, not verified VALID. Bounds inclusive.
     if !(-1.0..=1.0).contains(&kappa) {
         return Err(CoreError::KappaOutOfRange(kappa));
@@ -164,7 +164,7 @@ mod tests {
         let p = default_for_die(100);
         let a_small = compute_distribution(Die::<100>, 0.2, &p).unwrap().alpha;
         let a_big = compute_distribution(Die::<100>, 0.9, &p).unwrap().alpha;
-        // With more tilt we need >= α to satisfy caps; minimal α should not decrease.
+        // With more tilt we need >= α to satisfy caps. Minimal α should not decrease.
         assert!(a_big >= a_small - 1e-9);
         assert!(a_small >= 0.0 && a_big <= 1.0);
     }
@@ -174,7 +174,7 @@ mod tests {
         // In-contract boundaries are accepted (κ ∈ [-1, 1], inclusive).
         assert!(compute_distribution_with_defaults(Die::<20>, 1.0).is_ok());
         assert!(compute_distribution_with_defaults(Die::<20>, -1.0).is_ok());
-        // Out-of-contract κ is rejected - the verifier must never bless it.
+        // Out-of-contract κ is rejected. The verifier must never bless it.
         assert!(matches!(
             compute_distribution_with_defaults(Die::<20>, 50.0),
             Err(CoreError::KappaOutOfRange(k)) if k == 50.0

@@ -1,7 +1,7 @@
-//! KD-003 - CLI smoke tests.
+//! KD-003, CLI smoke tests.
 //!
 //! These test the `kd` binary end-to-end via process invocation.
-//! No server required - all tests use local mode (kd-core math).
+//! No server required, all tests use local mode (kd-core math).
 
 use assert_cmd::Command;
 
@@ -139,7 +139,7 @@ fn roll_output_to_file() {
 }
 
 // -----------------------------------------------------------------------
-// roll subcommand - transcript v2 provenance (KD-023)
+// roll subcommand, transcript v2 provenance (KD-023)
 // -----------------------------------------------------------------------
 
 #[test]
@@ -200,7 +200,7 @@ fn roll_transcript_os_entropy_omits_seed() {
 }
 
 // -----------------------------------------------------------------------
-// verify subcommand - parameter mode
+// verify subcommand, parameter mode
 // -----------------------------------------------------------------------
 
 #[test]
@@ -255,7 +255,7 @@ fn verify_sweep_text_output() {
 }
 
 // -----------------------------------------------------------------------
-// verify subcommand - transcript mode
+// verify subcommand, transcript mode
 // -----------------------------------------------------------------------
 
 #[test]
@@ -420,7 +420,7 @@ fn verify_transcript_missing_draw_unverifiable() {
     .assert()
     .success();
 
-    // Delete draw_u64 - face becomes unverifiable, which must FAIL
+    // Delete draw_u64, face becomes unverifiable, which must FAIL
     let content = std::fs::read_to_string(&transcript_path).unwrap();
     let mut v: serde_json::Value = serde_json::from_str(&content).unwrap();
     v.as_object_mut().unwrap().remove("draw_u64");

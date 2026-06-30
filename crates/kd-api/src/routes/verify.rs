@@ -1,9 +1,9 @@
-//! POST /v1/verify - receipt + legacy transcript verification
-//! GET  /v1/verify/:id - verify a roll by fetching its transcript from S3
+//! POST /v1/verify, receipt + legacy transcript verification
+//! GET  /v1/verify/:id, verify a roll by fetching its transcript from S3
 //!
 //! POST now auto-detects the body format:
-//!   • ReceiptV2 (has `"v": "truerolls-1"` or `"truerolls-drand-1"`) - signature + proof verification
-//!   • Legacy VerifyRequest (has `math_param_version`, `probs`) - recompute only
+//!   • ReceiptV2 (has `"v": "truerolls-1"` or `"truerolls-drand-1"`), signature + proof verification
+//!   • Legacy VerifyRequest (has `math_param_version`, `probs`), recompute only
 //!
 //! GET fetches the transcript from S3 and runs legacy verification.
 
@@ -94,16 +94,16 @@ pub async fn post_verify(
 }
 
 /// Verify a signed ReceiptV2 by delegating to the shared offline verifier,
-/// `kd_receipt::verify_receipt` - the SAME code the CLI (`kd verify --receipt`)
+/// `kd_receipt::verify_receipt`, the SAME code the CLI (`kd verify --receipt`)
 /// and the browser (wasm) run, so the signer and the verifier cannot drift
 /// (SIG-1). All receipt checks (signature · drand when present · sampling replay · face · metrics)
-/// and the math_param_version gate live in `kd_receipt`; it covers d4..d100 (the
+/// and the math_param_version gate live in `kd_receipt`. It covers d4..d100 (the
 /// inline path this replaced only handled d6/d20/d100).
 ///
 /// We verify against the server's OWN published key (the one served at
-/// /.well-known); a receipt signed by any other kid fails the (soft) signature
-/// check and the verdict is INVALID. Structural problems - bad version, bad
-/// DRBG key, unparseable draw, unknown die - are hard errors mapped to 400,
+/// /.well-known). A receipt signed by any other kid fails the (soft) signature
+/// check and the verdict is INVALID. Structural problems, bad version, bad
+/// DRBG key, unparseable draw, unknown die, are hard errors mapped to 400,
 /// matching the prior inline behavior.
 fn run_receipt_verification(
     state: &AppState,

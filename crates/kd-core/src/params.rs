@@ -34,7 +34,7 @@ impl Params {
     }
 }
 
-/// Defaults exactly as v1.3.1 (λ=0.50, ε=1e-12; die-specific KL caps; EV cap = 0.20·SD_u).
+/// Defaults exactly as v1.3.1 (λ=0.50, ε=1e-12, die-specific KL caps, EV cap = 0.20·SD_u).
 pub fn default_for_die(n: usize) -> Params {
     // Clamp to at least 2 so ln(n) is well-defined for the heuristic branch.
     let n_f = (n.max(2)) as f64;

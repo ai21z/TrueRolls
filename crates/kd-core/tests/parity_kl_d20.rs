@@ -1,11 +1,11 @@
-//! KD-011 - Parity thin-slice: KL-cap PASS/FAIL for d20 @ λ=0.6
+//! KD-011, Parity thin-slice: KL-cap PASS/FAIL for d20 @ λ=0.6
 //!
 //! Verifies the guarded-distribution invariants hold across all κ values:
 //!   1. Theoretical: KL(p || uniform) ≤ cap, |EV(p) − EV_u| ≤ cap for all κ
 //!   2. Empirical: seeded Monte Carlo → empirical frequencies are consistent
 //!      with the theoretical distribution (χ² goodness-of-fit)
 //!
-//! All assertions are PASS/FAIL only - no numeric values in test output.
+//! All assertions are PASS/FAIL only, no numeric values in test output.
 //! Runtime target: <60s CI (actual: <5s).
 
 use kd_core::{
@@ -19,7 +19,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
 // ---------------------------------------------------------------------------
-// Helpers - PASS/FAIL only, no numbers leaked
+// Helpers, PASS/FAIL only, no numbers leaked
 // ---------------------------------------------------------------------------
 
 /// Assert a boolean with a label-only message (no numeric details).
@@ -107,7 +107,7 @@ fn kappa_zero_is_uniform_lambda_06() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: Symmetry - positive and negative κ produce mirrored distributions
+// Test 3: Symmetry. Positive and negative κ produce mirrored distributions
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -142,7 +142,7 @@ fn kappa_symmetry() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: Monotonicity - alpha is non-decreasing with |κ|
+// Test 4: Monotonicity. Alpha is non-decreasing with |κ|
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -158,7 +158,7 @@ fn alpha_monotone_with_kappa_magnitude() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: Seeded Monte Carlo - empirical frequencies match theoretical probs
+// Test 5: Seeded Monte Carlo. Empirical frequencies match theoretical probs
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -188,7 +188,7 @@ fn empirical_monte_carlo_seeded() {
 
         // χ² goodness-of-fit test against theoretical probs.
         // Under H0 (samples from p), χ² ~ χ²(19).
-        // Reject at p < 1e-6 (χ²₁₉ > 59.95) - extremely conservative
+        // Reject at p < 1e-6 (χ²₁₉ > 59.95), extremely conservative
         // to avoid false failures in CI.
         let chi2_crit = 60.0; // well above 99.9999th percentile of χ²(19)
         let mut chi2 = 0.0_f64;
@@ -204,7 +204,7 @@ fn empirical_monte_carlo_seeded() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 6: Sampling determinism - same seed produces same faces
+// Test 6: Sampling determinism. Same seed produces same faces
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -224,7 +224,7 @@ fn sampling_determinism() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 7: Edge κ - extreme values still satisfy caps
+// Test 7: Edge κ. Extreme values still satisfy caps
 // ---------------------------------------------------------------------------
 
 #[test]

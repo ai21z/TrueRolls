@@ -1,11 +1,11 @@
-// typed env; validation
+// typed env, validation
 
 use crate::error::{AppError, bad_request, internal};
 use std::{env, net::IpAddr};
 
 /// Deployment profile, parsed from `KD_ENV`. `Prod` activates the SIG-2 guard
 /// (reject the published TEST signing seed/kid). **Fails closed:** only an explicit dev
-/// allowlist => `Dev`; everything else (incl. unknown values) => `Prod`.
+/// allowlist => `Dev`, everything else (incl. unknown values) => `Prod`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EnvProfile {
     Dev,
@@ -14,10 +14,10 @@ pub enum EnvProfile {
 
 impl EnvProfile {
     /// Map a raw `KD_ENV` value to a profile, **failing closed**. Only an explicit dev
-    /// allowlist - unset / empty / `dev` / `development` / `local` / `test` (case- and
-    /// whitespace-insensitive) - maps to `Dev`. Everything else (`prod`, `production`,
+    /// allowlist, unset / empty / `dev` / `development` / `local` / `test` (case- and
+    /// whitespace-insensitive), maps to `Dev`. Everything else (`prod`, `production`,
     /// `staging`, AND unrecognized values or typos like `prdo`) maps to `Prod`, activating
-    /// the SIG-2 guard - so a misconfigured `KD_ENV` can never silently disable it.
+    /// the SIG-2 guard, so a misconfigured `KD_ENV` can never silently disable it.
     fn from_env_str(s: Option<&str>) -> Self {
         match s.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
             None | Some("") | Some("dev") | Some("development") | Some("local") | Some("test") => {
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn sig2_validate_skips_guard_in_dev() {
-        // Dev must NOT run the guard - the published test seed is allowed locally.
+        // Dev must NOT run the guard, the published test seed is allowed locally.
         let c = cfg_with(
             EnvProfile::Dev,
             Some(PUBLISHED_TEST_SEED_HEX),

@@ -15,9 +15,9 @@ For `truerolls-drand-1`, `VALID` proves:
 3. **Deterministic replay.** The draw replays from the seed, and the face replays from the draw and recomputed distribution.
 4. **Bounded math.** `alpha`, `kl`, and `ev` match the guarded engine output.
 
-`VALID` does not prove the published outcome was unbiased: because the operator's attempt is not publicly committed before the target round resolves, it can still **grind** - privately fail/suppress unfavorable attempts and publish only a favorable completed receipt. Strict witnessed fairness (one committed attempt per roll) is the v2 protocol.
+`VALID` does not prove the published outcome was unbiased: because the operator's attempt is not publicly committed before the target round resolves, it can still **grind**, privately fail/suppress unfavorable attempts and publish only a favorable completed receipt. Strict witnessed fairness (one committed attempt per roll) is the v2 protocol.
 
-Legacy `truerolls-1` receipts prove only tamper-evidence, deterministic replay, and bounded math; they have no `proof.drand`.
+Legacy `truerolls-1` receipts prove only tamper-evidence, deterministic replay, and bounded math. They have no `proof.drand`.
 
 ## Top-level shape
 

@@ -1,12 +1,12 @@
 //! Property test for target #2: the minimal guard weight α chosen by
 //! `apply_guards_min_alpha` is **monotone non-decreasing in |κ|**, across EVERY
-//! supported die. This closes the "asserted-not-proven" gap empirically; the
+//! supported die. This closes the "asserted-not-proven" gap empirically. The
 //! analytic proof (the comonotone-covariance / Chebyshev argument) lives in
 //! `docs/explanation/alpha-monotonicity.md`.
 //!
-//! Why it holds (sketch): the feasible α-set is `[α*, 1]` - mixing toward
+//! Why it holds (sketch): the feasible α-set is `[α*, 1]`, mixing toward
 //! uniform lowers both `KL(p‖u)` (convex in α, min at α=1) and `|EV−μ|` (linear
-//! in α) - so the minimal α is the binding threshold. At any fixed α, both
+//! in α), so the minimal α is the binding threshold. At any fixed α, both
 //! `KL(p(α,κ)‖u)` and `|EV(p(α,κ))−μ|` are non-decreasing in |κ| (each a
 //! covariance of two comonotone functions of the face score), so the threshold
 //! itself rises with |κ|. The ε-floor+renorm is a small monotonicity-preserving
@@ -17,7 +17,7 @@ use kd_core::distribution::compute_distribution_with_defaults;
 
 /// Sweep κ from 0 outward to +1 and to −1 and assert α never decreases as |κ|
 /// grows. `tol` absorbs the bisection granularity (`params.alpha_tol = 1e-9`)
-/// and ε-floor jitter; it is orders of magnitude below any real (~1e-2)
+/// and ε-floor jitter. It is orders of magnitude below any real (~1e-2)
 /// inter-grid decrease, so it cannot mask a genuine violation.
 fn assert_alpha_monotone<const N: usize>(steps: u32, tol: f64) {
     for sign in [1.0_f64, -1.0_f64] {

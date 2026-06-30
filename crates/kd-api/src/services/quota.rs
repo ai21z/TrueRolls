@@ -2,7 +2,7 @@
 //
 // OPS-AUTH-01: the roll endpoint is unauthenticated and mints a signed receipt + DB row + S3
 // object + drand fetch on every committed call. Per-IP rate limiting (tower_governor) bounds a
-// single client but not the TOTAL across all clients - an attacker rotating source IPs drives
+// single client but not the TOTAL across all clients, an attacker rotating source IPs drives
 // unbounded mints. This module adds a global fixed-window ceiling: at most `cap` mints per
 // `window_secs` across every client.
 //
@@ -10,7 +10,7 @@
 // drand proof is validated, before the expensive target-round wait), so valid requests that reach
 // the mint-commit point are counted before they can spend the expensive wait/sign/write budget. The
 // counter is a monotonic count of validated reservation attempts in the window, including rejected
-// over-cap attempts; rejected attempts are not minted receipts. It charges neither a legitimate
+// over-cap attempts. Rejected attempts are not minted receipts. It charges neither a legitimate
 // idempotent retry (those dedup earlier) nor an invalid request (those 400 at validation, before the
 // reservation).
 // Fail-closed: a Redis error propagates to the caller, which is consistent with the roll path
@@ -22,9 +22,9 @@ use deadpool_redis::Pool as RedisPool;
 /// Outcome of trying to reserve one unit of global mint budget for the current window.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MintReservation {
-    /// Under the cap; the mint may proceed. `window_count` is the post-increment window total.
+    /// Under the cap, the mint may proceed. `window_count` is the post-increment window total.
     Allowed { window_count: u64 },
-    /// At/over the cap; reject with 429. `retry_after_secs` is the seconds until the window
+    /// At/over the cap, reject with 429. `retry_after_secs` is the seconds until the window
     /// resets (always >= 1). `window_count` includes this rejected reservation attempt.
     Rejected {
         window_count: u64,
@@ -32,7 +32,7 @@ pub enum MintReservation {
     },
 }
 
-// INCR the window counter, and on the window's first mint (counter == 1) set the TTL - in one
+// INCR the window counter, and on the window's first mint (counter == 1) set the TTL, in one
 // atomic round-trip, so the key cannot be left without an expiry if the process dies mid-pair.
 // TTL = window length covers the worst case (first mint landing at the very start of a window);
 // a later window uses a different key, so an over-long TTL would only waste a few bytes, never
@@ -50,7 +50,7 @@ return c
 /// `cap == 0` means "uncapped" and short-circuits without touching Redis. Otherwise this runs an
 /// atomic INCR + first-write EXPIRE and compares the post-increment count against the cap. The
 /// counter is allowed to climb past the cap under sustained load (every excess request is still
-/// rejected until the window's TTL resets it); we deliberately do not decrement on rejection, so
+/// rejected until the window's TTL resets it). We deliberately do not decrement on rejection, so
 /// the count stays monotonic within a window and there is no oscillation an attacker could exploit
 /// to squeeze extra mints.
 pub async fn reserve_mint(
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn window_secs_zero_is_clamped_to_one() {
-        // A misconfigured 0 must not divide-by-zero; it degrades to a 1s window.
+        // A misconfigured 0 must not divide-by-zero. It degrades to a 1s window.
         assert_eq!(window_bounds(42, 0), (42, 1));
     }
 

@@ -1,16 +1,16 @@
-# L2 Hardening Bundle - Codex Implementation Brief (v2)
+# L2 Hardening Bundle, Codex Implementation Brief (v2)
 
 > **Provenance.** Implementation brief, 2026-06-28, for the operational-security "L2 hardening
 > bundle" from [`../operational-security-audit.md`](../operational-security-audit.md) (OPS-RL-01/02,
-> OPS-DOS-01/02/03). Design is code-grounded (file:line read from source) + version-cited research;
+> OPS-DOS-01/02/03). Design is code-grounded (file:line read from source) + version-cited research.
 > NOT compiled. Items tagged `[VERIFY]` are research-derived API specifics Codex must confirm at
 > build time (a wrong feature name / field name fails to resolve immediately). The router-scoping
 > behaviour is confirmed against the axum 0.7 docs and is stated as fact, not `[VERIFY]`.
 >
 > v2 changes vs v1: (1) timeout returns **504 via the existing HandleErrorLayer** using
-> `tower::timeout` instead of `tower-http`'s 408 (semantically correct + avoids 408 retry-storms);
-> (2) **Retry-After** on 503/504; (3) **DB pool sized with the concurrency cap** (the connection is
-> NOT held during the drand wait - the real point is max_inflight 32 vs a 5-conn pool); (4)
+> `tower::timeout` instead of `tower-http`'s 408 (semantically correct + avoids 408 retry-storms).
+> (2) **Retry-After** on 503/504. (3) **DB pool sized with the concurrency cap** (the connection is
+> NOT held during the drand wait, the real point is max_inflight 32 vs a 5-conn pool). (4)
 > **observability** (tracing on shed/timeout). The critique invitation is intact.
 
 ---
@@ -24,7 +24,7 @@ Two holes gate a public deploy of `kd-api`:
    entry. Rotate the header per request -> unbounded distinct keys -> the per-IP limiter is fully
    bypassed.
 2. **No per-request protective stack.** `post_roll` makes sequential drand relay fetches + a future-
-   round wait + 4 DB/S3 writes; there is no concurrency ceiling, no whole-handler timeout, only the
+   round wait + 4 DB/S3 writes, there is no concurrency ceiling, no whole-handler timeout, only the
    default 2 MB body limit. A flood of slow rolls saturates the worker pool and the 5-connection DB
    pool.
 
@@ -35,9 +35,9 @@ governor (existing) -> HandleError -> LoadShed -> GlobalConcurrencyLimit -> Time
 ```
 
 Three decisions are load-bearing and easy to get wrong: (a) `HandleErrorLayer` is mandatory because
-LoadShed/timeout make the sub-stack `Error = BoxError` and axum's `Router` requires `Infallible`;
-(b) use `GlobalConcurrencyLimitLayer` (shared `Arc<Semaphore>`) not `ConcurrencyLimitLayer` (fresh
-per-clone semaphore -> unbounded, since axum clones the service per request); (c) the timeout default
+LoadShed/timeout make the sub-stack `Error = BoxError` and axum's `Router` requires `Infallible`.
+(b) Use `GlobalConcurrencyLimitLayer` (shared `Arc<Semaphore>`) not `ConcurrencyLimitLayer` (fresh
+per-clone semaphore -> unbounded, since axum clones the service per request). (c) The timeout default
 must be COMPUTED above the legitimate-roll worst case (~34 s from default drand config), not a 15 s
 literal that kills honest rolls under relay degradation.
 
