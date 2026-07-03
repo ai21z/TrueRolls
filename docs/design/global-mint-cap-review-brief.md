@@ -1,4 +1,4 @@
-# Global Mint Cap (OPS-AUTH-01), Review Outcome and Follow-up Brief
+# Global Mint Cap and Idempotency, Review Outcome and Follow-up Brief
 
 > **What this is.** A current review brief for the uncommitted global mint-cap work on
 > `freature/drand-per-roll`. It replaces the earlier byte-exact diff brief, which became stale after
@@ -10,9 +10,11 @@
 ## Review outcome
 
 **Code verdict.** The mint cap design enforces no over-delivery at the reservation gate: at most `cap`
-requests per window are admitted beyond `quota::reserve_mint`. The important code fix is that
-idempotency lock release is now ownership-safe. A stale handler cannot blindly delete a newer same-key
-lock after TTL expiry.
+requests per window are admitted beyond `quota::reserve_mint`. Redis is a concurrency fence only. The
+durable idempotency source is Postgres: the handler checks for an existing same-key receipt before and
+after acquiring the Redis lock, then persists the completed signed receipt with `ON CONFLICT
+(idempotency_key) DO NOTHING`. Idempotency lock release is ownership-safe, so a stale handler cannot
+blindly delete a newer same-key lock after TTL expiry.
 
 **Docs verdict.** The original auth/key lifecycle note overstated drand `target_round` as a receipt
 signing timestamp. That is false. The note now distinguishes drand seed provenance from issuance-time
@@ -31,7 +33,7 @@ rotated source IPs. The global mint cap is an L2 cost ceiling, not an authorizat
 Trust-spine invariants:
 
 - No change to `kd-core` sampling, guards, KL/EV, or prefix-CDF.
-- No receipt schema or verifier change in this pass.
+- The global cap itself does not require a receipt schema change.
 - No drand target-rule or seed-derivation change in this pass.
 - No fairness overclaim. Drand-backed receipts prove seed provenance and replay, not strict
   anti-withholding fairness.
@@ -82,9 +84,13 @@ Under `KD_ENV=prod`, `Config::validate()` refuses `roll_global_cap == 0` unless
 - Prod requires a finite cap or explicit opt-out.
 - `build_state` still calls `cfg.validate()?` before DB, Redis, S3, or signer setup.
 
-### T-CAP-3, Handler placement
+### T-CAP-3, Handler placement and durable idempotency
 
-**What.** `post_roll` reserves mint budget after:
+**What.** `post_roll` first calculates the canonical payload hash and checks Postgres for an existing
+completed receipt under the idempotency key. It then acquires the Redis lock and checks Postgres
+again. Only a new, non-deduplicated request reaches the mint gate.
+
+The handler reserves mint budget after:
 
 - request shape validation,
 - idempotency acquisition,
@@ -94,6 +100,8 @@ It reserves before target-round wait, signing, DB insert, and S3 upload.
 
 **Verify.**
 
+- Same key plus same body returns the stored receipt even after Redis TTL expiry, restart, or flush.
+- Same key plus different body returns 409.
 - No fresh 201 mint bypasses `reserve_mint`.
 - Dedup and 202 paths do not reserve.
 - Invalid drand proofs 400 before reserve.
@@ -120,9 +128,9 @@ end
 **Verify.**
 
 - A stale owner cannot delete a newer same-key owner after TTL expiry.
-- Cap rejection tries to release the owned lock.
-- Release errors or false returns are logged with `idem.lock_release_failed` and do not turn a 429 into
-  a 500.
+- Cap rejection and other pre-mint failures try to release the owned lock.
+- Release errors or false returns are logged with `idem.lock_release_failed` and do not replace the
+  original response with a cleanup failure.
 - The normal successful mint path still does not release the lock.
 
 ### T-CAP-5, 429 response

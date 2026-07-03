@@ -36,7 +36,7 @@ crates/
   kd-drand        pinned drand quicknet BLS verification + HKDF seed derivation
   kd-receipt      the single shared signer + offline verifier (one canonicalization for both)
   kd-api          Axum HTTP server: drand-backed roll, sign, verify, health; Postgres/Redis/S3
-  kd-cli          local + remote roll and verify; transcript/receipt files
+  kd-cli          local roll + local/remote verify; transcript/receipt files
   kd-core-wasm    wasm-bindgen bindings exposing kd-core math + verify to the browser
   kd-worker-wasm  wasm roll+sign over the shared signer (server-side; never shipped to the browser)
 services/

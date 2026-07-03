@@ -6,12 +6,19 @@
 
 ## Deploy-critical must-fix (before any public/internet-exposed deploy)
 
-1. **OPS-RL-01 - X-Forwarded-For trust boundary.** The only abuse control on the expensive endpoint is a per-IP limiter that trusts a client-spoofable header. Directly exposed, it is fully bypassable. **This is the single load-bearing deploy invariant.**
-2. **OPS-DOS-01 - No whole-handler timeout + tiny DB pool.** Each roll parks a task 6-20s with no global concurrency cap and only 5 DB connections; a small flood wedges all endpoints.
-3. **OPS-AUTH-01 - Unauthenticated state-mutating signing endpoint.** Anonymous callers drive unbounded DB rows, S3 objects, and signatures with no quota or billing cap.
+> **Status update, 2026-07-02 release hardening.** The original audit findings below are kept for
+> traceability, but several deploy gates have since been implemented: trusted-proxy configuration is
+> fail-closed in prod, POST `/v1/roll` has a bounded load-shed/concurrency/timeout/body-limit stack,
+> the global mint cap is enforced before mint commit, and idempotency is durable in Postgres with
+> ownership-safe Redis lock release. Remaining public-deploy work is now mostly operator policy
+> (choose production caps and proxy mode) plus key/revocation hardening.
+
+1. **OPS-RL-01 - X-Forwarded-For trust boundary.** Hardened in code through explicit trusted-proxy modes and prod fail-closed checks. Production still must set the correct mode for the real edge.
+2. **OPS-DOS-01/02/03 - Long roll work, concurrency, and body size.** Hardened for POST `/v1/roll` through load-shed, concurrency, timeout, and body-limit middleware. Production still must size the caps to the deployed DB/Redis/S3 budget.
+3. **OPS-AUTH-01 - Unauthenticated state-mutating signing endpoint.** Partly bounded by the global mint cap and production uncapped boot guard. Still a product-policy risk until auth, bot challenge, partner keys, or billing quotas exist.
 4. **OPS-KEY-01 / OPS-KEY-02 - No key rotation or revocation.** A leaked prod signing key is an unrecoverable, undetectable forgery event with no graceful response path.
 
-The first three share one root cause: the system accepts unlimited expensive, unattributed work, and the only gate (per-IP rate limiting) is header-spoofable when not behind a header-stripping proxy.
+The first three originally shared one root cause: the system accepted expensive, unattributed work with weak admission control. The release-hardening line now bounds that work. It does not make anonymous public minting a mature production business control.
 
 ---
 
@@ -23,17 +30,19 @@ The first three share one root cause: the system accepts unlimited expensive, un
 | OPS-RL-02 | MEDIUM | Default config ships the gap open; nothing forces a trusted-proxy posture |
 | OPS-RL-03 | LOW/INFO | No defense-in-depth beyond IP |
 
-**OPS-RL-01 - HIGH (conditional blocker).**
+**OPS-RL-01 - HIGH (conditional blocker, code-hardened).**
 - **Mechanism:** `routes/mod.rs:36` applies `SmartIpKeyExtractor` to POST `/v1/roll` only. That extractor reads the client IP from `x-forwarded-for` → `x-real-ip` → `forwarded` → peer IP and trusts the header value unconditionally (no trusted-proxy hop count, no rightmost selection). Because XFF is first in precedence, a direct client can send a fresh `X-Forwarded-For` per request and mint a new token bucket each time, defeating the limiter entirely. `main.rs:37-43` shows no proxy/trust layer in the stack (CORS is the only other middleware). The roll endpoint is the expensive one (drand fetch + multi-second wait + Postgres + S3 + Ed25519 sign), so an uncapped path is also resource amplification, not only a fairness issue.
 - **In-repo proof:** the crate's own test `distinct_ips_have_independent_buckets` (`routes/mod.rs:146-175`, helper `post_from` at `:107-114`) sends the IP **only** via `x-forwarded-for` with no real proxy, and the limiter buckets on it. That test is exactly the attacker primitive.
 - **Impact:** complete rate-limit bypass + resource-amplification DoS when not behind a proxy that overwrites forwarding headers.
 - **Fix:** make the trust boundary explicit and fail-closed (see OPS-RL-02). When no trusted proxy is configured, swap `SmartIpKeyExtractor` → `PeerIpKeyExtractor` at `routes/mod.rs:36` (peer-IP only, XFF ignored). When a trusted proxy with known hop count N is configured, select the **Nth-from-right** XFF entry via a small custom `KeyExtractor`. At the edge (Fly/Cloudflare), strip client-supplied `X-Forwarded-For`/`X-Real-IP`/`Forwarded` and key on the provider's authoritative header (`CF-Connecting-IP` / `Fly-Client-IP`).
 - **Citations:** docs.rs/tower_governor `SmartIpKeyExtractor` ("Only use this key extractor if you can ensure these headers are being set by a trusted provider"); https://adam-p.ca/blog/2022/03/x-forwarded-for/ ; https://owasp.org/www-community/pages/attacks/ip_spoofing_via_http_headers
+- **Status after hardening:** code now supports explicit trusted-proxy modes and peer-IP fallback, and prod rejects unsafe peer mode unless explicitly allowed. The remaining release check is deployment configuration, not missing route code.
 
-**OPS-RL-02 - MEDIUM.**
+**OPS-RL-02 - MEDIUM (code-hardened).**
 - **Mechanism:** `config.rs` (`from_env` / `validate`) has no `trusted_proxy` / `trust_xff` / hop-count setting. `validate()` (`config.rs:153-165`) enforces SIG-2 and non-empty drand relays under `KD_ENV=prod` but does **not** require an XFF policy. A `KD_ENV=prod` deploy that is directly internet-exposed boots cleanly with a spoofable limiter; the secure-deployment assumption lives only in a code comment (`routes/mod.rs:23-27`), enforced nowhere.
 - **Impact:** the secure posture is opt-in by deployment convention, not by config; nothing fails closed if it is unmet.
 - **Fix:** add `KD_TRUSTED_PROXY` (bool/hop-count), default false/0. Under `EnvProfile::Prod`, if unset, either refuse to boot or force peer-IP mode with a loud warning - mirroring the existing SIG-2 fail-closed pattern at `config.rs:154-160`.
+- **Status after hardening:** implemented as explicit trusted-proxy parsing plus prod guard tests.
 
 **OPS-RL-03 - LOW/INFO.** No auth on any endpoint (CORS `allow_origin(Any)` is the only other middleware, `main.rs:37-40`), so the per-IP limiter is the *sole* abuse control on POST `/v1/roll`. When that single control is header-spoofable there is no second layer. OWASP advises not relying solely on client IP for rate limiting.
 
@@ -43,27 +52,29 @@ The first three share one root cause: the system accepts unlimited expensive, un
 
 | ID | Sev | Title |
 |----|-----|-------|
-| OPS-DOS-01 | **HIGH** | No whole-handler timeout; each POST holds a task ~6-20s by design |
-| OPS-DOS-02 | **HIGH** | No concurrency cap; DB pool (max 5) is the worst-possible de-facto limiter |
-| OPS-DOS-03 | MEDIUM | No explicit request body-size limit on POST `/v1/roll` |
+| OPS-DOS-01 | **HIGH** (code-hardened) | Whole-handler timeout required for each long POST |
+| OPS-DOS-02 | **HIGH** (code-hardened) | Explicit concurrency cap required before DB/S3/drand work |
+| OPS-DOS-03 | MEDIUM (code-hardened) | Explicit request body-size limit required on POST `/v1/roll` |
 | OPS-DOS-04 | MEDIUM | Idempotency key churn + dedup busy-poll ties up tasks/connections |
 | OPS-DOS-05 | LOW-MED | Redis pool unbounded by default; outbound drand fan-out is an amplifier |
 
-The entire protective chain is two pieces: `GovernorLayer` on POST `/v1/roll` (`routes/mod.rs:50-61`) and a global `CorsLayer` (`main.rs:37-43`). There is **no** global concurrency cap, inflight/load-shed layer, whole-handler timeout, or request body-size override anywhere - confirmed by absence (`grep Timeout|ConcurrencyLimit|LoadShed` is empty).
+The original protective chain was only `GovernorLayer` on POST `/v1/roll` and global CORS. Release hardening has since added the intended bounded stack for POST `/v1/roll`: load shedding, global in-flight limiting, whole-handler timeout, and an explicit small body limit. The original mechanism notes below explain why those layers exist.
 
 **OPS-DOS-01 - HIGH.**
 - **Mechanism:** every accepted roll parks a Tokio task waiting for a *future* drand round (`roll.rs:276-311`, `wait_for_round_verified`), bounded only per-step by `drand_target_wait_ms` (default 12_000, `config.rs:118-122`) and per-relay `drand_timeout_ms` (default 2_500, `config.rs:109-113`), while fanning out sequential outbound GETs across 3 relays (`drand.rs:72-123`). Attacker cost ≈ one TCP write; server cost ≈ seconds of a held task plus DB/Redis/S3/outbound budget. **Worst case:** 2.5s × 3 relays for one failing `fetch_latest_verified` (≈7.5s) *plus* up to 12s in `wait_for_round_verified` ⇒ a single request can occupy a task ~20s under relay distress. No outer bound caps the sum.
 - **Impact:** asymmetric slow-hold amplification; combined with OPS-RL-01 a spoofing client or botnet multiplies held tasks freely.
 - **Fix:** wrap the handler in `tower_http::timeout::TimeoutLayer` (hard ceiling ~15s → 504/503) and add `GlobalConcurrencyLimitLayer` + `LoadShedLayer` on POST `/v1/roll` so excess requests shed fast as 503 rather than queuing.
 - **Citation:** https://github.com/tokio-rs/axum/discussions/242 (load-shed so requests "are dropped quickly and don't keep piling up").
+- **Status after hardening:** implemented. Tests cover timeout status, permit release, and load shedding.
 
 **OPS-DOS-02 - HIGH.**
 - **Mechanism:** no concurrency limit in front of the handler, so unbounded rolls all perform their ~6s drand wait concurrently; the squeeze appears only at the end when they contend for **5** Postgres connections (`state.rs:31-32`, `max_connections(5)`; used at `roll.rs:375`, `:406`, `:449`, and the dedup poll `:224`). sqlx's default `acquire_timeout` (30s - framework default, confirm against the pinned version) means tasks block up to 30s for a connection *after* already spending 6-12s on drand. Effective capacity is gated by 5 connections with no admission control, so the server accepts far more work than it can drain. The same 5-connection pool also serves `/healthz`, reads, and verify, so write-path saturation wedges all endpoints.
 - **Impact:** pool exhaustion → all endpoints 500/time out under modest concurrency.
 - **Fix:** admission control at the edge sized to downstream capacity (concurrency-limit POST `/v1/roll` to ~DB-pool-size × small factor) paired with LoadShed → 503; deliberately raise/justify the pool size rather than letting 5 be an accidental limiter; consider acquiring the DB connection *after* the drand wait, and a separate read pool so reads/health survive.
 - **Citation:** https://docs.rs/tower/latest/tower/limit/index.html
+- **Status after hardening:** implemented as an explicit global in-flight cap for POST `/v1/roll`; `KD_DB_MAX_CONNECTIONS` is configurable so the pool can be sized with the admission cap.
 
-**OPS-DOS-03 - MEDIUM.** `roll.rs:139` extracts `Json(req): Json<RollRequest>` with no `DefaultBodyLimit` override anywhere. Axum's default 2 MiB limit still applies (confirm against pinned axum version), but it is implicit and far larger than the tiny fixed-shape body needs; 2 MiB × unbounded concurrency (OPS-DOS-01/02) is needless memory amplification. **Fix:** apply explicit `DefaultBodyLimit::max(8 * 1024)` (or similar) to POST `/v1/roll`.
+**OPS-DOS-03 - MEDIUM (code-hardened).** `roll.rs:139` originally extracted `Json(req): Json<RollRequest>` with only Axum's implicit default body cap. Release hardening added an explicit small body limit to POST `/v1/roll`; route tests cover the cap and confirm GET routes remain unwrapped.
 
 **OPS-DOS-04 - MEDIUM.**
 - **Mechanism (Redis churn):** if no idempotency key is supplied the server mints one (`Uuid::new_v4()`, `roll.rs:191`) and writes `idem:roll:{key}` via SET NX EX (`idempotency.rs:14-24`, TTL 300s, `config.rs:132`). Attackers can also supply unbounded distinct keys. TTL caps total growth to ~roll-rate × 300s - a cost/load concern, not unbounded (hence MEDIUM).
@@ -75,7 +86,7 @@ The entire protective chain is two pieces: `GovernorLayer` on POST `/v1/roll` (`
 - **Outbound amplification:** `drand.rs:72-123` issues `/info` + a pulse per relay with sequential failover; `wait_for_round_verified` retries every 200ms up to 12s. N inbound rolls → many×N outbound requests to public drand relays. Beyond self-DoS this risks drand throttling the server's IP (fail-closed → all rolls 500, `roll.rs:277-281`), turning an inbound flood into total outage. Mitigate with a single-flight/shared cache for `/info` and `latest` (identical across concurrent rolls), a circuit breaker, and a cap on concurrent outbound drand calls.
 - **Citation:** https://docs.rs/deadpool/latest/deadpool/managed/struct.PoolConfig.html
 
-**Cross-cutting highest-leverage change:** a `ServiceBuilder` stack on POST `/v1/roll` - `LoadShedLayer` → `GlobalConcurrencyLimitLayer(N)` → `TimeoutLayer(~15s)` → `DefaultBodyLimit::max(small)`, atop the existing governor. This converts "accept everything, hold 6-20s, contend on 5 DB conns" into "admit N, shed the rest as 503 instantly, hard-cap each request lifetime."
+**Cross-cutting highest-leverage change:** implemented for POST `/v1/roll`. The remaining production work is choosing the actual cap values and monitoring whether they fit the deployed DB/Redis/S3 budget.
 
 ---
 
@@ -89,11 +100,13 @@ The entire protective chain is two pieces: `GovernorLayer` on POST `/v1/roll` (`
 | OPS-AUTH-04 | LOW | `GET /v1/verify/:id` is an unauthenticated S3-fetch amplifier |
 | OPS-AUTH-05 | INFO | CORS `allow_origin(Any)` - correct as-is while credential-less |
 
-No auth layer is wired in `router()` (`routes/mod.rs:18-72`); the only abuse control is the per-IP governor on POST `/v1/roll`.
+No auth layer is wired in `router()` (`routes/mod.rs:18-72`). Current abuse controls are the per-IP
+governor on POST `/v1/roll`, the L2 global mint cap, and the bounded in-flight/timeout stack.
 
 **OPS-AUTH-01 - HIGH (conditional blocker).**
-- **Mechanism:** an anonymous caller with a valid drand proof + 64-hex nonce + valid die/kappa triggers, per request: `db::insert_roll` (`roll.rs:375`), `insert_transcript_meta` (`:406`), `s3::put_transcript` (`:395`), `db::update_roll_receipt_json` (`:449`), and an Ed25519 signature (`signer.sign_receipt`, `:442-447`). Each success = unbounded monotonic DB-row growth + one S3 object + one signing op, with no per-caller quota, global cap, or auth to attribute/bill load. This is **OWASP API4:2023 Unrestricted Resource Consumption**. The per-IP limiter is not sufficient mitigation (OPS-RL-01): spoofed XFF defeats it entirely; even behind a correct proxy a botnet/cloud IP pool multiplies the 60-burst+1/s allowance with no global ceiling on rows or objects.
-- **Fix:** put POST `/v1/roll` behind an API-key/token with per-key quota + budget, or a bot challenge (Turnstile/CAPTCHA) for a public tier; add a global concurrency/volume cap independent of per-IP keying; configure S3/MinIO + DB storage spending limits and billing alerts; document and enforce the trusted-proxy invariant.
+- **Status after hardening:** the anonymous endpoint still exists, but the original "no global cap" claim is no longer current. POST `/v1/roll` now has a global fixed-window mint cap (`quota::reserve_mint`), a bounded in-flight/timeout/body-limit stack, and production boot refuses an uncapped roll endpoint unless explicitly opted out. The remaining risk is product-policy and attribution: without auth, API keys, or a bot challenge, a caller can still spend the public mint budget anonymously until the cap is reached.
+- **Current mechanism:** a successful request produces one signed receipt, one Postgres row, one transcript object, Redis state, and drand relay work. This is still **OWASP API4:2023 Unrestricted Resource Consumption** if the public cap is set too high or explicitly disabled. Per-IP limiting alone is not sufficient mitigation; the L2 global cap is the release hardening layer that bounds total volume.
+- **Remaining fix:** choose a production `KD_ROLL_GLOBAL_CAP` sized to budget, keep the trusted-proxy invariant enforced, add partner/API-key quotas or a bot challenge for higher public volume, and configure S3/DB billing alerts.
 - **Citation:** https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/
 
 **OPS-AUTH-02 - MEDIUM.** The signed receipt includes attacker-supplied `die`, `kappa`, `client_nonce` plus `drbg_key_hex` and the full drand proof (`roll.rs:413/430`, `:416-447`). An unauthenticated caller can compel valid signatures over chosen `(die, kappa, nonce)` tuples at will (within rate limits). Not a fairness break today (kd-core guards + drand wait still bound outcomes), but it is a free anonymous signed-statement generator; if receipt semantics ever embed identity/claims, this becomes a forgery/impersonation vector. **Fix:** gate signing behind auth so signatures are attributable; never let the signed body carry a field a downstream consumer treats as an authenticated assertion without binding it to an authenticated principal; version receipts so semantics can't silently broaden.
@@ -151,7 +164,14 @@ No auth layer is wired in `router()` (`routes/mod.rs:18-72`); the only abuse con
 
 **OPS-CODE-04 - LOW.** `roll.rs:368` `result.face.try_into().expect("face fits i32 (<= 100)")` and `services/rng.rs:56` `.expect("HKDF expand")`. Neither is remotely reachable today (face ≤ 100; HKDF expand of 32 bytes never fails), and a panic only drops the one task (tokio catches it). Flagged because they are `expect`s on the request path that would become live if the die set or OKM length changed. Note: `services/rng.rs` is **dead/legacy** (the shipping seed path is `kd_drand::derive_roll_seed`, `roll.rs:301`) - confirm and delete. **Fix:** convert remaining hot-path `expect`s to `?`/`internal(...)`.
 
-**OPS-CODE-05 - LOW.** `release_lock` is `#[allow(dead_code)]` and never called (`idempotency.rs:27-39`); the lock is `SET NX EX idem_ttl_secs` (300s, `config.rs:132`) and never released on error paths (`roll.rs:209-274`). If a roll acquires the lock then fails (drand/DB/S3 error), no receipt row is written, so every same-key retry finds lock-held + no-row → polls ~10s then returns 202 "processing" - for up to 300s, though nothing is processing. A client reusing a key (the intended idempotency use) is locked out for 5 minutes after any transient failure. **Fix:** best-effort `release_lock` on the error paths, or shorten the lock TTL; document that 202 can mean "previous attempt failed and is still TTL-locked."
+**OPS-CODE-05 - LOW (fixed for the roll mint path).** `release_lock` is now ownership-token based and
+uses compare-and-delete Lua. `post_roll` releases the owned lock on cap rejection and other pre-mint
+failures, while keeping the lock on successful mints. Redis is now only the concurrency fence:
+Postgres is checked before and after lock acquisition, and the final insert uses `ON CONFLICT
+(idempotency_key) DO NOTHING` with a fallback select. Same key plus same body returns the stored
+receipt after Redis TTL expiry; same key plus different body returns 409. Residual: a process that
+dies mid-flight can still leave a Redis lock until TTL, but the durable DB check prevents a completed
+receipt from being re-minted after Redis loss.
 
 **OPS-CODE-06 - LOW.** `/healthz` (`health.rs:9-38`) runs a real `SELECT 1`, Redis `PING`, and S3 `head_bucket` per request with no rate limit (each check is `.is_ok()`-guarded → returns `"degraded"`, which is correct). One cheap GET → three backend round-trips = unauthenticated amplification. **Fix:** rate-limit or cache health results for a few seconds.
 
@@ -175,4 +195,4 @@ No auth layer is wired in `router()` (`routes/mod.rs:18-72`); the only abuse con
 
 1. **Before any public deploy:** enforce the trusted-proxy invariant (OPS-RL-01/02) - `KD_TRUSTED_PROXY` config + peer-IP fallback fail-closed under Prod; add the edge `ServiceBuilder` stack (OPS-DOS-01/02/03): `LoadShed → ConcurrencyLimit(N) → Timeout(~15s) → DefaultBodyLimit(small)`; generic-ify internal error bodies (OPS-CODE-01).
 2. **Before production trust:** add auth/quota to POST `/v1/roll` (OPS-AUTH-01) and the multi-kid rotation/revocation path (OPS-KEY-01/02); move the signing seed off plain env toward KMS/HSM + zeroize (OPS-KEY-03).
-3. **Hardening:** rate-limit verify/health routes (OPS-AUTH-04, OPS-CODE-03/06), single-flight the drand `/info`/`latest` fetches (OPS-DOS-05), release idempotency locks on failure (OPS-CODE-05), redacting `Debug` for `Config` (OPS-KEY-04), delete dead `rng.rs` (OPS-CODE-04).
+3. **Hardening:** rate-limit verify/health routes (OPS-AUTH-04, OPS-CODE-03/06), single-flight the drand `/info`/`latest` fetches (OPS-DOS-05), redacting `Debug` for `Config` (OPS-KEY-04), delete dead `rng.rs` (OPS-CODE-04).

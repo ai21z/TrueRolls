@@ -12,6 +12,10 @@
 > (2) **Retry-After** on 503/504. (3) **DB pool sized with the concurrency cap** (the connection is
 > NOT held during the drand wait, the real point is max_inflight 32 vs a 5-conn pool). (4)
 > **observability** (tracing on shed/timeout). The critique invitation is intact.
+>
+> **Status note, 2026-07-02.** This is a historical implementation brief. Some file:line references
+> and the "4 DB/S3 writes" description predate the durable idempotency rewrite, which now persists a
+> completed signed receipt with a conflict-safe DB transaction. Use current source for review.
 
 ---
 
