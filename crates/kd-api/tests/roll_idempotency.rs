@@ -3,6 +3,7 @@ use _helpers::{base_url, client};
 use uuid::Uuid;
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn post_roll_201_then_200_on_same_idem_key() {
     let c = client();
     let url = format!("{}/v1/roll", base_url());
@@ -34,6 +35,7 @@ async fn post_roll_201_then_200_on_same_idem_key() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn post_roll_conflict_on_same_key_different_body() {
     let c = client();
     let url = format!("{}/v1/roll", base_url());
@@ -62,6 +64,7 @@ async fn post_roll_conflict_on_same_key_different_body() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn post_roll_validation_errors() {
     let c = client();
     let url = format!("{}/v1/roll", base_url());
@@ -100,6 +103,7 @@ async fn post_roll_validation_errors() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn post_roll_rejects_already_published_drand_target() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -118,6 +122,7 @@ async fn post_roll_rejects_already_published_drand_target() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn post_roll_concurrent_same_key_thundering_herd() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await

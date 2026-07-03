@@ -3,6 +3,7 @@ use _helpers::{base_url, client};
 use uuid::Uuid;
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn get_by_id_and_by_idem_key_consistent() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await

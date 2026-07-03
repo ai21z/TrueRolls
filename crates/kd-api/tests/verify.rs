@@ -79,6 +79,7 @@ fn build_verify_payload(die: &str, kappa: f64) -> Value {
 // ---- Happy path tests ----
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_d6_happy_path() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -98,6 +99,7 @@ async fn verify_d6_happy_path() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_d20_happy_path() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -117,6 +119,7 @@ async fn verify_d20_happy_path() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_d100_happy_path() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -138,6 +141,7 @@ async fn verify_d100_happy_path() {
 // ---- Tampered field tests → 422 MISMATCH ----
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_tampered_face_returns_422() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -160,6 +164,7 @@ async fn verify_tampered_face_returns_422() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_tampered_kappa_returns_422() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -180,6 +185,7 @@ async fn verify_tampered_kappa_returns_422() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_tampered_draw_u64_returns_422() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -207,6 +213,7 @@ async fn verify_tampered_draw_u64_returns_422() {
 // ---- Bad input tests → 400 ----
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_bad_version_returns_400() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -226,6 +233,7 @@ async fn verify_bad_version_returns_400() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_bad_die_returns_400() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -245,6 +253,7 @@ async fn verify_bad_die_returns_400() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_kappa_zero_happy_path() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -267,6 +276,7 @@ async fn verify_kappa_zero_happy_path() {
 // ---- Signed kappa domain tests ----
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_negative_kappa_happy_path() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -287,6 +297,7 @@ async fn verify_negative_kappa_happy_path() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_kappa_above_one_returns_400() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -309,6 +320,7 @@ async fn verify_kappa_above_one_returns_400() {
 }
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_kappa_below_neg_one_returns_400() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await
@@ -330,6 +342,7 @@ async fn verify_kappa_below_neg_one_returns_400() {
 // ---- Receipt version gate tests ----
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn verify_receipt_bad_math_param_version_returns_400() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await

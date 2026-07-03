@@ -2,6 +2,7 @@ mod _helpers;
 use _helpers::{base_url, client};
 
 #[tokio::test]
+#[ignore = "requires live kd-api stack on API_BASE_URL"]
 async fn healthz_ok_or_degraded_has_fields() {
     _helpers::wait_until_ready(std::time::Duration::from_secs(2))
         .await

@@ -80,11 +80,12 @@ cargo test -p kd-core          # the bounded-math engine
 cargo test -p kd-drand         # drand quicknet proof + HKDF derivation
 cargo test -p kd-receipt       # the signer/verifier (checks the committed goldens)
 cargo test -p kd-cli           # CLI roll + verify against the goldens
-cargo test --workspace         # everything; the kd-api integration tests need the live stack*
+cargo test --workspace         # service-free suite; live kd-api integration tests are ignored
 ```
 
-\* The `kd-api` integration tests expect the live stack (Postgres/Redis/MinIO + the
-server on `:8080`) and fail without it. Start it first with `scripts/dev-up.ps1`.
+The ignored `kd-api` integration tests expect the live stack (Postgres/Redis/MinIO +
+the server on `:8080`). Start it with `scripts/dev-up.ps1`, then run
+`cargo test -p kd-api --all-features -- --include-ignored`.
 
 ### The web demo
 
