@@ -1,4 +1,6 @@
-import type { RollResponse, TranscriptEntry } from '../types/kd';
+import type { ReceiptVerifyResponse, RollResponse, TranscriptEntry } from '../types/kd';
+
+export const DRAND_RECEIPT_VERSION = 'truerolls-drand-1';
 
 /**
  * The canonical ReceiptV2 body for POST /v1/verify.
@@ -31,10 +33,25 @@ export function buildReceiptBody(entry: TranscriptEntry): ReceiptBody {
   return body;
 }
 
-export function hasDrandProof(value: { proof?: unknown }): boolean {
+export function hasDrandProof(value: { v?: unknown; proof?: unknown }): boolean {
+  if (value.v !== DRAND_RECEIPT_VERSION) return false;
   const proof = value.proof;
   if (proof === null || typeof proof !== 'object') return false;
   return (proof as { drand?: unknown }).drand != null;
+}
+
+export function receiptVerifierAccepts(
+  value: { v?: unknown; proof?: unknown },
+  res: ReceiptVerifyResponse,
+): boolean {
+  const isDrandReceipt = value.v === DRAND_RECEIPT_VERSION;
+  return (
+    res.valid_signature &&
+    (!isDrandReceipt || (hasDrandProof(value) && res.valid_drand)) &&
+    res.valid_sampling &&
+    res.face_ok &&
+    res.metrics_ok
+  );
 }
 
 /**

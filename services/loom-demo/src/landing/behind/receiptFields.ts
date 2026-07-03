@@ -10,6 +10,7 @@
  */
 
 import type { ReceiptVerdict } from '../../api/wasmEngine';
+import { hasDrandProof } from '../../api/receipt';
 
 /** Receipt versions, mirrored from `kd-receipt` (RECEIPT_VERSION / DRAND_RECEIPT_VERSION). */
 export const DRAND_VERSION = 'truerolls-drand-1';
@@ -58,7 +59,7 @@ export function isLegacyReceipt(parsed: Record<string, unknown> | null): boolean
  */
 export function hasBeacon(parsed: Record<string, unknown> | null): boolean {
   if (!parsed) return false;
-  return isDrandReceipt(parsed) && asRecord(parsed.proof).drand != null;
+  return hasDrandProof(parsed);
 }
 
 /**

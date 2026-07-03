@@ -1,16 +1,42 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow, VerifyStatus } from '../types/kd';
 import { initClient, isMockMode, postRoll, postVerify, postVerifyReceipt } from '../api/client';
-import { buildReceiptBody, hasDrandProof } from '../api/receipt';
+import { buildReceiptBody, hasDrandProof, receiptVerifierAccepts } from '../api/receipt';
 
 const STORAGE_KEY = 'kd-rolls';
 
 /** Guard against corrupt / hand-edited / legacy sessionStorage entries: a
  * shape-wrong entry would crash the transcript list on the first .toFixed(). */
-function isValidEntry(r: unknown): r is TranscriptEntry {
-  if (typeof r !== 'object' || r === null) return false;
-  const e = r as Record<string, unknown>;
+function isRecord(r: unknown): r is Record<string, unknown> {
+  return typeof r === 'object' && r !== null && !Array.isArray(r);
+}
+
+function isValidSig(sig: unknown): boolean {
+  if (sig == null) return true;
+  if (!isRecord(sig)) return false;
   return (
+    typeof sig.alg === 'string' &&
+    typeof sig.kid === 'string' &&
+    typeof sig.signature_b64 === 'string' &&
+    typeof sig.canon === 'string'
+  );
+}
+
+function normalizeVerifyStatus(value: unknown): VerifyStatus {
+  if (value === 'verified_server' || value === 'mismatch' || value === 'error') return value;
+  return 'not_checked';
+}
+
+function normalizeEntry(r: unknown): TranscriptEntry | null {
+  if (!isRecord(r)) return null;
+  const e = r as Record<string, unknown>;
+  const proof = e.proof;
+  if (!isRecord(proof) || !isRecord(proof.rng)) return null;
+  if (typeof proof.draw_u64 !== 'string') return null;
+  if (!isValidSig(e.sig)) return null;
+  if (typeof e.deduplicated !== 'boolean') return null;
+
+  if (
     typeof e.id === 'string' &&
     typeof e.die === 'string' &&
     typeof e.localId === 'number' &&
@@ -19,7 +45,17 @@ function isValidEntry(r: unknown): r is TranscriptEntry {
     typeof e.alpha === 'number' &&
     typeof e.kl === 'number' &&
     typeof e.ev === 'number'
-  );
+  ) {
+    const entry = r as unknown as TranscriptEntry;
+    const verifyStatus = normalizeVerifyStatus(entry.verifyStatus);
+    return {
+      ...entry,
+      verifyStatus,
+      verifyDetail: verifyStatus === 'not_checked' ? undefined : entry.verifyDetail,
+      verifyChecks: verifyStatus === 'not_checked' ? undefined : entry.verifyChecks,
+    };
+  }
+  return null;
 }
 
 function loadRolls(): TranscriptEntry[] {
@@ -27,7 +63,11 @@ function loadRolls(): TranscriptEntry[] {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) return parsed.filter(isValidEntry);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map(normalizeEntry)
+          .filter((entry): entry is TranscriptEntry => entry !== null);
+      }
     }
   } catch { /* corrupt data, ignore */ }
   return [];
@@ -107,7 +147,11 @@ export function useKarmaState() {
       const entry = rolls.find((r) => r.localId === localId);
       if (!entry) return;
 
-      const isMock = isMockMode();
+      // A mock-minted artifact (unsigned, id prefixed `mock-`) is a demo receipt
+      // the live server never knew. Treat it as demo regardless of the current
+      // session mode, so it is not sent to GET /v1/verify/:id (which would 404).
+      const isMockEntry = entry.sig == null && entry.id.startsWith('mock-');
+      const isMock = isMockMode() || isMockEntry;
       let status: VerifyStatus;
       let checks: VerifyCheckRow[];
       let detail: string;
@@ -124,13 +168,7 @@ export function useKarmaState() {
         if (entryHasDrandProof) {
           checks.splice(1, 0, { id: 'drand', label: 'Drand beacon proof', ok: res.valid_drand });
         }
-        const allOk =
-          res.valid_signature &&
-          entryHasDrandProof &&
-          res.valid_drand &&
-          res.valid_sampling &&
-          res.face_ok &&
-          res.metrics_ok;
+        const allOk = receiptVerifierAccepts(entry, res);
         status = allOk ? 'verified_server' : 'mismatch';
         detail = allOk
           ? 'VALID: signed, the drand seed provenance verifies, and the outcome replays from that seed. It does not yet prove an unfavourable completed roll could not have been withheld. Strict witnessed fairness is the v2 protocol.'
@@ -145,8 +183,7 @@ export function useKarmaState() {
           { id: 'face', label: 'Face recompute', ok: res.face_ok },
           { id: 'metrics', label: 'Metrics match (α/KL/EV)', ok: res.metrics_ok },
         ];
-        const allOk =
-          res.valid_signature && res.valid_sampling && res.face_ok && res.metrics_ok;
+        const allOk = receiptVerifierAccepts(entry, res);
         status = allOk ? 'verified_server' : 'mismatch';
         detail = allOk
           ? 'Ed25519 signature verification + deterministic replay passed'
@@ -169,8 +206,10 @@ export function useKarmaState() {
             ? 'Math recompute passed (no signature checked on this path)'
             : (res.mismatches ?? []).join('; ');
       } else {
-        // Mock mode: no verifier ran. No check rows, demo labeling only.
-        await postVerify(entry.id);
+        // Mock mode (or a mock-minted artifact viewed later in a live session):
+        // no verifier ran. No check rows, demo labeling only. Only call the mock
+        // client in a real mock session; never send a `mock-` id to the live server.
+        if (isMockMode()) await postVerify(entry.id);
         checks = [];
         status = 'verified_local';
         detail = 'DEMO, no cryptographic verification performed';
@@ -201,7 +240,6 @@ export function useKarmaState() {
 
   const clearHistory = useCallback(() => {
     setRolls([]);
-    nextId.current = 1;
   }, []);
 
   // Record that a die was broken by a tamper: store the forged body + the verifier's

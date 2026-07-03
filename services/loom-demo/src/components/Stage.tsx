@@ -122,7 +122,9 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, di
     () => buildBars(probs, highlightFace),
     [probs, highlightFace],
   );
-  const isNeutral = latestRoll ? latestRoll.alpha > 0.99 : Math.abs(kappa) < 0.05;
+  const isNeutral = latestRoll
+    ? Math.abs(latestRoll.kappa) < 1e-9 || Math.abs(latestRoll.kl) < 1e-12
+    : Math.abs(kappa) < 1e-9;
 
   return (
     <section className={css.stage}>

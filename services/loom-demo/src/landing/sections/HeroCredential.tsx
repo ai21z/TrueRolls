@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { useKarmaState } from '../../hooks/useKarmaState';
 import type { HeroPhase } from '../three/HeroCanvas';
 import type { Die, ReceiptVerifyResponse } from '../../types/kd';
-import { buildReceiptBody, hasDrandProof as receiptHasDrandProof, tamperedView } from '../../api/receipt';
+import {
+  buildReceiptBody,
+  hasDrandProof as receiptHasDrandProof,
+  receiptVerifierAccepts,
+  tamperedView,
+} from '../../api/receipt';
 import { postVerifyReceipt } from '../../api/client';
 import { FACES } from '../../constants/caps';
 import { InkFrame } from '../system/InkFrame';
@@ -39,6 +44,8 @@ export function HeroCredential({ state, onPhase }: Props) {
   // New roll → reset, signal 'settled', then auto-verify the clean receipt.
   useEffect(() => {
     if (!entry) {
+      lastId.current = null;
+      setVerify(null);
       onPhase('idle');
       return;
     }
@@ -53,12 +60,7 @@ export function HeroCredential({ state, onPhase }: Props) {
       .then((res) => {
         if (cancelled) return;
         setVerify(res);
-        const allOk =
-          res.valid_signature &&
-          (!hasDrandProof || res.valid_drand !== false) &&
-          res.valid_sampling &&
-          res.face_ok &&
-          res.metrics_ok;
+        const allOk = receiptVerifierAccepts(entry, res);
         onPhase(allOk ? 'sealed' : 'settled');
       })
       .catch(() => {
@@ -98,6 +100,7 @@ export function HeroCredential({ state, onPhase }: Props) {
 
   const shown = tamper ?? verify;
   const tampered = !!tamper;
+  const verifiedOk = verify ? receiptVerifierAccepts(entry, verify) : false;
   // When broken, show the forged values the tampered receipt actually carries.
   const view = tamperState
     ? tamperedView(tamperState.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
@@ -106,7 +109,11 @@ export function HeroCredential({ state, onPhase }: Props) {
 
   let pill: { label: string; tone: string };
   if (tampered) pill = { label: 'Tampered', tone: css.toneFail };
-  else if (verify) pill = { label: 'Verified', tone: css.toneOk };
+  else if (verify) {
+    pill = verifiedOk
+      ? { label: 'Verified', tone: css.toneOk }
+      : { label: 'Invalid', tone: css.toneFail };
+  }
   else if (state.mock) pill = { label: 'Demo', tone: css.toneNeutral };
   else pill = { label: 'Signed', tone: css.toneNeutral };
 

@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow } from '../types/kd';
 import { KL_CAPS, FACES } from '../constants/caps';
 import { getTruerollsKeys, postVerifyReceipt } from '../api/client';
-import { buildReceiptBody, hasDrandProof as receiptHasDrandProof, offlineVerifyCommand, tamperedView } from '../api/receipt';
+import {
+  buildReceiptBody,
+  hasDrandProof as receiptHasDrandProof,
+  offlineVerifyCommand,
+  receiptVerifierAccepts,
+  tamperedView,
+} from '../api/receipt';
 import css from './TranscriptReceipt.module.css';
 
 interface Props {
@@ -38,7 +44,11 @@ function statusPill(entry: TranscriptEntry, mock: boolean): { label: string; ton
 }
 
 /** Check rows derived 1:1 from a ReceiptVerifyResponse, never fabricated. */
-function receiptCheckRows(res: ReceiptVerifyResponse, hasDrandProof: boolean): VerifyCheckRow[] {
+function receiptCheckRows(
+  res: ReceiptVerifyResponse,
+  receipt: { v?: unknown; proof?: unknown },
+): VerifyCheckRow[] {
+  const hasDrandProof = receiptHasDrandProof(receipt);
   const rows = [
     { id: 'signature', label: 'Signature (Ed25519)', ok: res.valid_signature },
     { id: 'rng', label: 'Seed replay (draw_u64)', ok: res.valid_sampling },
@@ -51,13 +61,12 @@ function receiptCheckRows(res: ReceiptVerifyResponse, hasDrandProof: boolean): V
   return rows;
 }
 
-function tamperSummary(res: ReceiptVerifyResponse, hasDrandProof: boolean): string {
-  const allOk =
-    res.valid_signature &&
-    res.valid_drand !== false &&
-    res.valid_sampling &&
-    res.face_ok &&
-    res.metrics_ok;
+function tamperSummary(
+  res: ReceiptVerifyResponse,
+  receipt: { v?: unknown; proof?: unknown },
+): string {
+  const hasDrandProof = receiptHasDrandProof(receipt);
+  const allOk = receiptVerifierAccepts(receipt, res);
   if (allOk) {
     return hasDrandProof
       ? 'VALID: signed, the drand seed provenance verifies, and the outcome replays from that seed. It does not yet prove an unfavourable completed roll could not have been withheld. Strict witnessed fairness is the v2 protocol.'
@@ -95,7 +104,9 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   // receipts have no signature and nothing real to verify against.
   const isReceiptVersion = entry.v === 'truerolls-1' || entry.v === 'truerolls-drand-1';
   const isSignedLive = isReceiptVersion && !!entry.sig && !mock;
-  const hasDrandProof = receiptHasDrandProof(entry);
+  const entryReceiptBody = buildReceiptBody(entry);
+  const activeReceiptBody = broken && tampered ? tampered.body : entryReceiptBody;
+  const hasDrandProof = receiptHasDrandProof(activeReceiptBody);
 
   // ── Tamper editor state. Seeded from the tampered body when already broken,
   // so re-verifying continues from the current broken artifact. ──
@@ -208,12 +219,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
       // Lift the result into shared state so the hero die, the seed, this row and
       // modal all agree. A failing edit breaks the die everywhere. Reverting it back
       // to a passing receipt restores the valid die. The stored receipt is untouched.
-      const allOk =
-        res.valid_signature &&
-        res.valid_drand !== false &&
-        res.valid_sampling &&
-        res.face_ok &&
-        res.metrics_ok;
+      const allOk = receiptVerifierAccepts(parsed, res);
       if (allOk) onUnbreak?.(entry.localId);
       else onBreak?.(entry.localId, parsed, res);
     } catch (err) {
@@ -242,12 +248,12 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   const storedChecks = Array.isArray(entry.verifyChecks)
     ? entry.verifyChecks.filter((row) => hasDrandProof || row.id !== 'drand')
     : null;
-  const checks = broken && tampered ? receiptCheckRows(tampered.result, hasDrandProof) : storedChecks;
+  const checks = broken && tampered ? receiptCheckRows(tampered.result, tampered.body) : storedChecks;
   const pill = broken
     ? { label: 'Tampered', tone: 'fail' as PillTone }
     : statusPill(entry, mock);
   const verifyDetailText = broken && tampered
-    ? tamperSummary(tampered.result, hasDrandProof)
+    ? tamperSummary(tampered.result, tampered.body)
     : entry.verifyDetail;
   const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
   const signedKid = entry.sig?.kid ?? null;
@@ -271,7 +277,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
       }, null, 2);
 
   const keyForSnippet = publicKey ?? PUBKEY_PLACEHOLDER;
-  const tamperRows = tamperResult ? receiptCheckRows(tamperResult, hasDrandProof) : null;
+  const tamperRows = tamperResult ? receiptCheckRows(tamperResult, activeReceiptBody) : null;
 
   return (
     <div
@@ -467,7 +473,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
                     ))}
                   </ul>
                 )}
-                <div className={css.tamperSummary}>{tamperSummary(tamperResult, hasDrandProof)}</div>
+                <div className={css.tamperSummary}>{tamperSummary(tamperResult, activeReceiptBody)}</div>
               </div>
             )}
 

@@ -13,16 +13,16 @@ interface Props {
   mock: boolean;
 }
 
-function verdictLabel(entry: TranscriptEntry, mock: boolean): { text: string; cls: string } {
+function verdictLabel(entry: TranscriptEntry): { text: string; cls: string } {
   switch (entry.verifyStatus) {
     case 'not_checked':
       return { text: '', cls: '' };
     case 'pending':
       return { text: 'Verifying…', cls: css.verdictPending };
     case 'verified_local':
-      return mock
-        ? { text: 'Demo', cls: css.verdictDemo }
-        : { text: '✓ Verified', cls: css.verdictOk };
+      // A demo/mock artifact: no cryptographic check ran, so it is never labelled
+      // "Verified", even if the session later reconnects to a live API.
+      return { text: 'Demo', cls: css.verdictDemo };
     case 'verified_server':
       return { text: '✓ Verified', cls: css.verdictOk };
     case 'mismatch':
@@ -64,8 +64,7 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
     ? tamperedView(tampered.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
     : { face: entry.face, kappa: entry.kappa, die: entry.die };
 
-  const isVerified =
-    !broken && (entry.verifyStatus === 'verified_local' || entry.verifyStatus === 'verified_server');
+  const isVerified = !broken && entry.verifyStatus === 'verified_server';
   const isFailed = broken || entry.verifyStatus === 'mismatch' || entry.verifyStatus === 'error';
 
   const rowClass = [
@@ -77,7 +76,7 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
   const klCap = KL_CAPS[entry.die as Die] ?? KL_CAPS.d20;
   const verdict = broken
     ? { text: '✕ Tampered', cls: css.verdictMismatch }
-    : verdictLabel(entry, mock);
+    : verdictLabel(entry);
   const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
 
   return (
@@ -117,11 +116,12 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
             View receipt
           </button>
 
-          {!broken && entry.verifyStatus === 'not_checked' && (
-            <button className={css.verifyBtn} onClick={() => onVerify(entry.localId)}>
-              Verify
-            </button>
-          )}
+          {!broken &&
+            (entry.verifyStatus === 'not_checked' || entry.verifyStatus === 'error') && (
+              <button className={css.verifyBtn} onClick={() => onVerify(entry.localId)}>
+                {entry.verifyStatus === 'error' ? 'Retry' : 'Verify'}
+              </button>
+            )}
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import { useId, useMemo } from 'react';
+import { hasDrandProof } from '../api/receipt';
 import type { WasmVerifyReport } from '../api/wasmEngine';
 import { hyphaePath } from '../landing/system/hyphae';
 import css from './RollSigil.module.css';
@@ -101,7 +102,6 @@ function parseReceipt(text: string): Parsed {
     const hash = typeof o.receipt_hash === 'string' ? o.receipt_hash : null;
     const proof = (o.proof as Record<string, unknown> | undefined) ?? undefined;
     const rng = (proof?.rng as Record<string, unknown> | undefined) ?? undefined;
-    const drand = proof?.drand;
     const drbg = typeof rng?.drbg_key_hex === 'string' ? rng.drbg_key_hex : undefined;
     const draw = typeof proof?.draw_u64 === 'string' ? proof.draw_u64 : undefined;
     const sig = (o.sig as Record<string, unknown> | undefined) ?? undefined;
@@ -112,7 +112,7 @@ function parseReceipt(text: string): Parsed {
       die: typeof o.die === 'string' ? o.die : null,
       hashShort: hash ? hash.replace(/^sha256:/, '').slice(0, 12) : null,
       kid: typeof sig?.kid === 'string' ? sig.kid : null,
-      hasDrandProof: drand != null,
+      hasDrandProof: hasDrandProof(o),
     };
   } catch {
     return {

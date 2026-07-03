@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getTruerollsKeys, type TruerollsKey } from '../../api/client';
-import { offlineVerifyCommand } from '../../api/receipt';
+import { DRAND_RECEIPT_VERSION, offlineVerifyCommand } from '../../api/receipt';
 import { RollSigil } from '../../components/RollSigil';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
@@ -71,8 +71,11 @@ function parseSigKid(text: string): string | null {
 
 function receiptHasDrandProof(text: string): boolean {
   try {
-    const obj = JSON.parse(text) as { proof?: { drand?: unknown } };
-    return obj.proof?.drand != null;
+    const obj = JSON.parse(text) as { v?: unknown; proof?: { drand?: unknown } };
+    // Version-gated, not field-presence: the shared verifier leaves valid_drand
+    // true for non-drand versions, so a legacy receipt carrying a stray proof.drand
+    // must NOT render a "beacon verified" row.
+    return obj.v === DRAND_RECEIPT_VERSION && obj.proof?.drand != null;
   } catch {
     return false;
   }
@@ -204,7 +207,16 @@ export function Verify() {
   const loadSample = () => {
     setReceiptText(SAMPLE_RECEIPT);
     setTampered(false);
-    verify(SAMPLE_RECEIPT);
+    // Resolve the sample against its own signing key, ignoring any prior manual
+    // key edit (mirrors the mount canary), so the bundled sample always verifies
+    // VALID rather than failing the signature check against a stale manual key.
+    const sigKid = parseSigKid(SAMPLE_RECEIPT);
+    const match = sigKid ? wellKnownKeys.find((k) => k.kid === sigKid) : undefined;
+    const key = match?.public_key ?? DEMO_TEST_KEY;
+    setPublicKey(key);
+    setKeySource(match?.public_key ? 'well-known' : 'demo');
+    setKeyKid(match?.public_key ? match.kid : 'test-kid-1');
+    runWith(SAMPLE_RECEIPT, key);
   };
 
   const onFile = async (file: File | undefined) => {

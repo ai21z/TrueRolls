@@ -345,7 +345,7 @@ export function CeremonyRail({ parsed, report, onReExamine }: CeremonyRailProps)
     if (stepIndex >= 0) {
       // Manual step: a single frame for the chosen station, no rAF (so it works
       // even in a backgrounded tab where requestAnimationFrame is paused).
-      paint(STATION_ELAPSED[Math.min(stepIndex, N - 1)]);
+      paint(Math.min(STATION_ELAPSED[Math.min(stepIndex, N - 1)], TOTAL - 1));
       return;
     }
     if (reduced) {
