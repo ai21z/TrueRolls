@@ -11,7 +11,7 @@ pub async fn healthz(State(state): State<Arc<AppState>>) -> Json<Health> {
 
     let redis_ok = match state.redis.get().await {
         Ok(mut conn) => redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .is_ok(),
         Err(_) => false,

@@ -33,7 +33,7 @@ pub async fn acquire_lock(
         .arg("NX")
         .arg("EX")
         .arg(ttl_secs)
-        .query_async::<_, Option<String>>(&mut conn)
+        .query_async::<Option<String>>(&mut conn)
         .await
         .context("redis SET NX EX")?
         .is_some();
@@ -47,10 +47,11 @@ pub async fn acquire_lock(
     }
 }
 
-/// Release an idempotency lock early. The normal post-mint flow deliberately does NOT call this
-/// (it keeps the lock to fence concurrent duplicates until the row is written or the TTL expires).
-/// It is used only on the global-mint-cap reject path, where no mint occurred, so releasing lets a
-/// retry of the same idem key re-attempt once the window resets.
+/// Release an idempotency lock early. The normal successful mint flow deliberately does NOT call
+/// this: it keeps the lock to fence concurrent duplicates while the completed row becomes visible.
+/// Pre-mint failures call this so a retry of the same idempotency key can re-attempt immediately
+/// instead of polling until TTL expiry. The token check prevents a stale owner from deleting a newer
+/// same-key lock after the original TTL expires.
 pub async fn release_lock(pool: &RedisPool, lock: &IdempotencyLock) -> Result<bool, anyhow::Error> {
     let mut conn = pool.get().await.context("redis pool get")?;
     let deleted: i64 = redis::cmd("EVAL")

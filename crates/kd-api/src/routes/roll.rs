@@ -2,14 +2,15 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
+use chrono::Utc;
 use serde::Serialize;
 use serde_json::{self};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, info_span, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::error::{AppError, bad_request, conflict, internal, not_found};
@@ -51,16 +52,19 @@ pub async fn get_roll_by_id(
 }
 
 /// GET /v1/roll?idem_key=...
-#[tracing::instrument(name = "roll.get_by_idem", skip(state, q), fields(idem_key = %q.idem_key))]
+#[tracing::instrument(name = "roll.get_by_idem", skip(state, q), fields(idem_key_hash = tracing::field::Empty))]
 pub async fn get_roll_by_idem(
     State(state): State<Arc<AppState>>,
     Query(q): Query<IdemQuery>,
 ) -> Result<Json<RollResponse>, AppError> {
-    if q.idem_key.trim().is_empty() {
+    let idem_key = q.idem_key.trim();
+    if idem_key.is_empty() {
         return Err(bad_request("idem_key is required"));
     }
+    let key_hash = short_hash_hex(&format!("idem:roll:{idem_key}"));
+    tracing::Span::current().record("idem_key_hash", tracing::field::display(&key_hash));
 
-    let row = db::select_roll_by_idem_key(&state.pg, &q.idem_key)
+    let row = db::select_roll_by_idem_key(&state.pg, idem_key)
         .await
         .map_err(internal)?;
 
@@ -137,17 +141,16 @@ pub async fn post_roll(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<RollRequest>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<Response, AppError> {
     // ---- span & timer -------------------------------------------------------
     let started = Instant::now();
-    let span = info_span!(
-        "roll.request",
+    info!(
+        event = "roll.request",
         die = %req.die,
         kappa = req.kappa,
         has_seed = %req.seed.is_some(),
         has_client_nonce = %req.client_nonce.is_some()
     );
-    let _g = span.enter();
 
     // ---- validate input -----------------------------------------------------
     match req.die.as_str() {
@@ -172,23 +175,9 @@ pub async fn post_roll(
         .as_ref()
         .ok_or_else(|| bad_request("drand proof is required for drand-backed rolls"))?;
 
-    // ---- idempotency: header preferred, if both present and differ -> 400 ---
-    let header_key = headers
-        .get("Idempotency-Key")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_owned());
-
-    if let (Some(h), Some(b)) = (header_key.as_deref(), req.idempotency_key.as_deref())
-        && h != b
-    {
-        return Err(bad_request(
-            "Idempotency-Key header and body.idempotency_key differ",
-        ));
-    }
-
-    let idem_key = header_key
-        .or(req.idempotency_key.clone())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    // ---- idempotency: header and body values are trimmed and compared -------
+    let header_key = idempotency_header_value(&headers)?;
+    let idem_key = normalize_idempotency_key(header_key, req.idempotency_key.as_deref())?;
 
     let redis_key = format!("idem:roll:{idem_key}");
     let key_hash = short_hash_hex(&redis_key);
@@ -204,6 +193,16 @@ pub async fn post_roll(
         .map_err(internal)?;
     let payload_sha = sha256_bytes(&payload_bytes);
     let payload_sha_hex = hex::encode(&payload_sha);
+
+    // Postgres is the durable source of idempotency truth. Check it before
+    // touching Redis so a retry after lock TTL/restart/flush returns the stored
+    // receipt instead of doing new drand/quota work.
+    if let Some(row) = db::select_idempotency_record_by_key(&state.pg, &idem_key)
+        .await
+        .map_err(internal)?
+    {
+        return idempotency_record_response(row, &payload_sha, &key_hash, started);
+    }
 
     // ---- acquire lock (SET NX EX) -------------------------------------------
     let idem_lock = idempotency::acquire_lock(&state.redis, &redis_key, state.cfg.idem_ttl_secs)
@@ -222,7 +221,7 @@ pub async fn post_roll(
                 let pg = pg_for_poll.clone();
                 let key = key_for_poll.clone();
                 Box::pin(async move {
-                    db::select_receipt_by_idem_key(&pg, &key)
+                    db::select_idempotency_record_by_key(&pg, &key)
                         .await
                         .ok()
                         .flatten()
@@ -234,27 +233,7 @@ pub async fn post_roll(
         .await;
 
         if let Some(row) = row_opt {
-            info!(event = "idem.dedup.hit", key_hash = %key_hash);
-
-            if let Some(stored) = row.idem_payload_sha256
-                && stored != payload_sha
-            {
-                warn!(event = "idem.dedup.mismatch", key_hash = %key_hash);
-                return Err(conflict("Idempotency-Key was used with a different body"));
-            }
-
-            let mut receipt = row.receipt_json;
-            if let Some(obj) = receipt.as_object_mut() {
-                obj.insert("deduplicated".to_string(), serde_json::json!(true));
-            }
-
-            info!(
-                event = "roll.done",
-                status = 200u16,
-                dedup = true,
-                ms = started.elapsed().as_millis() as u64
-            );
-            return Ok((StatusCode::OK, Json(receipt)).into_response());
+            return idempotency_record_response(row, &payload_sha, &key_hash, started);
         }
 
         // 202 Accepted: request with this idempotency key is still being computed
@@ -274,21 +253,46 @@ pub async fn post_roll(
         return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
     };
 
+    let post_acquire_row = match db::select_idempotency_record_by_key(&state.pg, &idem_key).await {
+        Ok(row) => row,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "post_acquire_select_failed")
+                .await;
+            return Err(internal(err));
+        }
+    };
+    if let Some(row) = post_acquire_row {
+        release_lock_best_effort(&state, &idem_lock, &key_hash, "post_acquire_dedup").await;
+        return idempotency_record_response(row, &payload_sha, &key_hash, started);
+    }
+
     // ---- drand: verify client frontier, wait for target, derive RNG ---------
-    let server_latest = state
-        .drand
-        .fetch_latest_verified()
-        .await
-        .map_err(|e| internal(format!("drand latest fetch failed: {e}")))?;
-    let wall_clock_frontier_round = quicknet_wall_clock_frontier_round()
-        .map_err(|e| internal(format!("drand wall-clock frontier failed: {e}")))?;
-    let client_observed = validate_roll_drand_request(
+    let server_latest = match state.drand.fetch_latest_verified().await {
+        Ok(pulse) => pulse,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_latest_failed").await;
+            return Err(internal(format!("drand latest fetch failed: {err}")));
+        }
+    };
+    let wall_clock_frontier_round = match quicknet_wall_clock_frontier_round() {
+        Ok(round) => round,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_frontier_failed").await;
+            return Err(internal(format!("drand wall-clock frontier failed: {err}")));
+        }
+    };
+    let client_observed = match validate_roll_drand_request(
         drand_req,
         server_latest.round,
         wall_clock_frontier_round,
         state.cfg.drand_client_max_lag_rounds,
-    )
-    .map_err(bad_request)?;
+    ) {
+        Ok(pulse) => pulse,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_request_invalid").await;
+            return Err(bad_request(err));
+        }
+    };
 
     // ---- global mint cap: bound TOTAL receipts minted per window (OPS-AUTH-01) ----
     // The drand proof is now validated and we hold the idempotency lock, so we are committed to a
@@ -298,19 +302,28 @@ pub async fn post_roll(
     // request is rejected before the ~6s wait, and a legitimate idempotent retry (which dedups)
     // never charges.
     // Fail-closed: a Redis error -> 500 (the roll path already requires Redis for the idem lock).
-    let now_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(internal)?
-        .as_secs();
-    match quota::reserve_mint(
+    let now_unix = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "system_time_failed").await;
+            return Err(internal(err));
+        }
+    };
+    let reservation = match quota::reserve_mint(
         &state.redis,
         state.cfg.roll_global_cap,
         state.cfg.roll_global_cap_window_secs,
         now_unix,
     )
     .await
-    .map_err(internal)?
     {
+        Ok(reservation) => reservation,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "mint_cap_error").await;
+            return Err(internal(err));
+        }
+    };
+    match reservation {
         quota::MintReservation::Allowed { window_count } => {
             info!(
                 event = "roll.mintcap.ok",
@@ -328,37 +341,22 @@ pub async fn post_roll(
                 cap = state.cfg.roll_global_cap,
                 retry_after_secs
             );
-            // No mint happened, so release the idempotency lock (unlike the normal post-mint
-            // flow, which keeps it to fence concurrent duplicates). This lets a retry of the SAME
-            // idem key succeed once the window resets, instead of polling to a 202 until TTL.
-            match idempotency::release_lock(&state.redis, &idem_lock).await {
-                Ok(true) => {
-                    info!(event = "idem.lock_released", key_hash = %key_hash);
-                }
-                Ok(false) => {
-                    warn!(
-                        event = "idem.lock_release_failed",
-                        key_hash = %key_hash,
-                        reason = "missing_or_owned_by_another_request"
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        event = "idem.lock_release_failed",
-                        key_hash = %key_hash,
-                        error = %err
-                    );
-                }
-            }
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "mint_cap_rejected").await;
             return Ok(mint_cap_response(retry_after_secs));
         }
     }
 
-    let target_pulse = state
+    let target_pulse = match state
         .drand
         .wait_for_round_verified(drand_req.target_round, state.cfg.drand_target_wait_ms)
         .await
-        .map_err(|e| internal(format!("drand target fetch failed: {e}")))?;
+    {
+        Ok(pulse) => pulse,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_target_failed").await;
+            return Err(internal(format!("drand target fetch failed: {err}")));
+        }
+    };
 
     let seed_input = kd_drand::DrandSeedInput {
         target_pulse: target_pulse.clone(),
@@ -367,12 +365,23 @@ pub async fn post_roll(
         kappa: req.kappa,
         idem_payload_sha256_hex: payload_sha_hex.clone(),
     };
-    let drbg_key = kd_drand::derive_roll_seed(&seed_input)
-        .map_err(|e| internal(format!("drand seed derivation failed: {e}")))?;
-    let result = {
+    let drbg_key = match kd_drand::derive_roll_seed(&seed_input) {
+        Ok(seed) => seed,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_seed_failed").await;
+            return Err(internal(format!("drand seed derivation failed: {err}")));
+        }
+    };
+    let roll_result = {
         let mut rng = rand_chacha::ChaCha20Rng::from_seed(drbg_key);
         compute_roll_with_rng_labeled(&req.die, req.kappa, &mut rng, None, kd_drand::RNG_ALGO)
-            .map_err(internal)?
+    };
+    let result = match roll_result {
+        Ok(result) => result,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "roll_math_failed").await;
+            return Err(internal(err));
+        }
     };
 
     // ---- attach RNG provenance into transcript ------------------------------
@@ -435,49 +444,16 @@ pub async fn post_roll(
     let alpha = result.alpha;
     let kl = result.kl;
 
-    // ---- persist roll --------------------------------------------------------
     let public_id = Uuid::new_v4();
-    let row = db::insert_roll(
-        &state.pg,
-        public_id,
-        &req.die,
-        req.kappa,
-        None,
-        &idem_key,
-        &payload_sha,
-        face,
-        ev,
-        alpha,
-        kl,
-    )
-    .await
-    .map_err(internal)?;
-    info!(event = "roll.inserted", %public_id, key_hash = %key_hash);
-
-    // ---- upload transcript to S3 --------------------------------------------
+    let created_at = Utc::now();
     let s3_key = format!("rolls/{public_id}.json");
-    let bytes = serde_json::to_vec(&transcript_json).map_err(internal)?;
-    s3::put_transcript(&state.s3, &state.s3_bucket, &s3_key, bytes.clone())
-        .await
-        .map_err(internal)?;
-    info!(event = "s3.transcript.put", %public_id, bytes = bytes.len(), %s3_key);
-
-    // ---- store transcript meta ----------------------------------------------
-    let sha = {
-        let mut h = Sha256::new();
-        h.update(&bytes);
-        h.finalize().to_vec()
-    };
-    db::insert_transcript_meta(&state.pg, row.id, &s3_key, &sha, bytes.len() as i64)
-        .await
-        .map_err(internal)?;
-
-    // ---- build response ------------------------------------------------------
     let transcript_url = format!("/v1/roll/{}/transcript", public_id);
     let transcript_key_s3 = s3::s3_uri(&state.s3_bucket, &s3_key);
     let drbg_key_hex = hex::encode(drbg_key);
 
-    // Build the receipt body (everything except sig and receipt_hash) for signing
+    // Build the receipt body before DB insertion. The final DB write stores a
+    // complete signed receipt, so an idempotent retry never finds a half-minted
+    // row with no receipt.
     let mut receipt = ReceiptV2 {
         v: kd_drand::DRAND_RECEIPT_VERSION.to_string(),
         id: public_id,
@@ -487,7 +463,7 @@ pub async fn post_roll(
         alpha,
         kl,
         ev,
-        created_at: row.created_at,
+        created_at,
         transcript_url,
         transcript_key: Some(transcript_key_s3),
         proof: ReceiptProof {
@@ -503,17 +479,119 @@ pub async fn post_roll(
         sig: None,
     };
 
-    // Sign the receipt (sig covers everything except the sig block itself)
     if let Some(ref signer) = state.signer {
-        let body_for_signing = serde_json::to_value(&receipt).map_err(internal)?;
-        let (sig_block, receipt_hash) = signer.sign_receipt(&body_for_signing).map_err(internal)?;
+        let body_for_signing = match serde_json::to_value(&receipt) {
+            Ok(value) => value,
+            Err(err) => {
+                release_lock_best_effort(&state, &idem_lock, &key_hash, "receipt_json_failed")
+                    .await;
+                return Err(internal(err));
+            }
+        };
+        let (sig_block, receipt_hash) = match signer.sign_receipt(&body_for_signing) {
+            Ok(parts) => parts,
+            Err(err) => {
+                release_lock_best_effort(&state, &idem_lock, &key_hash, "receipt_sign_failed")
+                    .await;
+                return Err(internal(err));
+            }
+        };
         receipt.receipt_hash = Some(receipt_hash);
         receipt.sig = Some(sig_block);
     }
-    let receipt_json = serde_json::to_value(&receipt).map_err(internal)?;
-    db::update_roll_receipt_json(&state.pg, row.id, &receipt_json)
-        .await
-        .map_err(internal)?;
+    let receipt_json = match serde_json::to_value(&receipt) {
+        Ok(value) => value,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "receipt_json_failed").await;
+            return Err(internal(err));
+        }
+    };
+
+    // ---- upload transcript to S3 --------------------------------------------
+    let bytes = match serde_json::to_vec(&transcript_json) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "transcript_json_failed").await;
+            return Err(internal(err));
+        }
+    };
+    if let Err(err) = s3::put_transcript(&state.s3, &state.s3_bucket, &s3_key, bytes.clone()).await
+    {
+        release_lock_best_effort(&state, &idem_lock, &key_hash, "s3_put_failed").await;
+        return Err(internal(err));
+    }
+    info!(event = "s3.transcript.put", %public_id, bytes = bytes.len(), %s3_key);
+
+    let sha = {
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        h.finalize().to_vec()
+    };
+
+    // ---- persist completed roll --------------------------------------------
+    let insert_result = db::insert_complete_roll(
+        &state.pg,
+        public_id,
+        created_at,
+        &receipt.die,
+        receipt.kappa,
+        None,
+        &idem_key,
+        &payload_sha,
+        face,
+        ev,
+        alpha,
+        kl,
+        &receipt_json,
+        &s3_key,
+        &sha,
+        bytes.len() as i64,
+    )
+    .await;
+
+    match insert_result {
+        Ok(Some(row)) => {
+            info!(
+                event = "roll.inserted",
+                %public_id,
+                key_hash = %key_hash,
+                roll_id = row.id
+            );
+        }
+        Ok(None) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "db_conflict").await;
+            // The row already exists under this idem key (a concurrent winner), so
+            // the transcript we just uploaded under our own public_id is orphaned.
+            delete_transcript_best_effort(&state, &s3_key, public_id, "db_conflict").await;
+            if let Some(row) = db::select_idempotency_record_by_key(&state.pg, &idem_key)
+                .await
+                .map_err(internal)?
+            {
+                return idempotency_record_response(row, &payload_sha, &key_hash, started);
+            }
+
+            #[derive(Serialize)]
+            struct ProcessingResponse<'a> {
+                status: &'static str,
+                idem_key: &'a str,
+                retry_hint_ms: u64,
+            }
+            let processing = ProcessingResponse {
+                status: "processing",
+                idem_key: &idem_key,
+                retry_hint_ms: state.cfg.idem_poll_ms,
+            };
+            return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
+        }
+        Err(err) => {
+            release_lock_best_effort(&state, &idem_lock, &key_hash, "db_insert_failed").await;
+            // Deliberately NO transcript cleanup here: a commit whose ack was lost
+            // returns Err while the row IS durably committed, and that row references
+            // this object. A rare orphan (storage leak) beats deleting a committed
+            // roll's transcript. The unambiguous conflict path above does clean up.
+            return Err(internal(err));
+        }
+    }
 
     let resp = ReceiptV2Response {
         receipt,
@@ -547,6 +625,132 @@ fn mint_cap_response(retry_after_secs: u64) -> axum::response::Response {
     resp
 }
 
+fn normalize_idempotency_key(
+    header_key: Option<&str>,
+    body_key: Option<&str>,
+) -> Result<String, AppError> {
+    let header_key = header_key.map(str::trim);
+    let body_key = body_key.map(str::trim);
+
+    for value in [header_key, body_key].into_iter().flatten() {
+        if value.is_empty() {
+            return Err(bad_request("Idempotency-Key must not be empty"));
+        }
+    }
+
+    if let (Some(h), Some(b)) = (header_key, body_key)
+        && h != b
+    {
+        return Err(bad_request(
+            "Idempotency-Key header and body.idempotency_key differ",
+        ));
+    }
+
+    Ok(header_key
+        .or(body_key)
+        .map(str::to_owned)
+        .unwrap_or_else(|| Uuid::new_v4().to_string()))
+}
+
+fn idempotency_header_value(headers: &HeaderMap) -> Result<Option<&str>, AppError> {
+    headers
+        .get("Idempotency-Key")
+        .map(|value| {
+            value
+                .to_str()
+                .map(str::trim)
+                .map_err(|_| bad_request("Idempotency-Key must be valid header text"))
+        })
+        .transpose()
+}
+
+fn idempotency_record_response(
+    row: db::IdempotencyRecord,
+    payload_sha: &[u8],
+    key_hash: &str,
+    started: Instant,
+) -> Result<Response, AppError> {
+    info!(event = "idem.dedup.hit", key_hash = %key_hash);
+
+    if let Some(stored) = row.idem_payload_sha256
+        && stored.as_slice() != payload_sha
+    {
+        warn!(event = "idem.dedup.mismatch", key_hash = %key_hash);
+        return Err(conflict("Idempotency-Key was used with a different body"));
+    }
+
+    let Some(mut receipt) = row.receipt_json else {
+        warn!(event = "idem.dedup.unreplayable", key_hash = %key_hash);
+        return Err(conflict(
+            "Idempotency-Key already exists without a stored receipt; retry with a new key",
+        ));
+    };
+
+    if let Some(obj) = receipt.as_object_mut() {
+        obj.insert("deduplicated".to_string(), serde_json::json!(true));
+    }
+
+    info!(
+        event = "roll.done",
+        status = 200u16,
+        dedup = true,
+        ms = started.elapsed().as_millis() as u64
+    );
+    Ok((StatusCode::OK, Json(receipt)).into_response())
+}
+
+/// Delete a transcript object that definitively has no durable roll row
+/// referencing it: the ON CONFLICT loser only, where our INSERT wrote nothing by
+/// definition. NOT used on DB error paths, a lost commit-ack surfaces as Err
+/// while the row IS durably committed, and deleting there would break a committed
+/// roll's transcript. Best-effort: a failure is logged, never surfaced.
+async fn delete_transcript_best_effort(
+    state: &AppState,
+    s3_key: &str,
+    public_id: Uuid,
+    reason: &'static str,
+) {
+    match s3::delete_transcript(&state.s3, &state.s3_bucket, s3_key).await {
+        Ok(()) => info!(event = "s3.transcript.orphan_cleaned", %public_id, %s3_key, reason),
+        Err(err) => warn!(
+            event = "s3.transcript.orphan_cleanup_failed",
+            %public_id,
+            %s3_key,
+            reason,
+            error = %err
+        ),
+    }
+}
+
+async fn release_lock_best_effort(
+    state: &AppState,
+    lock: &idempotency::IdempotencyLock,
+    key_hash: &str,
+    reason: &'static str,
+) {
+    match idempotency::release_lock(&state.redis, lock).await {
+        Ok(true) => {
+            info!(event = "idem.lock_released", key_hash = %key_hash, reason);
+        }
+        Ok(false) => {
+            warn!(
+                event = "idem.lock_release_failed",
+                key_hash = %key_hash,
+                reason,
+                detail = "missing_or_owned_by_another_request"
+            );
+        }
+        Err(err) => {
+            warn!(
+                event = "idem.lock_release_failed",
+                key_hash = %key_hash,
+                reason,
+                error = %err
+            );
+        }
+    }
+}
+
 fn sha256_bytes(data: &[u8]) -> Vec<u8> {
     let mut h = Sha256::new();
     h.update(data);
@@ -574,4 +778,53 @@ fn short_hash_hex(s: &str) -> String {
         let _ = write!(&mut out, "{:02x}", b);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn normalize_idempotency_key_rejects_blank_supplied_keys() {
+        assert!(normalize_idempotency_key(Some("   "), None).is_err());
+        assert!(normalize_idempotency_key(None, Some("\t\n")).is_err());
+    }
+
+    #[test]
+    fn normalize_idempotency_key_trims_and_compares_header_and_body() {
+        assert_eq!(
+            normalize_idempotency_key(Some(" key-1 "), Some("key-1"))
+                .unwrap()
+                .as_str(),
+            "key-1"
+        );
+        assert!(normalize_idempotency_key(Some(" key-1 "), Some("key-2")).is_err());
+    }
+
+    #[test]
+    fn idempotency_header_rejects_non_text_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Idempotency-Key",
+            HeaderValue::from_bytes(b"\xff").expect("opaque header bytes"),
+        );
+
+        assert!(idempotency_header_value(&headers).is_err());
+    }
+
+    #[test]
+    fn idempotency_record_without_receipt_is_conflict_not_processing() {
+        let row = db::IdempotencyRecord {
+            idem_payload_sha256: Some(vec![1, 2, 3]),
+            receipt_json: None,
+        };
+
+        match idempotency_record_response(row, &[1, 2, 3], "keyhash", Instant::now()) {
+            Err(AppError::Conflict(msg)) => {
+                assert!(msg.contains("without a stored receipt"));
+            }
+            other => panic!("expected conflict for unreplayable idempotency row, got {other:?}"),
+        }
+    }
 }

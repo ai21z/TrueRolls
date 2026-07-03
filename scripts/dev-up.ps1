@@ -77,15 +77,17 @@ Write-Host "  bucket kd-transcripts ready"
 
 # --- 4. build (debug; reuses aws-lc-sys, no NASM needed) -----------------------
 Step 4 "Build kd-api (debug)"
+# Stop a running kd-api BEFORE building: Windows will not let cargo replace a
+# locked exe, so a re-run with a live server would otherwise abort right here.
+if (Get-Process kd-api -ErrorAction SilentlyContinue) {
+  Write-Host "  kd-api already running - stopping it first"
+  Get-Process kd-api | Stop-Process -Force; Start-Sleep 2
+}
 cargo build -p kd-api 2>&1 | Select-Object -Last 1 | ForEach-Object { "  $_" }
 if ($LASTEXITCODE -ne 0) { Die "cargo build -p kd-api failed (a clean/release build needs NASM + cmake for aws-lc-sys)." }
 
 # --- 5. launch kd-api detached, with the TEST signing key ---------------------
 Step 5 "Launch kd-api (detached, test signing key)"
-if (Get-Process kd-api -ErrorAction SilentlyContinue) {
-  Write-Host "  kd-api already running - stopping it first"
-  Get-Process kd-api | Stop-Process -Force; Start-Sleep 2
-}
 $env:REDIS_URL  = 'redis://:kd_dev_only@127.0.0.1:6379'
 $env:S3_ENDPOINT = 'http://127.0.0.1:9000'
 $env:S3_BUCKET  = 'kd-transcripts'

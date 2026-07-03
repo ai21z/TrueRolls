@@ -56,10 +56,47 @@ async fn main() -> Result<(), String> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::warn!(event = "shutdown_signal_error", source = "ctrl_c", error = %err);
+            // Registration failed: never resolve (same as the SIGTERM arm), so a
+            // broken signal handler cannot trigger an immediate shutdown at boot.
+            std::future::pending::<()>().await;
+        }
+    };
+
+    // Container orchestrators (Fly.io, Kubernetes, docker stop) send SIGTERM, not
+    // SIGINT, on a rolling deploy. Draining on SIGTERM as well as Ctrl-C lets an
+    // in-flight roll finish (or the client get a clean response) instead of being
+    // dropped mid-await. Unix-only; on Windows this future never resolves.
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(err) => {
+                tracing::warn!(event = "shutdown_signal_error", source = "sigterm", error = %err);
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    tracing::info!(event = "shutdown_signal");
 }
 
 fn init_tracing() {
