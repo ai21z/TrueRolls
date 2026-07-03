@@ -125,7 +125,7 @@ function passArrayF64ToWasm0(arg, malloc) {
     return ptr;
 }
 /**
- * Map a 64-bit draw (JS BigInt) onto `probs` via prefix-CDF; returns the 1-based face.
+ * Map a 64-bit draw (JS BigInt) onto `probs` via prefix-CDF. Returns the 1-based face.
  * `probs.length` must equal the die size.
  * @param {string} die
  * @param {Float64Array} probs
@@ -162,8 +162,8 @@ export function paramVersion() {
 }
 
 /**
- * Verify a signed TrueRolls receipt entirely client-side - Ed25519 signature,
- * DRBG sampling replay, face, and metric caps - using the shared `kd_receipt`
+ * Verify a signed TrueRolls receipt entirely client-side, Ed25519 signature,
+ * DRBG sampling replay, face, and metric caps, using the shared `kd_receipt`
  * engine (identical to `kd verify --receipt`).
  *
  * - `receiptJson`: the raw receipt JSON string.
