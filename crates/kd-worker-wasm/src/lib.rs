@@ -78,6 +78,7 @@ fn roll_and_sign_impl(
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&drbg);
+    let drbg_key_hex = hex::encode(seed);
     let draw = ChaCha20Rng::from_seed(seed).next_u64();
 
     // 2. Guarded face + metrics from kd-core.
@@ -213,6 +214,17 @@ mod tests {
         assert_eq!(v["sig"]["kid"], KID);
         assert_eq!(v["sig"]["alg"], "Ed25519");
         assert!((1..=20).contains(&v["face"].as_u64().unwrap()));
+    }
+
+    #[test]
+    fn drbg_key_hex_is_canonicalized_before_signing() {
+        let seed = "42".repeat(32);
+        let receipt = roll("d20", 0.6, &(seed.clone() + "\n"));
+        let v: serde_json::Value = serde_json::from_str(&receipt).unwrap();
+        assert_eq!(v["proof"]["rng"]["drbg_key_hex"], seed);
+
+        let report = kd_receipt::verify_receipt_str(&receipt, &pubkey()).unwrap();
+        assert!(report.is_valid(), "{:?}", report.errors);
     }
 
     #[test]

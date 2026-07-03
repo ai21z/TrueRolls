@@ -60,5 +60,5 @@ pub fn dkl_to_uniform<const N: usize>(p: &[f64; N]) -> f64 {
             s += pi * (pi.ln() + ln_n); // pi * ln(pi / (1/N))
         }
     }
-    s
+    if s < 0.0 && s > -1e-12 { 0.0 } else { s }
 }

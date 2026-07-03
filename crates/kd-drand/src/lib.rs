@@ -43,6 +43,7 @@ pub enum DrandError {
         target: u64,
         expected: u64,
     },
+    NonFiniteKappa,
     Canonicalization(String),
     Hkdf(String),
 }
@@ -80,6 +81,7 @@ impl fmt::Display for DrandError {
                 f,
                 "target_round {target} does not equal client_observed_round {observed} + {DEFAULT_TARGET_DELAY_ROUNDS} (expected {expected})"
             ),
+            DrandError::NonFiniteKappa => write!(f, "kappa must be finite"),
             DrandError::Canonicalization(e) => write!(f, "JCS canonicalization failed: {e}"),
             DrandError::Hkdf(e) => write!(f, "HKDF expand failed: {e}"),
         }
@@ -176,6 +178,9 @@ pub fn randomness_from_signature_hex(signature_hex: &str) -> Result<String, Dran
 }
 
 pub fn derive_roll_seed(input: &DrandSeedInput) -> Result<[u8; 32], DrandError> {
+    if !input.kappa.is_finite() {
+        return Err(DrandError::NonFiniteKappa);
+    }
     input.target_pulse.verify_quicknet()?;
     let randomness = decode_hex_exact("randomness_hex", &input.target_pulse.randomness_hex, 32)?;
     let salt = decode_hex_exact(
@@ -308,5 +313,22 @@ mod tests {
         let mut changed = input;
         changed.client_nonce = "fedcba9876543210fedcba9876543210".to_string();
         assert_ne!(derive_roll_seed(&changed).unwrap(), seed);
+    }
+
+    #[test]
+    fn derive_roll_seed_rejects_non_finite_kappa_before_hkdf_info() {
+        for kappa in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let input = DrandSeedInput {
+                target_pulse: round_123(),
+                client_nonce: "0123456789abcdef0123456789abcdef".to_string(),
+                die: "d20".to_string(),
+                kappa,
+                idem_payload_sha256_hex: "11".repeat(32),
+            };
+            assert!(
+                derive_roll_seed(&input).is_err(),
+                "kappa {kappa:?} must not enter canonical HKDF metadata"
+            );
+        }
     }
 }

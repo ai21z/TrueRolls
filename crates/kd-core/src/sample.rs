@@ -11,7 +11,7 @@ use rand_core::RngCore;
 /// Deterministic mapping from a 64-bit draw to an index by prefix-CDF.
 /// No modulo bias, monotone in the fixed-point sense.
 pub fn prefix_cdf_index_from_u64<const N: usize>(p: &[f64; N], draw: u64) -> usize {
-    // Uniform in [0,1) using 64-bit fixed-point; +1 in denom to avoid 1.0
+    // Uniform in [0,1) using the exact 2^64 bucket count, written as MAX + 1.
     let u = (draw as f64) / ((u64::MAX as f64) + 1.0);
     let mut acc = 0.0;
     for (i, &pi) in p.iter().enumerate() {

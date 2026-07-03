@@ -137,6 +137,10 @@ mod tests {
         for &pi in &out.probs {
             assert!((pi - u).abs() < 1e-12);
         }
+        assert!(
+            out.kl >= 0.0,
+            "KL cannot be negative, even when floating-point noise is tiny"
+        );
         assert!(out.kl < 1e-12);
         assert!((out.ev - Die::<20>::ev_uniform()).abs() < 1e-12);
     }
