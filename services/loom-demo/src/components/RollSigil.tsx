@@ -20,8 +20,8 @@ import css from './RollSigil.module.css';
  *
  * The two real tamper levers, `face` and `κ`, are inline-editable. Editing one re-runs
  * the WASM verifier (via the parent's tamper path) and you watch the bonds sever live.
- * Every other node is derived or cryptographic, so it is read-only, editing a hash or a
- * signature would be a lie about how the system works. Motion is gated by
+ * Every other node is derived, signed, hashed, or proof-bearing, so it is read-only.
+ * Editing a hash or signature would be a lie about how the system works. Motion is gated by
  * prefers-reduced-motion in the stylesheet.
  */
 

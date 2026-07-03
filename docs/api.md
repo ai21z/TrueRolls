@@ -399,10 +399,19 @@ To verify a receipt offline: take its `sig.kid`, look up the matching `public_ke
 
 ---
 
-## Known drift
+## Current Reference Status
 
-These are points where the OpenAPI reference and the running code diverge. **The code is authoritative.**
+No OpenAPI artifact is currently committed in this repository. This file is the implemented HTTP
+reference.
 
-- **Rate limiting and L2 overload statuses are undocumented in OpenAPI.** The code applies a per-IP token-bucket limiter (`tower_governor`) scoped to `POST /v1/roll` only. It now keys the client IP through `KD_TRUSTED_PROXY`: default `peer` ignores forwarded headers, `xff:<hops>` takes the Nth IP from the right, and `cloudflare` / `fly` read the provider's authoritative client-IP header. Under `KD_ENV=prod`, `peer` mode fails closed unless `KD_ALLOW_PEER_IP=1` is set deliberately. When the token bucket is exceeded the request gets **`429 Too Many Requests`** with `x-ratelimit-after`. Separately, `POST /v1/roll` has a body cap, global in-flight cap, and whole-handler timeout. Overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. GET roll lookup, verify, health, drand health, and well-known routes are not wrapped in the heavy stack. Treat all of this as abuse/load protection, not authentication.
+`POST /v1/roll` has a per-client-IP token bucket (`tower_governor`) plus a bounded heavy path:
+body cap, global in-flight cap, and whole-handler timeout. The rate limiter keys the client IP
+through `KD_TRUSTED_PROXY`: default `peer` ignores forwarded headers, `xff:<hops>` takes the Nth IP
+from the right, and `cloudflare` / `fly` read the provider's authoritative client-IP header. Under
+`KD_ENV=prod`, `peer` mode fails closed unless `KD_ALLOW_PEER_IP=1` is set deliberately. When the
+token bucket is exceeded the request gets **`429 Too Many Requests`** with `x-ratelimit-after`.
+Overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. GET roll
+lookup, verify, health, drand health, and well-known routes are not wrapped in the heavy stack.
+Treat all of this as abuse/load protection, not authentication.
 
-Aside from the rate-limit/body-cap/overload statuses named above, the OpenAPI's endpoint set, request/response shapes, status codes, and the documented quirks (the 200-on-failed-check receipt path, the 422 plain-text-JSON-string legacy body, the receipt-vs-legacy response asymmetry) match the code at the time of writing. Note that example key ids and crypto values in both this doc and the OpenAPI are placeholders, not code constants.
+Example key ids and crypto values in this document are placeholders, not code constants.

@@ -438,8 +438,8 @@ export function Docs() {
             <span className={css.eyebrow}>Contract</span>
             <h2 className={css.h2}>API & transparency</h2>
             <p className={css.p}>
-              The HTTP contract is documented in OpenAPI (
-              <code className={css.code}>docs/openapi.yaml</code>):
+              The implemented HTTP contract is documented in{' '}
+              <code className={css.code}>docs/api.md</code>:
             </p>
             <ul className={css.wayList}>
               <li className={css.wayItem}>
@@ -460,9 +460,9 @@ export function Docs() {
               </li>
             </ul>
             <p className={css.note}>
-              The verifier and core are intended to be open source. Transparency is
-              the point for a trust system. The Studio scenario tool is the separate,
-              closed product.
+              Transparency comes from the receipt, the public standards, and the
+              shared verifier path used by the server, CLI, and browser. The repository
+              is proprietary, all rights reserved.
             </p>
           </section>
 
