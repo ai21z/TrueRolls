@@ -36,7 +36,7 @@ jobs:
         run: cargo test -p kd-cli --test goldens
 
   wasm-parity:
-    name: Committed wasm parity
+    name: Committed wasm runtime parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,18 +55,10 @@ jobs:
           mkdir -p outputs
           wasm-pack build crates/kd-core-wasm --target web --out-dir ../../outputs/ci-kd-core-wasm
 
-      - name: Compare committed wasm package
+      - name: Compare committed and rebuilt wasm runtime math
         run: |
           set -euo pipefail
-          for file in \
-            kd_core_wasm_bg.wasm \
-            kd_core_wasm_bg.wasm.d.ts \
-            kd_core_wasm.d.ts \
-            kd_core_wasm.js \
-            package.json
-          do
-            cmp "packages/kd-core-wasm/$file" "outputs/ci-kd-core-wasm/$file"
-          done
+          node scripts/wasm-parity.mjs packages/kd-core-wasm outputs/ci-kd-core-wasm
 
   ui:
     name: Loom demo build and lint
