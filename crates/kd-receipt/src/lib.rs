@@ -37,6 +37,7 @@ use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::fmt;
 
 mod sign;
@@ -88,6 +89,7 @@ struct ReceiptV2 {
     kl: f64,
     ev: f64,
     proof: ReceiptProof,
+    receipt_hash: Option<String>,
     sig: Option<ReceiptSig>,
 }
 
@@ -278,14 +280,52 @@ pub fn verify_receipt(
 
     let mut errors: Vec<String> = Vec::new();
 
-    // ---- 1. Signature (soft) ------------------------------------------------
+    // ---- 1. Receipt hash + signature metadata + signature (soft) -----------
     let mut valid_signature = false;
     match &receipt.sig {
         Some(sig_block) => {
-            match verify_ed25519_sig(receipt_value, &sig_block.signature_b64, public_key_b64) {
-                Ok(true) => valid_signature = true,
-                Ok(false) => errors.push("Ed25519 signature verification FAILED".to_string()),
-                Err(e) => errors.push(format!("signature error: {e}")),
+            let mut metadata_ok = true;
+            if sig_block.alg != "Ed25519" {
+                metadata_ok = false;
+                errors.push(format!("sig.alg '{}' != 'Ed25519'", sig_block.alg));
+            }
+            if sig_block.canon != "JCS/RFC8785" {
+                metadata_ok = false;
+                errors.push(format!("sig.canon '{}' != 'JCS/RFC8785'", sig_block.canon));
+            }
+            // Decision (intentional, not version-scoped): every signed receipt of
+            // BOTH current versions (`truerolls-1` and `truerolls-drand-1`) is emitted
+            // with a `receipt_hash` by every signer (kd-api, kd-worker-wasm, sign.rs),
+            // so a signed receipt without one is rejected by design. Hashless signed
+            // receipts are treated as deprecated, not accepted-for-compatibility. This
+            // is strictly stricter: it can only reject, never bless a forgery.
+            match expected_receipt_hash(receipt_value) {
+                Ok(expected_hash) => match receipt.receipt_hash.as_deref() {
+                    Some(claimed) if claimed == expected_hash => {}
+                    Some(claimed) => {
+                        metadata_ok = false;
+                        errors.push(format!(
+                            "receipt_hash mismatch: expected {expected_hash}, claimed {claimed}"
+                        ));
+                    }
+                    None => {
+                        metadata_ok = false;
+                        errors.push(
+                            "receipt_hash is required for signed receipts (both current versions emit it)".to_string(),
+                        );
+                    }
+                },
+                Err(e) => {
+                    metadata_ok = false;
+                    errors.push(format!("receipt_hash error: {e}"));
+                }
+            }
+            if metadata_ok {
+                match verify_ed25519_sig(receipt_value, &sig_block.signature_b64, public_key_b64) {
+                    Ok(true) => valid_signature = true,
+                    Ok(false) => errors.push("Ed25519 signature verification FAILED".to_string()),
+                    Err(e) => errors.push(format!("signature error: {e}")),
+                }
             }
         }
         None => errors.push("receipt has no signature block".to_string()),
@@ -412,7 +452,7 @@ fn verify_ed25519_sig(
     public_key_b64: &str,
 ) -> Result<bool, String> {
     use base64::Engine;
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
 
     let pk_bytes = base64::engine::general_purpose::STANDARD
         .decode(public_key_b64)
@@ -440,10 +480,16 @@ fn verify_ed25519_sig(
     // receipt_hash), the exact bytes `ReceiptSigner::sign_receipt` signed.
     let canonical_bytes = canonical_signing_bytes(receipt_value)?;
 
-    match vk.verify(&canonical_bytes, &signature) {
+    match vk.verify_strict(&canonical_bytes, &signature) {
         Ok(()) => Ok(true),
         Err(_) => Ok(false),
     }
+}
+
+fn expected_receipt_hash(receipt_value: &Value) -> Result<String, String> {
+    let canonical_bytes = canonical_signing_bytes(receipt_value)?;
+    let digest = Sha256::digest(&canonical_bytes);
+    Ok(format!("sha256:{}", hex::encode(digest)))
 }
 
 fn verify_drand_seed(receipt: &ReceiptV2) -> Result<[u8; 32], VerifyError> {
@@ -704,6 +750,61 @@ mod tests {
         assert!(report.valid_sampling);
         assert!(report.face_ok);
         assert!(report.metrics_ok);
+    }
+
+    #[test]
+    fn forged_receipt_hash_is_invalid() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt["receipt_hash"] = json!("sha256:".to_string() + &"00".repeat(32));
+
+        let report = verify_receipt(&receipt, &test_public_key_b64()).unwrap();
+
+        assert!(!report.valid_signature);
+        assert!(!report.is_valid());
+        assert!(
+            report.errors.iter().any(|e| e.contains("receipt_hash")),
+            "{:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn missing_receipt_hash_is_invalid_for_current_receipts() {
+        let mut receipt = golden("golden_receipt_01_d20.json");
+        receipt.as_object_mut().unwrap().remove("receipt_hash");
+
+        let report = verify_receipt(&receipt, &test_public_key_b64()).unwrap();
+
+        assert!(!report.valid_signature);
+        assert!(!report.is_valid());
+        assert!(
+            report.errors.iter().any(|e| e.contains("receipt_hash")),
+            "{:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn wrong_signature_metadata_is_invalid() {
+        let mut wrong_alg = golden("golden_receipt_01_d20.json");
+        wrong_alg["sig"]["alg"] = json!("Ed25519ph");
+        let alg_report = verify_receipt(&wrong_alg, &test_public_key_b64()).unwrap();
+        assert!(!alg_report.valid_signature);
+        assert!(
+            alg_report.errors.iter().any(|e| e.contains("sig.alg")),
+            "{:?}",
+            alg_report.errors
+        );
+
+        let mut wrong_canon = golden("golden_receipt_01_d20.json");
+        wrong_canon["sig"]["canon"] = json!("serde_json");
+        let canon_report = verify_receipt(&wrong_canon, &test_public_key_b64()).unwrap();
+        assert!(!canon_report.valid_signature);
+        assert!(
+            canon_report.errors.iter().any(|e| e.contains("sig.canon")),
+            "{:?}",
+            canon_report.errors
+        );
     }
 
     #[test]
