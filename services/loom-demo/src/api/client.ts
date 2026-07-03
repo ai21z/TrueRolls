@@ -13,10 +13,17 @@ export interface TruerollsKey {
   kid: string;
   alg: string;
   public_key: string;
+  status?: 'active' | 'retired' | 'revoked';
 }
 export interface TruerollsKeys {
   keys: TruerollsKey[];
 }
+
+export function getApiBaseForCli(): string {
+  if (typeof window === 'undefined') return BASE;
+  return new URL(BASE, window.location.origin).toString().replace(/\/$/, '');
+}
+
 export async function initClient(): Promise<boolean> {
   // Kick off the kd-core wasm engine alongside the health probe. The engine
   // is required for the distribution preview and for mock-mode rolls. An init

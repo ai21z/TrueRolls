@@ -7,6 +7,7 @@ export const engineLabel: () => [number, number];
 export const faceFromDraw: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
 export const paramVersion: () => [number, number];
 export const verifyReceiptJson: (a: number, b: number, c: number, d: number) => [number, number];
+export const verifyReceiptJsonWithKeySet: (a: number, b: number, c: number, d: number) => [number, number];
 export const __wbindgen_export_0: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

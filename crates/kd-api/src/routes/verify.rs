@@ -100,27 +100,18 @@ pub async fn post_verify(
 /// and the math_param_version gate live in `kd_receipt`. It covers d4..d100 (the
 /// inline path this replaced only handled d6/d20/d100).
 ///
-/// We verify against the server's OWN published key (the one served at
-/// /.well-known). A receipt signed by any other kid fails the (soft) signature
-/// check and the verdict is INVALID. Structural problems, bad version, bad
-/// DRBG key, unparseable draw, unknown die, are hard errors mapped to 400,
-/// matching the prior inline behavior.
+/// We verify against the server's OWN published key set (the one served at
+/// /.well-known). The shared verifier selects by `sig.kid`, treats retired keys
+/// as verify-only, and rejects revoked or unknown kids with an INVALID report.
+/// Structural problems, bad version, bad DRBG key, unparseable draw, unknown
+/// die, are hard errors mapped to 400, matching the prior inline behavior.
 fn run_receipt_verification(
     state: &AppState,
     body: &serde_json::Value,
 ) -> Result<ReceiptVerifyResponse, AppError> {
-    // The server verifies with the key it publishes. If no signer is configured
-    // (unsigned dev mode), pass an empty key: the signature check then fails
-    // softly while sampling/face/metrics still run.
-    let public_key_b64 = state
-        .signer
-        .as_ref()
-        .map(|s| s.public_key_entry().public_key)
-        .unwrap_or_default();
-
     // Every VerifyError is a "cannot verify at all" case (malformed / unsupported
     // version / unknown die) → 400, mirroring the inline path this replaced.
-    let report = kd_receipt::verify_receipt(body, &public_key_b64)
+    let report = kd_receipt::verify_receipt_with_key_set(body, &state.public_keys)
         .map_err(|e| bad_request(e.to_string()))?;
 
     info!(

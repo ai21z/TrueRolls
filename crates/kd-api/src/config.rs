@@ -1,6 +1,9 @@
 // typed env, validation
 
 use crate::error::{AppError, bad_request, internal};
+use crate::services::signing::{KeyStatus, TEST_KIDS};
+use base64::Engine;
+use serde::Deserialize;
 use std::{env, net::IpAddr};
 
 /// Deployment profile, parsed from `KD_ENV`. `Prod` activates the SIG-2 guard
@@ -62,6 +65,17 @@ impl TrustedProxy {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct SigningKeyConfig {
+    pub kid: String,
+    #[serde(default)]
+    pub status: KeyStatus,
+    #[serde(default)]
+    pub secret_hex: Option<String>,
+    #[serde(default)]
+    pub public_key: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct Config {
@@ -80,6 +94,8 @@ pub struct Config {
     pub signing_secret: Option<String>,
     /// Key ID string for the signing key
     pub signing_kid: Option<String>,
+    /// Explicit key set. One active key signs. Retired keys verify only. Revoked keys fail verification.
+    pub signing_keys: Vec<SigningKeyConfig>,
     /// Public base URL (for building transcript_url etc.)
     pub public_base_url: String,
     /// Deployment profile (KD_ENV). `Prod` activates the SIG-2 signer guard.
@@ -136,6 +152,7 @@ impl Config {
         let rng_salt = env::var("KD_RNG_SALT").ok();
         let signing_secret = env::var("KD_SIGNING_ED25519_SECRET").ok();
         let signing_kid = env::var("KD_SIGNING_KID").ok();
+        let signing_keys = parse_signing_keys(signing_secret.as_deref(), signing_kid.as_deref())?;
         let public_base_url =
             env::var("KD_PUBLIC_BASE_URL").unwrap_or_else(|_| format!("http://{}:{}", host, port));
         let env_profile = EnvProfile::from_env_str(env::var("KD_ENV").ok().as_deref());
@@ -218,6 +235,7 @@ impl Config {
             rng_salt,
             signing_secret,
             signing_kid,
+            signing_keys,
             public_base_url,
             env_profile,
             roll_rl_period_secs,
@@ -242,12 +260,8 @@ impl Config {
     /// refuse the published TEST signer, a published TEST kid, or an absent signer. Dev
     /// performs no check (the test seed is allowed locally).
     pub fn validate(&self) -> Result<(), AppError> {
+        self.validate_signing_keys()?;
         if self.env_profile == EnvProfile::Prod {
-            crate::services::signing::reject_test_signer_in_prod(
-                self.signing_secret.as_deref(),
-                self.signing_kid.as_deref(),
-            )
-            .map_err(internal)?;
             if self.trusted_proxy.ignores_forwarded_headers() && !self.allow_peer_ip_in_prod {
                 return Err(internal(
                     "KD_TRUSTED_PROXY is unset/peer in prod. Set peer, xff:<hops>, cloudflare, or fly. To intentionally run peer-IP keyed in prod, set KD_ALLOW_PEER_IP=1.",
@@ -264,6 +278,140 @@ impl Config {
         }
         Ok(())
     }
+
+    fn validate_signing_keys(&self) -> Result<(), AppError> {
+        if self.signing_keys.is_empty() {
+            if self.env_profile == EnvProfile::Prod {
+                return Err(internal(
+                    "refusing to start: production requires one active signing key",
+                ));
+            }
+            return Ok(());
+        }
+
+        let mut active_count = 0usize;
+        let mut seen = std::collections::HashSet::new();
+        for key in &self.signing_keys {
+            let kid = key.kid.trim();
+            if kid.is_empty() {
+                return Err(bad_request("signing key kid must not be empty"));
+            }
+            if !seen.insert(kid.to_ascii_lowercase()) {
+                return Err(bad_request(format!("duplicate signing kid '{kid}'")));
+            }
+            if self.env_profile == EnvProfile::Prod
+                && TEST_KIDS.iter().any(|t| t.eq_ignore_ascii_case(kid))
+            {
+                return Err(internal(format!(
+                    "refusing to start: signing kid '{kid}' is a published TEST kid; use a real production kid"
+                )));
+            }
+
+            if let Some(secret) = key.secret_hex.as_deref() {
+                validate_seed_hex(secret)?;
+                if self.env_profile == EnvProfile::Prod {
+                    crate::services::signing::reject_test_signer_in_prod(Some(secret), Some(kid))
+                        .map_err(internal)?;
+                }
+            }
+            if let Some(public_key) = key.public_key.as_deref() {
+                validate_public_key(public_key)?;
+                if self.env_profile == EnvProfile::Prod {
+                    crate::services::signing::reject_test_public_key_in_prod(public_key, Some(kid))
+                        .map_err(internal)?;
+                }
+            }
+
+            match key.status {
+                KeyStatus::Active => {
+                    active_count += 1;
+                    if key
+                        .secret_hex
+                        .as_deref()
+                        .is_none_or(|s| s.trim().is_empty())
+                    {
+                        return Err(bad_request(format!(
+                            "active signing key '{kid}' requires secret_hex"
+                        )));
+                    }
+                }
+                KeyStatus::Retired | KeyStatus::Revoked => {
+                    let has_secret = key
+                        .secret_hex
+                        .as_deref()
+                        .is_some_and(|s| !s.trim().is_empty());
+                    let has_public = key
+                        .public_key
+                        .as_deref()
+                        .is_some_and(|s| !s.trim().is_empty());
+                    if !has_secret && !has_public {
+                        return Err(bad_request(format!(
+                            "{:?} signing key '{kid}' requires public_key or secret_hex",
+                            key.status
+                        )));
+                    }
+                }
+            }
+        }
+
+        if active_count != 1 {
+            return Err(bad_request(format!(
+                "signing key set must contain exactly one active key; found {active_count}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn parse_signing_keys(
+    legacy_secret: Option<&str>,
+    legacy_kid: Option<&str>,
+) -> Result<Vec<SigningKeyConfig>, AppError> {
+    match env::var("KD_SIGNING_KEYS") {
+        Ok(raw) if !raw.trim().is_empty() => {
+            if legacy_secret.is_some() || legacy_kid.is_some() {
+                return Err(bad_request(
+                    "KD_SIGNING_KEYS must not be combined with KD_SIGNING_ED25519_SECRET / KD_SIGNING_KID",
+                ));
+            }
+            serde_json::from_str(raw.trim())
+                .map_err(|e| bad_request(format!("KD_SIGNING_KEYS must be JSON: {e}")))
+        }
+        _ => match (legacy_secret, legacy_kid) {
+            (Some(secret), Some(kid)) => Ok(vec![SigningKeyConfig {
+                kid: kid.to_string(),
+                status: KeyStatus::Active,
+                secret_hex: Some(secret.to_string()),
+                public_key: None,
+            }]),
+            _ => Ok(Vec::new()),
+        },
+    }
+}
+
+fn validate_seed_hex(secret: &str) -> Result<(), AppError> {
+    let bytes = hex::decode(secret.trim())
+        .map_err(|e| bad_request(format!("signing secret_hex is not valid hex: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(bad_request(format!(
+            "signing secret_hex must be 32 bytes (64 hex chars), got {}",
+            bytes.len()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_public_key(public_key: &str) -> Result<(), AppError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key.trim())
+        .map_err(|e| bad_request(format!("signing public_key is not valid base64: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(bad_request(format!(
+            "signing public_key must decode to 32 bytes, got {}",
+            bytes.len()
+        )));
+    }
+    Ok(())
 }
 
 fn env_truthy(name: &str) -> bool {
@@ -280,7 +428,11 @@ fn env_truthy(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::signing::PUBLISHED_TEST_SEED_HEX;
+    use crate::services::signing::KeyStatus;
+    use kd_receipt::{
+        PUBLISHED_TEST_PUBLIC_KEY_2_B64, PUBLISHED_TEST_PUBLIC_KEY_B64, PUBLISHED_TEST_SEED_2_HEX,
+        PUBLISHED_TEST_SEED_HEX,
+    };
 
     /// A fresh, never-published 32-byte seed (64 hex) standing in for a real prod key.
     const FRESH_SEED_HEX: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
@@ -324,6 +476,15 @@ mod tests {
             rng_salt: None,
             signing_secret: secret.map(String::from),
             signing_kid: kid.map(String::from),
+            signing_keys: match (secret, kid) {
+                (Some(secret), Some(kid)) => vec![SigningKeyConfig {
+                    kid: kid.to_string(),
+                    status: KeyStatus::Active,
+                    secret_hex: Some(secret.to_string()),
+                    public_key: None,
+                }],
+                _ => Vec::new(),
+            },
             public_base_url: String::new(),
             env_profile: profile,
             roll_rl_period_secs: 1,
@@ -353,6 +514,129 @@ mod tests {
         assert!(
             c.validate().is_err(),
             "prod + published test seed must fail validate()"
+        );
+    }
+
+    #[test]
+    fn sig2_validate_rejects_test_seed_with_fresh_kid_in_prod() {
+        let c = cfg_with(
+            EnvProfile::Prod,
+            Some(PUBLISHED_TEST_SEED_HEX),
+            Some("truerolls-prod-1"),
+        );
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("published TEST seed"),
+            "prod + published test seed under a fresh kid must fail via seed guard, got: {err}"
+        );
+    }
+
+    #[test]
+    fn sig2_validate_rejects_second_test_kid_in_prod() {
+        let c = cfg_with(
+            EnvProfile::Prod,
+            Some(PUBLISHED_TEST_SEED_2_HEX),
+            Some("test-kid-2"),
+        );
+        assert!(
+            c.validate().is_err(),
+            "prod + second published test signer must fail validate()"
+        );
+    }
+
+    #[test]
+    fn sig2_validate_rejects_second_test_seed_with_fresh_kid_in_prod() {
+        let c = cfg_with(
+            EnvProfile::Prod,
+            Some(PUBLISHED_TEST_SEED_2_HEX),
+            Some("truerolls-prod-2"),
+        );
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("published TEST seed"),
+            "prod + second published test seed under a fresh kid must fail via seed guard, got: {err}"
+        );
+    }
+
+    #[test]
+    fn signing_key_config_requires_single_active_signer() {
+        let mut c = cfg_with(EnvProfile::Dev, None, None);
+        c.signing_keys = vec![
+            SigningKeyConfig {
+                kid: "dev-active-1".to_string(),
+                status: KeyStatus::Active,
+                secret_hex: Some(FRESH_SEED_HEX.to_string()),
+                public_key: None,
+            },
+            SigningKeyConfig {
+                kid: "dev-active-2".to_string(),
+                status: KeyStatus::Active,
+                secret_hex: Some(
+                    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".to_string(),
+                ),
+                public_key: None,
+            },
+        ];
+
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("exactly one active"),
+            "expected single-active-key validation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn signing_key_config_allows_retired_public_key_plus_one_active() {
+        let mut c = cfg_with(EnvProfile::Dev, Some(FRESH_SEED_HEX), Some("dev-active-1"));
+        c.signing_keys.push(SigningKeyConfig {
+            kid: "dev-retired-1".to_string(),
+            status: KeyStatus::Retired,
+            secret_hex: None,
+            public_key: Some("IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=".to_string()),
+        });
+
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    #[test]
+    fn sig2_validate_rejects_renamed_test_public_key_in_prod() {
+        let mut c = cfg_with(
+            EnvProfile::Prod,
+            Some(FRESH_SEED_HEX),
+            Some("truerolls-prod-1"),
+        );
+        c.signing_keys.push(SigningKeyConfig {
+            kid: "issuer-2026-06".to_string(),
+            status: KeyStatus::Retired,
+            secret_hex: None,
+            public_key: Some(PUBLISHED_TEST_PUBLIC_KEY_B64.to_string()),
+        });
+
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("published TEST public key"),
+            "prod must reject a published test public key even under a fresh kid, got: {err}"
+        );
+    }
+
+    #[test]
+    fn sig2_validate_rejects_second_renamed_test_public_key_in_prod() {
+        let mut c = cfg_with(
+            EnvProfile::Prod,
+            Some(FRESH_SEED_HEX),
+            Some("truerolls-prod-1"),
+        );
+        c.signing_keys.push(SigningKeyConfig {
+            kid: "issuer-2026-07".to_string(),
+            status: KeyStatus::Revoked,
+            secret_hex: None,
+            public_key: Some(PUBLISHED_TEST_PUBLIC_KEY_2_B64.to_string()),
+        });
+
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("published TEST public key"),
+            "prod must reject the second published test public key too, got: {err}"
         );
     }
 

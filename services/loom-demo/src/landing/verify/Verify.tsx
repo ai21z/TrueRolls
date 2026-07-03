@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { getTruerollsKeys, type TruerollsKey } from '../../api/client';
+import { getApiBaseForCli, getTruerollsKeys, type TruerollsKey } from '../../api/client';
+import { DEMO_TEST_KEY, resolveReceiptKey, type KeySource } from '../../api/keys';
 import { DRAND_RECEIPT_VERSION, offlineVerifyCommand } from '../../api/receipt';
 import { RollSigil } from '../../components/RollSigil';
 import { InkFrame } from '../system/InkFrame';
@@ -10,6 +11,7 @@ import {
   isKdCoreWasmReady,
   kdCoreWasmEngineLabel,
   verifyReceiptWasm,
+  verifyReceiptWasmWithKeySet,
   type WasmVerifyReport,
 } from '../../api/wasmEngine';
 import css from './Verify.module.css';
@@ -55,20 +57,6 @@ const SAMPLE_RECEIPT = `{
   }
 }`;
 
-// PUBLIC test verifying key (base64, kid test-kid-1). Derived from the published
-// test seed. Signs the sample receipt and the goldens. NEVER a production key.
-const DEMO_TEST_KEY = 'IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=';
-
-/** Read a receipt's signing key-id (`sig.kid`) without throwing on malformed input. */
-function parseSigKid(text: string): string | null {
-  try {
-    const obj = JSON.parse(text) as { sig?: { kid?: unknown } };
-    return typeof obj.sig?.kid === 'string' ? obj.sig.kid : null;
-  } catch {
-    return null;
-  }
-}
-
 function receiptHasDrandProof(text: string): boolean {
   try {
     const obj = JSON.parse(text) as { v?: unknown; proof?: { drand?: unknown } };
@@ -80,8 +68,6 @@ function receiptHasDrandProof(text: string): boolean {
     return false;
   }
 }
-
-type KeySource = 'well-known' | 'demo' | 'manual';
 
 interface CheckRowProps {
   ok: boolean | undefined;
@@ -111,45 +97,36 @@ export function Verify() {
   const [publicKey, setPublicKey] = useState<string>(DEMO_TEST_KEY);
   const [keySource, setKeySource] = useState<KeySource>('demo');
   const [keyKid, setKeyKid] = useState<string | null>('test-kid-1');
+  const [keyStatus, setKeyStatus] = useState<string | null>('active');
   const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
   const [report, setReport] = useState<WasmVerifyReport | null>(null);
   const [tampered, setTampered] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Low-level: verify `text` with an explicit `key` (used at mount, where the freshly
-  // fetched keys aren't in state yet).
-  const runWith = (text: string, key: string) => {
+  const runWithResolved = (text: string, resolved: ReturnType<typeof resolveReceiptKey>) => {
     if (!isKdCoreWasmReady()) {
       setReport({ verdict: 'ERROR', error: 'verifier engine still loading, try again in a moment' });
       return;
     }
-    setReport(verifyReceiptWasm(text, key));
-  };
-
-  // Pick the verifying key for a receipt: a manually-pasted key wins. Otherwise the
-  // /.well-known key whose kid signed THIS receipt (so a real production receipt verifies
-  // against the production key). Otherwise the bundled demo test key (so the test-signed
-  // sample still verifies VALID offline, or on a prod deploy that doesn't publish test-kid-1).
-  const resolveKeyFor = (
-    text: string,
-    keys: TruerollsKey[],
-  ): { key: string; source: KeySource; kid: string | null } => {
-    if (keySource === 'manual') return { key: publicKey, source: 'manual', kid: null };
-    const sigKid = parseSigKid(text);
-    const match = sigKid ? keys.find((k) => k.kid === sigKid) : undefined;
-    if (match?.public_key) return { key: match.public_key, source: 'well-known', kid: match.kid };
-    return { key: DEMO_TEST_KEY, source: 'demo', kid: 'test-kid-1' };
+    setReport(
+      resolved.kind === 'manual'
+        ? verifyReceiptWasm(text, resolved.publicKey)
+        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson),
+    );
   };
 
   // Resolve the key for `text` against the fetched /.well-known keys, reflect the choice in
   // the key badge, then verify.
   const verify = (text: string) => {
-    const r = resolveKeyFor(text, wellKnownKeys);
-    setPublicKey(r.key);
+    const r = resolveReceiptKey(text, wellKnownKeys, keySource === 'manual' ? publicKey : null, {
+      allowDemoFallback: text === SAMPLE_RECEIPT,
+    });
+    setPublicKey(r.publicKey);
     setKeySource(r.source);
     setKeyKid(r.kid);
-    runWith(text, r.key);
+    setKeyStatus(r.status ?? null);
+    runWithResolved(text, r);
   };
 
   // On mount: ensure the wasm engine is up, adopt the site's published key
@@ -173,16 +150,14 @@ export function Verify() {
       }
       if (cancelled) return;
       setWellKnownKeys(keys);
-      // Resolve against the just-fetched keys (state isn't committed yet). The sample is
-      // signed by the published test key. On a prod deploy that doesn't publish that kid
-      // this falls back to the bundled demo key, so the sample still verifies VALID.
-      const sigKid = parseSigKid(SAMPLE_RECEIPT);
-      const match = sigKid ? keys.find((k) => k.kid === sigKid) : undefined;
-      const key = match?.public_key ?? DEMO_TEST_KEY;
-      setPublicKey(key);
-      setKeySource(match?.public_key ? 'well-known' : 'demo');
-      setKeyKid(match?.public_key ? match.kid : 'test-kid-1');
-      runWith(SAMPLE_RECEIPT, key);
+      // Resolve against the just-fetched keys (state isn't committed yet). The sample
+      // falls back to the bundled demo key if production does not publish test-kid-1.
+      const r = resolveReceiptKey(SAMPLE_RECEIPT, keys, null, { allowDemoFallback: true });
+      setPublicKey(r.publicKey);
+      setKeySource(r.source);
+      setKeyKid(r.kid);
+      setKeyStatus(r.status ?? null);
+      runWithResolved(SAMPLE_RECEIPT, r);
     })();
     return () => {
       cancelled = true;
@@ -201,6 +176,7 @@ export function Verify() {
     setPublicKey(key);
     setKeySource('manual');
     setKeyKid(null);
+    setKeyStatus(null);
     setReport(null);
   };
 
@@ -210,13 +186,12 @@ export function Verify() {
     // Resolve the sample against its own signing key, ignoring any prior manual
     // key edit (mirrors the mount canary), so the bundled sample always verifies
     // VALID rather than failing the signature check against a stale manual key.
-    const sigKid = parseSigKid(SAMPLE_RECEIPT);
-    const match = sigKid ? wellKnownKeys.find((k) => k.kid === sigKid) : undefined;
-    const key = match?.public_key ?? DEMO_TEST_KEY;
-    setPublicKey(key);
-    setKeySource(match?.public_key ? 'well-known' : 'demo');
-    setKeyKid(match?.public_key ? match.kid : 'test-kid-1');
-    runWith(SAMPLE_RECEIPT, key);
+    const r = resolveReceiptKey(SAMPLE_RECEIPT, wellKnownKeys, null, { allowDemoFallback: true });
+    setPublicKey(r.publicKey);
+    setKeySource(r.source);
+    setKeyKid(r.kid);
+    setKeyStatus(r.status ?? null);
+    runWithResolved(SAMPLE_RECEIPT, r);
   };
 
   const onFile = async (file: File | undefined) => {
@@ -299,10 +274,16 @@ export function Verify() {
   const isError = verdict === 'ERROR';
   const isValid = verdict === 'VALID';
   const hasDrandProof = receiptHasDrandProof(receiptText);
+  const cliCommand = offlineVerifyCommand(
+    receiptText,
+    keySource === 'well-known'
+      ? { kind: 'server', server: getApiBaseForCli() }
+      : { kind: 'public-key', publicKey },
+  );
 
   const keyBadgeText =
     keySource === 'well-known'
-      ? `from /.well-known${keyKid ? ` · ${keyKid}` : ''}`
+      ? `from /.well-known${keyKid ? ` · ${keyKid}` : ''}${keyStatus ? ` · ${keyStatus}` : ''}`
       : keySource === 'demo'
         ? 'demo test key'
         : 'manual';
@@ -407,7 +388,7 @@ export function Verify() {
             <InkButton
               seed={11}
               className={css.ghostBtn}
-              onClick={() => copy(offlineVerifyCommand(receiptText, publicKey), 'cmd')}
+              onClick={() => copy(cliCommand, 'cmd')}
             >
               {copied === 'cmd' ? 'Copied' : 'Copy CLI command'}
             </InkButton>
@@ -517,7 +498,7 @@ export function Verify() {
       <section className={css.honest}>
         <h2 className={css.honestTitle}>What this proves. And what it doesn't.</h2>
         <p>
-          A VALID verdict proves the receipt was signed by the holder of the published key, and,
+          A VALID verdict proves the receipt was signed by the holder of the named issuer key, and,
           when <code>proof.drand</code> is present, that the seed came from a verified public drand
           beacon and the outcome replays from it. It does <b>not yet</b> prove the operator could not
           privately discard an unfavourable completed roll and publish only this one. Strict witnessed

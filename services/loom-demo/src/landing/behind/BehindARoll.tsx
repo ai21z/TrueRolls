@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTruerollsKeys, type TruerollsKey } from '../../api/client';
+import { DEMO_TEST_KEY, resolveReceiptKey } from '../../api/keys';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
@@ -11,6 +12,7 @@ import {
   initKdCoreWasm,
   isKdCoreWasmReady,
   verifyReceiptWasm,
+  verifyReceiptWasmWithKeySet,
   type WasmVerifyReport,
 } from '../../api/wasmEngine';
 import css from './BehindARoll.module.css';
@@ -72,10 +74,6 @@ const SAMPLE_DRAND_RECEIPT = `{
   "v": "truerolls-drand-1"
 }`;
 
-// PUBLIC test verifying key (base64, kid test-kid-1). Signs the sample and the
-// goldens. NEVER a production key.
-const DEMO_TEST_KEY = 'IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=';
-
 type StratumStatus = 'pass' | 'fail' | 'absent' | 'pending';
 
 interface StratumField {
@@ -102,13 +100,6 @@ function parseReceipt(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-function parseSigKid(text: string): string | null {
-  const parsed = parseReceipt(text);
-  if (!parsed) return null;
-  const kid = asRecord(parsed.sig).kid;
-  return typeof kid === 'string' ? kid : null;
 }
 
 function statusFrom(ok: boolean | undefined): StratumStatus {
@@ -294,31 +285,28 @@ export function BehindARoll() {
     window.setTimeout(() => bandRefs.current[active]?.focus({ preventScroll: true }), 0);
   };
 
-  const runWith = (text: string, key: string) => {
+  const runWithResolved = (text: string, resolved: ReturnType<typeof resolveReceiptKey>) => {
     if (!isKdCoreWasmReady()) {
       setReport({ verdict: 'ERROR', error: 'verifier engine still loading, try again in a moment' });
       return;
     }
-    setReport(verifyReceiptWasm(text, key));
+    setReport(
+      resolved.kind === 'manual'
+        ? verifyReceiptWasm(text, resolved.publicKey)
+        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson),
+    );
     setActive(0);
-  };
-
-  // A manually-pasted key is honoured as-is, otherwise the /.well-known key whose
-  // kid signed THIS receipt, otherwise the bundled demo test key (so the sample
-  // still verifies offline).
-  const resolveKeyFor = (text: string, keys: TruerollsKey[]): string => {
-    const sigKid = parseSigKid(text);
-    const match = sigKid ? keys.find((k) => k.kid === sigKid) : undefined;
-    return match?.public_key ?? DEMO_TEST_KEY;
   };
 
   const verify = (text: string, edited: boolean = keyEdited) => {
     // A key the user typed wins as-is, otherwise resolve well-known/demo by kid.
     // `edited` is threaded explicitly so loadSample/onFile can force a re-resolve
     // without waiting on the async keyEdited state update.
-    const key = edited ? publicKey : resolveKeyFor(text, wellKnownKeys);
-    setPublicKey(key);
-    runWith(text, key);
+    const resolved = resolveReceiptKey(text, wellKnownKeys, edited ? publicKey : null, {
+      allowDemoFallback: text === SAMPLE_DRAND_RECEIPT,
+    });
+    setPublicKey(resolved.publicKey);
+    runWithResolved(text, resolved);
   };
 
   useEffect(() => {
@@ -337,9 +325,11 @@ export function BehindARoll() {
       }
       if (cancelled) return;
       setWellKnownKeys(keys);
-      const key = resolveKeyFor(SAMPLE_DRAND_RECEIPT, keys);
-      setPublicKey(key);
-      runWith(SAMPLE_DRAND_RECEIPT, key);
+      const resolved = resolveReceiptKey(SAMPLE_DRAND_RECEIPT, keys, null, {
+        allowDemoFallback: true,
+      });
+      setPublicKey(resolved.publicKey);
+      runWithResolved(SAMPLE_DRAND_RECEIPT, resolved);
     })();
     return () => {
       cancelled = true;
@@ -389,8 +379,8 @@ export function BehindARoll() {
   // the B pill, the C pill, and the closing prose so they can never disagree.
   const scopeText = proofScope(parsed, report);
   // Artifact vs key provenance are distinct: the bundled sample is the committed
-  // golden text. The demo test key can also sign an UPLOADED receipt or be the
-  // offline fallback, so the badge must not call those a "bundled sample".
+  // golden text. A manually typed demo key can still verify other receipts, so
+  // the badge must not call those a "bundled sample".
   const isSample = receiptText === SAMPLE_DRAND_RECEIPT;
   const isDemoKey = publicKey === DEMO_TEST_KEY;
   const dieVal = parsed?.die;

@@ -38,7 +38,7 @@ Trust-spine invariants:
 - No fairness overclaim. Drand-backed receipts prove seed provenance and replay, not strict
   anti-withholding fairness.
 - `.env.example` contains placeholders only.
-- Production still rejects the published test signing seed and test kid.
+- Production still rejects the published test signing seeds, test kids, and derived test public keys.
 
 ---
 
@@ -161,10 +161,11 @@ end
 **Verify the note says all of the following.**
 
 - The global mint cap is implemented.
-- Multi-kid rotation is designed, not implemented.
-- Current `kd-receipt` verifies against one caller-supplied public key and does not select by `sig.kid`.
-- Current well-known key endpoint returns a list shape with one active key and no validity-window
-  metadata.
+- Multi-kid rotation is implemented with exactly one active signing key and retired verify-only keys.
+- `kd-receipt` has a status-aware key-set verifier that selects by `sig.kid`, plus a manual
+  single-public-key verifier that bypasses status semantics.
+- The well-known key endpoint returns a list shape with `active`, `retired`, and `revoked` status,
+  but no validity-window metadata.
 - Drand `target_round` is seed provenance, not a receipt signing timestamp.
 - Revocation after signing-key compromise requires issuance/existence evidence for the receipt hash.
 - Correct drand round time is `genesis + (round - 1) * period`.

@@ -13,11 +13,11 @@ pub(crate) struct KeysResponse {
 }
 
 pub async fn get_keys(State(state): State<Arc<AppState>>) -> Result<Json<KeysResponse>, AppError> {
-    match &state.signer {
-        Some(signer) => {
-            let entry = signer.public_key_entry();
-            Ok(Json(KeysResponse { keys: vec![entry] }))
-        }
-        None => Err(not_found("no signing keys configured")),
+    if state.public_keys.is_empty() {
+        Err(not_found("no signing keys configured"))
+    } else {
+        Ok(Json(KeysResponse {
+            keys: state.public_keys.clone(),
+        }))
     }
 }

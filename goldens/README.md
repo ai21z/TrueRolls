@@ -3,7 +3,7 @@
 Reference fixtures for regression-testing the verify pipeline:
 
 - 9 **transcript goldens** in the CLI `kd.local.v2` schema (4 clean, 5 tampered/broken)
-- 2 **receipt goldens** in the signed `truerolls-1` `ReceiptV2` schema (1 valid, 1 tampered)
+- 3 **receipt goldens** in the signed `truerolls-1` `ReceiptV2` schema (2 valid, 1 tampered)
 
 Supersedes the KD-022 v1 pack. The six v1 filenames are kept and their contents
 regenerated in the v2 schema (the v1 files lacked `draw_u64`, so after the
@@ -28,6 +28,7 @@ KD-023 face policy they all failed local verification as `face: unverifiable`).
 | 9 | `golden_09_d6_missing_draw.json` | d6 | 0.6 | 1001 | Missing draw_u64 | `MISMATCH` (`face: unverifiable`), exit 1 | 400 (missing draw_u64) |
 | R1 | `golden_receipt_01_d20.json` | d20 | 0.6 | n/a | Valid signed receipt | `VALID`, exit 0 | 200 via receipt mode when server kid matches test key |
 | R2 | `golden_receipt_02_d20_tampered_face.json` | d20 | 0.6 | n/a | Tampered receipt face | `INVALID`, exit 1 | n/a (offline CLI fixture) |
+| R3 | `golden_receipt_05_d20_test_kid_2.json` | d20 | 0.6 | n/a | Valid signed receipt, second public test key | `VALID`, exit 0 | n/a (offline CLI rotation fixture) |
 
 \* κ was changed from 0.6 to -0.9 after generation; all other fields still
 reflect the honest κ=0.6 computation.
@@ -121,12 +122,13 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/v1/verify -ContentType
 
 ## Receipt goldens
 
-> **⚠ TEST KEY ONLY.** The receipts are signed with the Ed25519 key derived
+> **⚠ TEST KEY ONLY.** Most receipts are signed with the Ed25519 key derived
 > from the seed `0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`
 > (kid `test-kid-1`) - the same PUBLIC seed used by kd-api's `signing.rs`
 > unit tests. It is committed to the repo on purpose so the fixtures are
-> reproducible by anyone. **It must NEVER be used in production**, and a real
-> deployment must reject it.
+> reproducible by anyone. `golden_receipt_05_d20_test_kid_2.json` is signed with
+> the second PUBLIC rotation-test seed (kid `test-kid-2`). Both test keys must
+> NEVER be used in production, and a real deployment must reject them.
 
 Shape: `truerolls-1` `ReceiptV2` - fixed id
 `00000000-0000-0000-0000-00000000d201`, fixed
@@ -142,10 +144,11 @@ Offline verification (test public key, derived from the public test seed):
 ```powershell
 kd verify --receipt goldens/golden_receipt_01_d20.json --public-key "IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY="   # VALID, exit 0
 kd verify --receipt goldens/golden_receipt_02_d20_tampered_face.json --public-key "IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY="   # INVALID, exit 1
+kd verify --receipt goldens/golden_receipt_05_d20_test_kid_2.json --public-key "QycWCxDM++7wJJeyTQHm3h8dNWxhPllY98M8wkVLFrQ="   # VALID, exit 0
 ```
 
-`crates/kd-cli/tests/goldens.rs` derives this public key in code from the test
-seed, so the fixtures and the tests cannot drift apart.
+`crates/kd-cli/tests/goldens.rs` derives these public keys in code from the test
+seeds, so the fixtures and the tests cannot drift apart.
 
 ## Parameters
 

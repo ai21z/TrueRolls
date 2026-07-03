@@ -37,6 +37,11 @@ export function verifyReceiptJson(receipt_json: string, public_key_b64: string):
  */
 export function computeDistributionJson(die: string, kappa: number): string;
 /**
+ * Verify a signed TrueRolls receipt against a published key set JSON object
+ * shaped like `/.well-known/truerolls-keys.json`.
+ */
+export function verifyReceiptJsonWithKeySet(receipt_json: string, key_set_json: string): string;
+/**
  * Returns [`ENGINE_LABEL`].
  */
 export function engineLabel(): string;
@@ -51,6 +56,7 @@ export interface InitOutput {
   readonly faceFromDraw: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
   readonly paramVersion: () => [number, number];
   readonly verifyReceiptJson: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly verifyReceiptJsonWithKeySet: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbindgen_export_0: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

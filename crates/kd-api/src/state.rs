@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::error::{AppError, internal};
 use crate::services::drand::DrandHttpClient;
-use crate::services::signing::ReceiptSigner;
+use crate::services::signing::{KeyStatus, PublicKeyEntry, ReceiptSigner};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -19,6 +19,7 @@ pub struct AppState {
     pub s3_bucket: String,
     pub cfg: Config,
     pub signer: Option<Arc<ReceiptSigner>>,
+    pub public_keys: Vec<PublicKeyEntry>,
     pub drand: DrandHttpClient,
 }
 
@@ -52,20 +53,12 @@ pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
             .build(),
     );
 
-    // Build receipt signer if both env vars are present
-    let signer = match (&cfg.signing_secret, &cfg.signing_kid) {
-        (Some(secret), Some(kid)) => {
-            let s = ReceiptSigner::from_hex_seed(secret, kid.clone()).map_err(internal)?;
-            tracing::info!(kid = %kid, "Ed25519 receipt signer initialized");
-            Some(Arc::new(s))
-        }
-        _ => {
-            tracing::warn!(
-                "KD_SIGNING_ED25519_SECRET / KD_SIGNING_KID not set; receipts will be unsigned"
-            );
-            None
-        }
-    };
+    let (signer, public_keys) = build_signing_material(cfg)?;
+    if let Some(signer) = &signer {
+        tracing::info!(kid = %signer.kid, "Ed25519 receipt signer initialized");
+    } else {
+        tracing::warn!("no active Ed25519 receipt signer configured; receipts will be unsigned");
+    }
     let drand =
         DrandHttpClient::new(cfg.drand_relays.clone(), cfg.drand_timeout_ms).map_err(internal)?;
 
@@ -76,15 +69,59 @@ pub async fn build_state(cfg: &Config) -> Result<Arc<AppState>, AppError> {
         s3_bucket: cfg.s3_bucket.clone(),
         cfg: cfg.clone(),
         signer,
+        public_keys,
         drand,
     }))
+}
+
+fn build_signing_material(
+    cfg: &Config,
+) -> Result<(Option<Arc<ReceiptSigner>>, Vec<PublicKeyEntry>), AppError> {
+    let mut active_signer: Option<Arc<ReceiptSigner>> = None;
+    let mut public_keys = Vec::with_capacity(cfg.signing_keys.len());
+
+    for key in &cfg.signing_keys {
+        let kid = key.kid.trim().to_string();
+        let mut entry = if let Some(secret) = key.secret_hex.as_deref() {
+            let signer = ReceiptSigner::from_hex_seed(secret, kid.clone()).map_err(internal)?;
+            let entry = signer.public_key_entry();
+            if let Some(configured_public_key) = key.public_key.as_deref()
+                && configured_public_key.trim() != entry.public_key
+            {
+                return Err(internal(format!(
+                    "configured public_key for signing kid '{kid}' does not match secret_hex"
+                )));
+            }
+            if key.status == KeyStatus::Active {
+                active_signer = Some(Arc::new(signer));
+            }
+            entry
+        } else {
+            PublicKeyEntry {
+                kid: kid.clone(),
+                alg: "Ed25519".to_string(),
+                public_key: key
+                    .public_key
+                    .as_ref()
+                    .expect("Config::validate requires public_key or secret_hex")
+                    .trim()
+                    .to_string(),
+                status: key.status,
+            }
+        };
+        entry.status = key.status;
+        public_keys.push(entry);
+    }
+
+    Ok((active_signer, public_keys))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{EnvProfile, TrustedProxy};
-    use crate::services::signing::PUBLISHED_TEST_SEED_HEX;
+    use crate::services::signing::KeyStatus;
+    use kd_receipt::PUBLISHED_TEST_SEED_HEX;
 
     /// A Config that violates SIG-2 (prod + published test seed) with EMPTY connection
     /// strings. `build_state` must refuse at `cfg.validate()`, its FIRST line, before any
@@ -106,6 +143,12 @@ mod tests {
             rng_salt: None,
             signing_secret: Some(PUBLISHED_TEST_SEED_HEX.to_string()),
             signing_kid: Some("test-kid-1".to_string()),
+            signing_keys: vec![crate::config::SigningKeyConfig {
+                kid: "test-kid-1".to_string(),
+                status: KeyStatus::Active,
+                secret_hex: Some(PUBLISHED_TEST_SEED_HEX.to_string()),
+                public_key: None,
+            }],
             public_base_url: String::new(),
             env_profile: EnvProfile::Prod,
             roll_rl_period_secs: 1,
@@ -133,8 +176,63 @@ mod tests {
             Err(e) => e.to_string(),
         };
         assert!(
-            msg.contains("published TEST seed"),
+            msg.contains("published TEST"),
             "expected SIG-2 refusal before any I/O (proves the guard is wired into build_state); got: {msg}"
+        );
+    }
+
+    #[test]
+    fn signing_material_publishes_active_and_retired_keys() {
+        let mut cfg = prod_test_seed_cfg();
+        cfg.env_profile = EnvProfile::Dev;
+        cfg.signing_keys = vec![
+            crate::config::SigningKeyConfig {
+                kid: "dev-active-1".to_string(),
+                status: KeyStatus::Active,
+                secret_hex: Some(
+                    "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string(),
+                ),
+                public_key: None,
+            },
+            crate::config::SigningKeyConfig {
+                kid: "dev-retired-1".to_string(),
+                status: KeyStatus::Retired,
+                secret_hex: None,
+                public_key: Some("IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=".to_string()),
+            },
+        ];
+
+        let (signer, keys) = build_signing_material(&cfg).expect("build signing material");
+
+        assert_eq!(
+            signer.as_ref().map(|s| s.kid.as_str()),
+            Some("dev-active-1")
+        );
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0].status, KeyStatus::Active);
+        assert_eq!(keys[1].status, KeyStatus::Retired);
+    }
+
+    #[test]
+    fn signing_material_rejects_secret_public_key_mismatch() {
+        let mut cfg = prod_test_seed_cfg();
+        cfg.env_profile = EnvProfile::Dev;
+        cfg.signing_keys = vec![crate::config::SigningKeyConfig {
+            kid: "dev-active-1".to_string(),
+            status: KeyStatus::Active,
+            secret_hex: Some(
+                "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string(),
+            ),
+            public_key: Some("IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=".to_string()),
+        }];
+
+        let err = match build_signing_material(&cfg) {
+            Ok(_) => panic!("mismatched public_key must be rejected"),
+            Err(err) => err.to_string(),
+        };
+        assert!(
+            err.contains("does not match"),
+            "expected mismatch refusal, got: {err}"
         );
     }
 }

@@ -73,7 +73,7 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
   },
   sig: {
     eyebrow: 'sig',
-    body: 'The Ed25519 signature. Proves the published key signed this exact receipt.',
+    body: 'The Ed25519 signature. Proves the issuer key set names the key that signed this exact receipt.',
   },
   seed: {
     eyebrow: 'seed honesty',

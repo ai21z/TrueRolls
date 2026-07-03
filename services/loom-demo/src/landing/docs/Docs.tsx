@@ -209,7 +209,7 @@ export function Docs() {
                   <code className={css.code}>d100 ≤ 0.025</code>) and an expected-value
                   cap (
                   <code className={css.code}>
-                    |EV − EV_uniform| ≤ 0.20·SD_uniform
+                    |EV - EV_uniform| ≤ 0.20·SD_uniform
                   </code>
                   ). The engine mixes <code className={css.code}>p̃</code> back toward
                   uniform by the smallest amount <code className={css.code}>α</code>{' '}
@@ -298,7 +298,7 @@ export function Docs() {
                 <span className={css.pip} aria-hidden="true">✓</span>
                 <span className={css.checkText}>
                   <b>Signature (Ed25519)</b>, the body is genuinely signed by the
-                  published key.
+                  key named in the issuer key set.
                 </span>
               </li>
               <li className={css.checkItem}>
@@ -358,14 +358,15 @@ export function Docs() {
             </CodeBlock>
 
             <p className={css.p}>
-              The signing key is published at{' '}
+              The issuer key set is published at{' '}
               <code className={css.code}>/.well-known/truerolls-keys.json</code>.
             </p>
 
-            <CodeBlock label="public key" right="/.well-known/truerolls-keys.json">
+            <CodeBlock label="key set" right="/.well-known/truerolls-keys.json">
 {`{
   "keys": [
-    { "kid": "...", "alg": "Ed25519", "public_key": "<base64>" }
+    { "kid": "...", "alg": "Ed25519", "public_key": "<base64>", "status": "active" },
+    { "kid": "...", "alg": "Ed25519", "public_key": "<base64>", "status": "retired" }
   ]
 }`}
             </CodeBlock>
@@ -456,7 +457,7 @@ export function Docs() {
               </li>
               <li className={css.wayItem}>
                 <code className={css.code}>GET /.well-known/truerolls-keys.json</code>{' '}
-                publishes the key.
+                publishes the status-aware key set.
               </li>
             </ul>
             <p className={css.note}>

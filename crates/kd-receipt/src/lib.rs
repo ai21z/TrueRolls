@@ -42,8 +42,9 @@ use std::fmt;
 
 mod sign;
 pub use sign::{
-    PUBLISHED_TEST_SEED_HEX, PublicKeyEntry, ReceiptSignature, ReceiptSigner, TEST_KIDS,
-    reject_test_signer_in_prod,
+    KeyStatus, PUBLISHED_TEST_PUBLIC_KEY_2_B64, PUBLISHED_TEST_PUBLIC_KEY_B64,
+    PUBLISHED_TEST_SEED_2_HEX, PUBLISHED_TEST_SEED_HEX, PublicKeyEntry, ReceiptSignature,
+    ReceiptSigner, TEST_KIDS, reject_test_public_key_in_prod, reject_test_signer_in_prod,
 };
 
 /// Legacy receipt schema version.
@@ -261,6 +262,17 @@ pub fn verify_receipt_str(
     verify_receipt(&value, public_key_b64)
 }
 
+/// Parse `receipt_json` and verify it against a published key set. The verifier
+/// selects the key by `sig.kid` and applies key status semantics internally.
+pub fn verify_receipt_str_with_key_set(
+    receipt_json: &str,
+    key_set: &[PublicKeyEntry],
+) -> Result<VerifyReport, VerifyError> {
+    let value: Value =
+        serde_json::from_str(receipt_json).map_err(|e| VerifyError::ParseReceipt(e.to_string()))?;
+    verify_receipt_with_key_set(&value, key_set)
+}
+
 /// Verify a signed ReceiptV2 (`receipt_value`) against `public_key_b64`.
 ///
 /// Returns a [`VerifyReport`] for any *structurally valid* receipt (even if the
@@ -270,6 +282,58 @@ pub fn verify_receipt_str(
 pub fn verify_receipt(
     receipt_value: &Value,
     public_key_b64: &str,
+) -> Result<VerifyReport, VerifyError> {
+    verify_receipt_inner(receipt_value, VerificationKeys::Direct(public_key_b64))
+}
+
+/// Verify a signed ReceiptV2 against a key set. The receipt's `sig.kid` chooses
+/// the key. Active and retired keys may verify old receipts. Revoked keys always
+/// produce an INVALID report with an explicit revoked-key reason.
+pub fn verify_receipt_with_key_set(
+    receipt_value: &Value,
+    key_set: &[PublicKeyEntry],
+) -> Result<VerifyReport, VerifyError> {
+    verify_receipt_inner(receipt_value, VerificationKeys::KeySet(key_set))
+}
+
+enum VerificationKeys<'a> {
+    Direct(&'a str),
+    KeySet(&'a [PublicKeyEntry]),
+}
+
+impl<'a> VerificationKeys<'a> {
+    fn public_key_for_sig(&self, sig: &ReceiptSig, errors: &mut Vec<String>) -> Option<&'a str> {
+        match self {
+            VerificationKeys::Direct(public_key_b64) => Some(public_key_b64),
+            VerificationKeys::KeySet(keys) => {
+                let mut matches = keys.iter().filter(|key| key.kid == sig.kid);
+                let Some(key) = matches.next() else {
+                    errors.push(format!("unknown signing kid '{}'", sig.kid));
+                    return None;
+                };
+                if matches.next().is_some() {
+                    errors.push(format!("duplicate signing kid '{}' in key set", sig.kid));
+                    return None;
+                }
+                if key.alg != "Ed25519" {
+                    errors.push(format!("key '{}' alg '{}' != 'Ed25519'", key.kid, key.alg));
+                    return None;
+                }
+                match key.status {
+                    KeyStatus::Active | KeyStatus::Retired => Some(key.public_key.as_str()),
+                    KeyStatus::Revoked => {
+                        errors.push(format!("signing key '{}' is revoked", sig.kid));
+                        None
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn verify_receipt_inner(
+    receipt_value: &Value,
+    verification_keys: VerificationKeys<'_>,
 ) -> Result<VerifyReport, VerifyError> {
     let receipt: ReceiptV2 = serde_json::from_value(receipt_value.clone())
         .map_err(|e| VerifyError::ParseReceipt(e.to_string()))?;
@@ -320,7 +384,10 @@ pub fn verify_receipt(
                     errors.push(format!("receipt_hash error: {e}"));
                 }
             }
-            if metadata_ok {
+            if metadata_ok
+                && let Some(public_key_b64) =
+                    verification_keys.public_key_for_sig(sig_block, &mut errors)
+            {
                 match verify_ed25519_sig(receipt_value, &sig_block.signature_b64, public_key_b64) {
                     Ok(true) => valid_signature = true,
                     Ok(false) => errors.push("Ed25519 signature verification FAILED".to_string()),
@@ -999,6 +1066,78 @@ mod tests {
         obj.insert("receipt_hash".into(), json!(receipt_hash));
         obj.insert("sig".into(), serde_json::to_value(&sig).unwrap());
         receipt
+    }
+
+    fn resign_receipt_with(mut receipt: Value, signer: &ReceiptSigner) -> Value {
+        let obj = receipt.as_object_mut().expect("receipt object");
+        obj.remove("receipt_hash");
+        obj.remove("sig");
+        let (sig, receipt_hash) = signer.sign_receipt(&receipt).unwrap();
+        let obj = receipt.as_object_mut().expect("receipt object");
+        obj.insert("receipt_hash".into(), json!(receipt_hash));
+        obj.insert("sig".into(), serde_json::to_value(&sig).unwrap());
+        receipt
+    }
+
+    #[test]
+    fn key_set_verifier_accepts_retired_kid() {
+        let signer =
+            ReceiptSigner::from_hex_seed(PUBLISHED_TEST_SEED_2_HEX, "test-kid-2".to_string())
+                .unwrap();
+        let receipt = resign_receipt_with(signed_drand_receipt(), &signer);
+        let mut key = signer.public_key_entry();
+        key.status = KeyStatus::Retired;
+
+        let report =
+            verify_receipt_with_key_set(&receipt, &[key]).expect("retired receipt is verifiable");
+
+        assert!(report.is_valid(), "{:?}", report.errors);
+        assert!(report.valid_signature, "{:?}", report.errors);
+    }
+
+    #[test]
+    fn key_set_verifier_rejects_revoked_kid_with_reason() {
+        let signer =
+            ReceiptSigner::from_hex_seed(PUBLISHED_TEST_SEED_2_HEX, "test-kid-2".to_string())
+                .unwrap();
+        let receipt = resign_receipt_with(signed_drand_receipt(), &signer);
+        let mut key = signer.public_key_entry();
+        key.status = KeyStatus::Revoked;
+
+        let report =
+            verify_receipt_with_key_set(&receipt, &[key]).expect("revoked receipt is structural");
+
+        assert!(!report.is_valid());
+        assert!(!report.valid_signature);
+        assert!(
+            report.errors.iter().any(|e| e.contains("revoked")),
+            "expected explicit revoked-key reason, got {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn key_set_verifier_rejects_unknown_kid_without_fallback() {
+        let receipt = signed_drand_receipt();
+        let signer =
+            ReceiptSigner::from_hex_seed(PUBLISHED_TEST_SEED_2_HEX, "test-kid-2".to_string())
+                .unwrap();
+        let mut key = signer.public_key_entry();
+        key.status = KeyStatus::Active;
+
+        let report = verify_receipt_with_key_set(&receipt, &[key])
+            .expect("unknown kid receipt is structural");
+
+        assert!(!report.is_valid());
+        assert!(!report.valid_signature);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("unknown signing kid")),
+            "expected explicit unknown-kid reason, got {:?}",
+            report.errors
+        );
     }
 
     #[test]

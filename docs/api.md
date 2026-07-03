@@ -262,14 +262,14 @@ Verify a receipt or a legacy transcript body. The handler **auto-detects** the f
 The raw body is passed to the shared offline verifier (the same code path used by the CLI and the WASM verifier, so the signer and verifier cannot drift). The verifier:
 
 1. for `truerolls-drand-1`, verifies the pinned quicknet drand proof and re-derives the receipt seed,
-2. checks the Ed25519 signature over the JCS/RFC8785-canonicalized body (sig + receipt_hash excluded), using the server's **own published key**,
+2. checks the Ed25519 signature over the JCS/RFC8785-canonicalized body (sig + receipt_hash excluded), using the server's **own published key set**,
 3. replays ChaCha20 from `proof.rng.drbg_key_hex` (one `next_u64`) and confirms it reproduces `proof.draw_u64`,
 4. recomputes the guarded distribution and face from `(die, kappa)` and checks the face,
 5. checks recomputed `alpha`, `kl`, `ev` against the receipt within a fixed tolerance (`1e-9`).
 
 **Failed checks still return `200`**, the outcome is reported via boolean flags and `errors`, not via HTTP status. `400` is reserved for input the verifier cannot process at all (see below).
 
-The signature is verified against the server's currently published key. A receipt signed by any other key fails the signature check softly: `valid_signature: false`, verdict reported in flags, still **200**. If the server has no signing key configured, the signature check fails softly (recorded in `errors`) while sampling/face/metrics still run.
+The signature is verified against the server's currently published key set. A receipt signed by an unknown, revoked, or mismatched key fails the signature check softly: `valid_signature: false`, verdict reported in flags, still **200**. If the server has no signing key configured, the signature check fails softly (recorded in `errors`) while sampling/face/metrics still run.
 
 **Response, `200`, `ReceiptVerifyResponse`**
 
@@ -359,14 +359,15 @@ This checks the server's **own** stored transcript against the server's **own** 
 
 ## GET /.well-known/truerolls-keys.json
 
-Publishes the server's Ed25519 verifying key(s) so receipts can be verified offline.
+Publishes the server's Ed25519 verifying key set so receipts can be verified by `sig.kid`.
 
 **Response, `200`, `KeysResponse`**
 
 ```json
 {
   "keys": [
-    { "kid": "kd-dev-1", "alg": "Ed25519", "public_key": "<base64 32-byte key>" }
+    { "kid": "kd-dev-1", "alg": "Ed25519", "public_key": "<base64 32-byte key>", "status": "active" },
+    { "kid": "kd-old-1", "alg": "Ed25519", "public_key": "<base64 32-byte key>", "status": "retired" }
   ]
 }
 ```
@@ -376,10 +377,11 @@ Publishes the server's Ed25519 verifying key(s) so receipts can be verified offl
 | `keys[].kid` | string | Key id; matches a receipt's `sig.kid`. Configured per deployment. |
 | `keys[].alg` | string | `"Ed25519"`. |
 | `keys[].public_key` | string | Base64 of the 32-byte verifying key. |
+| `keys[].status` | string | `"active"`, `"retired"`, or `"revoked"`. Active signs new receipts. Retired verifies historical receipts. Revoked makes every receipt under that `kid` invalid. |
 
 - **`404`**, no signing key configured. In that mode receipts are emitted unsigned (without `sig`/`receipt_hash`). Plain text.
 
-To verify a receipt offline: take its `sig.kid`, look up the matching `public_key` here, and check `sig.signature_b64` over the JCS/RFC8785 canonicalization of the receipt body with `sig` and `receipt_hash` removed.
+To verify a receipt with status semantics: pass the whole key set to the shared verifier. It selects by `sig.kid`, verifies active and retired keys, and rejects revoked or unknown kids. Supplying a single public key manually is an override for manual audits and does not carry key-status semantics.
 
 ---
 

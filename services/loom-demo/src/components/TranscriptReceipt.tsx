@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow } from '../types/kd';
 import { KL_CAPS, FACES } from '../constants/caps';
-import { getTruerollsKeys, postVerifyReceipt } from '../api/client';
+import { getApiBaseForCli, getTruerollsKeys, postVerifyReceipt } from '../api/client';
 import {
   buildReceiptBody,
   hasDrandProof as receiptHasDrandProof,
@@ -277,6 +277,9 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
       }, null, 2);
 
   const keyForSnippet = publicKey ?? PUBKEY_PLACEHOLDER;
+  const cliVerifyOptions = isSignedLive
+    ? { kind: 'server' as const, server: getApiBaseForCli() }
+    : { kind: 'public-key' as const, publicKey: keyForSnippet };
   const tamperRows = tamperResult ? receiptCheckRows(tamperResult, activeReceiptBody) : null;
 
   return (
@@ -395,7 +398,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
             className={css.actionBtn}
             onClick={() => {
               const cmd = isReceiptVersion
-                ? offlineVerifyCommand(receiptJson, keyForSnippet)
+                ? offlineVerifyCommand(receiptJson, cliVerifyOptions)
                 : 'kd verify --input receipt.json';
               copyToClipboard(cmd, 'cli');
             }}
@@ -487,7 +490,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
               <button
                 className={css.actionBtn}
                 onClick={() =>
-                  copyToClipboard(offlineVerifyCommand(tamperJson, keyForSnippet), 'tamper-cli')
+                  copyToClipboard(offlineVerifyCommand(tamperJson, cliVerifyOptions), 'tamper-cli')
                 }
               >
                 {copiedField === 'tamper-cli' ? 'Copied' : 'Copy offline command'}

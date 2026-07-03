@@ -42,6 +42,9 @@ use std::path::{Path, PathBuf};
 const TEST_SIGNING_SEED_HEX: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const TEST_KID: &str = "test-kid-1";
+const TEST_SIGNING_SEED_2_HEX: &str =
+    "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
+const TEST_KID_2: &str = "test-kid-2";
 
 /// Fixed receipt id for golden_receipt_01/02 (valid UUID, recognizable).
 const RECEIPT_ID: &str = "00000000-0000-0000-0000-00000000d201";
@@ -307,6 +310,30 @@ fn build_receipt_drand(bad_target_sig: bool) -> Value {
     receipt
 }
 
+fn resign_receipt_with_test_key_2(receipt: &Value) -> Value {
+    let mut body = receipt.clone();
+    let obj = body.as_object_mut().expect("receipt object");
+    obj.remove("receipt_hash");
+    obj.remove("sig");
+    obj.insert(
+        "id".to_string(),
+        json!("00000000-0000-0000-0000-00000000d205"),
+    );
+
+    let signer = ReceiptSigner::from_hex_seed(TEST_SIGNING_SEED_2_HEX, TEST_KID_2.to_string())
+        .expect("test signer 2 build failed");
+    let (sig, receipt_hash) = signer
+        .sign_receipt(&body)
+        .expect("test-kid-2 receipt signing failed");
+    let obj = body.as_object_mut().unwrap();
+    obj.insert("receipt_hash".into(), json!(receipt_hash));
+    obj.insert(
+        "sig".into(),
+        serde_json::to_value(&sig).expect("sig serialization failed"),
+    );
+    body
+}
+
 #[test]
 #[ignore = "regenerates goldens - run explicitly: cargo test -p kd-cli --test gen_goldens -- --ignored"]
 fn regenerate_goldens() {
@@ -384,6 +411,9 @@ fn regenerate_goldens() {
     // ---- receipt goldens ---------------------------------------------------
     let receipt_01 = build_receipt_01();
     write_golden("golden_receipt_01_d20.json", &receipt_01);
+
+    let receipt_05 = resign_receipt_with_test_key_2(&receipt_01);
+    write_golden("golden_receipt_05_d20_test_kid_2.json", &receipt_05);
 
     // 02, tampered receipt face: bump the face (1-based mod 20) but keep the
     // ORIGINAL signature, so both the Ed25519 check and the face recompute

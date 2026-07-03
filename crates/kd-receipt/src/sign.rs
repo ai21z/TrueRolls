@@ -20,8 +20,28 @@ use serde::{Deserialize, Serialize};
 pub const PUBLISHED_TEST_SEED_HEX: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+/// Second PUBLIC test signing seed for rotation tests. Published and safe to
+/// embed, but NEVER valid in production.
+pub const PUBLISHED_TEST_SEED_2_HEX: &str =
+    "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
+
+/// Public verifying key derived from [`PUBLISHED_TEST_SEED_HEX`]. Published for
+/// bundled samples and goldens only. Production must refuse it even under a
+/// renamed kid or a retired/revoked status.
+pub const PUBLISHED_TEST_PUBLIC_KEY_B64: &str = "IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=";
+
+/// Public verifying key derived from [`PUBLISHED_TEST_SEED_2_HEX`].
+pub const PUBLISHED_TEST_PUBLIC_KEY_2_B64: &str = "QycWCxDM++7wJJeyTQHm3h8dNWxhPllY98M8wkVLFrQ=";
+
 /// Key-ids known to belong to published TEST keys, refused in production.
-pub const TEST_KIDS: &[&str] = &["test-kid-1"];
+pub const TEST_KIDS: &[&str] = &["test-kid-1", "test-kid-2"];
+
+/// Public verifying keys known to belong to published TEST keys, refused in
+/// production whether active, retired, or revoked.
+pub const TEST_PUBLIC_KEYS_B64: &[&str] = &[
+    PUBLISHED_TEST_PUBLIC_KEY_B64,
+    PUBLISHED_TEST_PUBLIC_KEY_2_B64,
+];
 
 /// SIG-2 guard. Call ONLY under the production profile. Returns `Err` (which
 /// aborts boot) when the configured signer is the published TEST seed, a
@@ -31,17 +51,18 @@ pub fn reject_test_signer_in_prod(
     secret_hex: Option<&str>,
     kid: Option<&str>,
 ) -> Result<(), String> {
-    let known_bad =
-        hex::decode(PUBLISHED_TEST_SEED_HEX).expect("PUBLISHED_TEST_SEED_HEX is valid hex");
     match (secret_hex, kid) {
         (Some(secret), Some(kid)) => {
             // Compare DECODED bytes so hex case / surrounding whitespace cannot bypass.
-            if hex::decode(secret.trim())
-                .map(|b| b == known_bad)
-                .unwrap_or(false)
-            {
+            let decoded_secret = hex::decode(secret.trim()).ok();
+            let is_test_seed = decoded_secret.as_ref().is_some_and(|secret_bytes| {
+                [PUBLISHED_TEST_SEED_HEX, PUBLISHED_TEST_SEED_2_HEX]
+                    .iter()
+                    .any(|test_hex| hex::decode(test_hex).is_ok_and(|b| b == *secret_bytes))
+            });
+            if is_test_seed {
                 return Err(
-                    "refusing to start: the configured signing seed is the published TEST seed; \
+                    "refusing to start: the configured signing seed is a published TEST seed; \
                      set a real KD_SIGNING_ED25519_SECRET for KD_ENV=prod"
                         .to_string(),
                 );
@@ -59,6 +80,36 @@ pub fn reject_test_signer_in_prod(
                 .to_string(),
         ),
     }
+}
+
+/// SIG-2 guard for public key material. Call ONLY under the production profile
+/// after normal base64/length validation. Returns `Err` when a configured
+/// well-known verifier key is one of the published TEST keys, even if the kid is
+/// renamed or the entry is retired/revoked.
+pub fn reject_test_public_key_in_prod(
+    public_key_b64: &str,
+    kid: Option<&str>,
+) -> Result<(), String> {
+    let decoded_public_key = base64::engine::general_purpose::STANDARD
+        .decode(public_key_b64.trim())
+        .ok();
+    let is_test_public_key = decoded_public_key.as_ref().is_some_and(|public_key_bytes| {
+        TEST_PUBLIC_KEYS_B64.iter().any(|test_b64| {
+            base64::engine::general_purpose::STANDARD
+                .decode(test_b64)
+                .is_ok_and(|test_bytes| test_bytes == *public_key_bytes)
+        })
+    });
+
+    if is_test_public_key {
+        let kid = kid.unwrap_or("<unknown>").trim();
+        return Err(format!(
+            "refusing to start: signing kid '{kid}' uses a published TEST public key; \
+             use a real production key"
+        ));
+    }
+
+    Ok(())
 }
 
 /// Holds the signing key, verifying key, and key-id. Built once at startup from
@@ -80,11 +131,23 @@ pub struct ReceiptSignature {
 }
 
 /// One entry returned by /.well-known/truerolls-keys.json
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyStatus {
+    #[default]
+    Active,
+    Retired,
+    Revoked,
+}
+
+/// One entry returned by /.well-known/truerolls-keys.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicKeyEntry {
     pub kid: String,
     pub alg: String,
     pub public_key: String, // base64-encoded 32-byte Ed25519 verifying key
+    #[serde(default)]
+    pub status: KeyStatus,
 }
 
 impl ReceiptSigner {
@@ -145,6 +208,7 @@ impl ReceiptSigner {
             kid: self.kid.clone(),
             alg: "Ed25519".to_string(),
             public_key: pk_b64,
+            status: KeyStatus::Active,
         }
     }
 }
@@ -276,6 +340,32 @@ mod tests {
     }
 
     #[test]
+    fn sig2_prod_rejects_published_test_public_key() {
+        let r =
+            reject_test_public_key_in_prod(PUBLISHED_TEST_PUBLIC_KEY_B64, Some("truerolls-prod-1"));
+        assert!(
+            r.is_err(),
+            "a published test public key must be refused even with a fresh kid"
+        );
+        assert!(
+            !r.unwrap_err().contains(PUBLISHED_TEST_PUBLIC_KEY_B64),
+            "error message must not contain the public key"
+        );
+    }
+
+    #[test]
+    fn sig2_prod_rejects_second_published_test_public_key() {
+        assert!(
+            reject_test_public_key_in_prod(
+                PUBLISHED_TEST_PUBLIC_KEY_2_B64,
+                Some("truerolls-prod-2"),
+            )
+            .is_err(),
+            "the second published test public key must also be refused"
+        );
+    }
+
+    #[test]
     fn sig2_prod_rejects_missing_signer() {
         assert!(
             reject_test_signer_in_prod(None, None).is_err(),
@@ -298,6 +388,11 @@ mod tests {
         assert!(
             reject_test_signer_in_prod(Some(&upper_ws), Some("truerolls-prod-1")).is_err(),
             "case/whitespace must not bypass the seed blocklist"
+        );
+        let public_ws = format!("  {PUBLISHED_TEST_PUBLIC_KEY_B64}  ");
+        assert!(
+            reject_test_public_key_in_prod(&public_ws, Some("truerolls-prod-1")).is_err(),
+            "whitespace must not bypass the public-key blocklist"
         );
         // Mixed-case, padded test kid still blocked.
         assert!(

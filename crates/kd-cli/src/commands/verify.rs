@@ -6,7 +6,7 @@ use kd_core::{
     math::{dkl_to_uniform, ev as compute_ev},
     params::{Params, default_for_die},
 };
-use kd_receipt::verify_receipt;
+use kd_receipt::{PublicKeyEntry, verify_receipt, verify_receipt_with_key_set};
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
 use serde_json::json;
@@ -46,8 +46,8 @@ pub struct VerifyArgs {
     #[arg(long)]
     receipt: Option<PathBuf>,
 
-    /// Ed25519 public key (base64) for offline receipt verification.
-    /// If omitted, fetches from server's /.well-known/truerolls-keys.json
+    /// Ed25519 public key (base64) for manual receipt verification.
+    /// If omitted, fetches the status-aware key set from server's /.well-known/truerolls-keys.json.
     #[arg(long)]
     public_key: Option<String>,
 
@@ -819,30 +819,28 @@ fn verify_receipt_offline(args: &VerifyArgs, path: &PathBuf) -> Result<()> {
     let receipt_value: serde_json::Value =
         serde_json::from_str(&content).context("invalid JSON in receipt file")?;
 
-    // The public key is only needed for a signed receipt. Use --public-key if
-    // given, else fetch from the server's well-known endpoint keyed by the
-    // receipt's own kid.
-    let public_key_b64 = match &args.public_key {
-        Some(pk) => pk.clone(),
+    // Single shared verifier, the exact same engine the browser runs through
+    // kd-core-wasm. Hard (unverifiable) failures map back to a CLI error/exit 1.
+    let report = match &args.public_key {
+        Some(public_key_b64) => {
+            verify_receipt(&receipt_value, public_key_b64).map_err(|e| anyhow::anyhow!("{e}"))?
+        }
         None => {
-            let kid = receipt_value
+            if receipt_value
                 .get("sig")
                 .and_then(|s| s.get("kid"))
-                .and_then(|k| k.as_str());
-            match kid {
-                Some(kid) => {
-                    eprintln!("Fetching public key from {}", args.server);
-                    fetch_public_key(&args.server, kid)?
-                }
-                None => String::new(), // unsigned receipt, key unused
+                .is_some()
+            {
+                eprintln!("Fetching public key set from {}", args.server);
+                let key_set = fetch_public_keys(&args.server)?;
+                verify_receipt_with_key_set(&receipt_value, &key_set)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
+            } else {
+                verify_receipt_with_key_set(&receipt_value, &[])
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
             }
         }
     };
-
-    // Single shared verifier, the exact same engine the browser runs through
-    // kd-core-wasm. Hard (unverifiable) failures map back to a CLI error/exit 1.
-    let report =
-        verify_receipt(&receipt_value, &public_key_b64).map_err(|e| anyhow::anyhow!("{e}"))?;
     let all_ok = report.is_valid();
 
     if args.json {
@@ -873,8 +871,8 @@ fn verify_receipt_offline(args: &VerifyArgs, path: &PathBuf) -> Result<()> {
     }
 }
 
-/// Fetch the Ed25519 public key (base64) for a given kid from the server.
-fn fetch_public_key(server: &str, kid: &str) -> Result<String> {
+/// Fetch the issuer key set from the server.
+fn fetch_public_keys(server: &str) -> Result<Vec<PublicKeyEntry>> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
@@ -888,23 +886,13 @@ fn fetch_public_key(server: &str, kid: &str) -> Result<String> {
         bail!("server returned {} for public key request", resp.status());
     }
 
-    let body: serde_json::Value = resp.json()?;
-    let keys = body
-        .get("keys")
-        .and_then(|k| k.as_array())
-        .context("no 'keys' array in response")?;
-
-    for key in keys {
-        if key.get("kid").and_then(|k| k.as_str()) == Some(kid) {
-            let pk = key
-                .get("public_key")
-                .and_then(|k| k.as_str())
-                .context("key entry missing 'public_key'")?;
-            return Ok(pk.to_string());
-        }
+    #[derive(serde::Deserialize)]
+    struct KeysResponse {
+        keys: Vec<PublicKeyEntry>,
     }
 
-    bail!("no key found with kid='{kid}'")
+    let body: KeysResponse = resp.json().context("invalid key-set response")?;
+    Ok(body.keys)
 }
 
 // ---------------------------------------------------------------------------

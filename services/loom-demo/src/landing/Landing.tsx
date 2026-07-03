@@ -332,7 +332,7 @@ export function Landing({ state }: Props) {
                 <div className={css.trustItem}>
                   <span className={css.trustDot} />
                   <span className={css.trustText}>
-                    <b>Published key.</b> The Ed25519 public key lives at{' '}
+                    <b>Published key set.</b> The Ed25519 key set lives at{' '}
                     <code>/.well-known/truerolls-keys.json</code>.
                   </span>
                 </div>

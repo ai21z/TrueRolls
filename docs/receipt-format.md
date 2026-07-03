@@ -1,6 +1,6 @@
 # Receipt format
 
-A TrueRolls receipt is a self-contained JSON document returned for every live roll. It carries the outcome, bounded-math metrics, seed replay material, drand proof material, and an Ed25519 signature over a canonical encoding of all of that. Given a receipt and the issuer's public key, anyone can recompute the outcome offline.
+A TrueRolls receipt is a self-contained JSON document returned for every live roll. It carries the outcome, bounded-math metrics, seed replay material, drand proof material, and an Ed25519 signature over a canonical encoding of all of that. Given a receipt and the issuer's key set or a direct public key, anyone can recompute the outcome offline.
 
 This page documents the current live version, `truerolls-drand-1`, and the legacy saved-receipt version, `truerolls-1`.
 
@@ -136,10 +136,10 @@ GET /.well-known/truerolls-keys.json
 Shape:
 
 ```json
-{ "keys": [ { "kid": "…", "alg": "Ed25519", "public_key": "<base64 32-byte key>" } ] }
+{ "keys": [ { "kid": "issuer-key-1", "alg": "Ed25519", "public_key": "<base64 32-byte key>", "status": "active" } ] }
 ```
 
-Select the key whose `kid` matches `sig.kid`. Offline verifiers may instead be handed the public key directly.
+The shared verifier selects the key whose `kid` matches `sig.kid`. `active` and `retired` keys can verify receipts. `revoked` keys make every receipt under that `kid` invalid. Offline verifiers may instead be handed one public key directly, but that bypasses key-status semantics.
 
 ## Verification order
 

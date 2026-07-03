@@ -19,6 +19,7 @@ import init, {
   computeRollReplayJson,
   engineLabel,
   verifyReceiptJson,
+  verifyReceiptJsonWithKeySet,
 } from 'kd-core-wasm';
 import kdCoreWasmUrl from 'kd-core-wasm/kd_core_wasm_bg.wasm?url';
 import type { Die } from '../types/kd';
@@ -158,4 +159,12 @@ export interface WasmVerifyReport {
 export function verifyReceiptWasm(receiptJson: string, publicKeyB64: string): WasmVerifyReport {
   assertKdCoreWasmReady();
   return JSON.parse(verifyReceiptJson(receiptJson, publicKeyB64)) as WasmVerifyReport;
+}
+
+export function verifyReceiptWasmWithKeySet(
+  receiptJson: string,
+  keySetJson: string,
+): WasmVerifyReport {
+  assertKdCoreWasmReady();
+  return JSON.parse(verifyReceiptJsonWithKeySet(receiptJson, keySetJson)) as WasmVerifyReport;
 }

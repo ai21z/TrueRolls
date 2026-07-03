@@ -70,17 +70,32 @@ export function tamperedView(
   };
 }
 
+export type OfflineVerifyCommandOptions =
+  | { kind: 'server'; server: string }
+  | { kind: 'public-key'; publicKey: string };
+
+function psArg(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 /**
- * PowerShell-friendly offline verification snippet: save the receipt JSON to
- * receipt.json via a here-string, then run the shared CLI verifier. Shared by
- * the receipt card and the in-browser verify page so the printed command never
- * drifts between them.
+ * PowerShell-friendly CLI verification snippet: save the receipt JSON to
+ * receipt.json via a here-string, then run the shared verifier. Issuer-backed
+ * receipts should use `--server` so kd-cli fetches the key set and applies
+ * active/retired/revoked status. Manual/demo receipts use `--public-key`.
  */
-export function offlineVerifyCommand(receiptJson: string, publicKey: string): string {
+export function offlineVerifyCommand(
+  receiptJson: string,
+  options: OfflineVerifyCommandOptions,
+): string {
+  const verifyArgs =
+    options.kind === 'server'
+      ? `--server ${psArg(options.server)}`
+      : `--public-key ${psArg(options.publicKey)}`;
   return [
     "@'",
     receiptJson,
     "'@ | Set-Content -Path receipt.json",
-    `kd verify --receipt receipt.json --public-key ${publicKey}`,
+    `kd verify --receipt receipt.json ${verifyArgs}`,
   ].join('\n');
 }

@@ -7,7 +7,7 @@
 //! existing kd-api call sites (`crate::services::signing::*`) and the SIG-2 boot
 //! guard keep working unchanged.
 
-pub use kd_receipt::{PublicKeyEntry, ReceiptSignature, ReceiptSigner, reject_test_signer_in_prod};
-
-#[cfg(test)]
-pub use kd_receipt::PUBLISHED_TEST_SEED_HEX;
+pub use kd_receipt::{
+    KeyStatus, PublicKeyEntry, ReceiptSignature, ReceiptSigner, TEST_KIDS,
+    reject_test_public_key_in_prod, reject_test_signer_in_prod,
+};

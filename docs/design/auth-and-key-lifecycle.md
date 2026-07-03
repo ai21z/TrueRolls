@@ -2,9 +2,10 @@
 
 > **Provenance.** Design note, 2026-06-28. Addresses operational-security findings against the
 > public-deploy posture of `kd-api`: OPS-AUTH-01 (the unauthenticated signing endpoint had no global
-> volume/cost ceiling) and OPS-KEY-01/02 (no signing-key rotation or revocation substrate). Part 1's
-> global mint cap is implemented on `freature/drand-per-roll`. Everything else is design, not
-> implemented, unless explicitly marked otherwise.
+> volume/cost ceiling) and OPS-KEY-01/02 (no signing-key rotation or revocation substrate). The L2
+> global mint cap is implemented. Phase 3 implements multi-kid key publication, status-aware
+> verification, retired-key rotation, and blunt revoked-kid invalidation. Time-scoped revocation
+> remains a v-next design because it needs independent issuance evidence.
 
 Companion notes:
 
@@ -105,18 +106,42 @@ out.
 
 ## Part 2, OPS-KEY-01/02: rotation and revocation
 
-Status: designed, not implemented.
+Status: partly implemented.
 
-### Current verifier and key-discovery reality
+### Implemented verifier and key-discovery reality
 
-The current implementation is simpler than the future design:
+TrueRolls now has two verification modes:
 
-- `kd-receipt::verify_receipt(value, public_key_b64)` accepts one caller-supplied Ed25519 public key.
-- `sig.kid` exists in the receipt signature block, but the verifier does not select a key by `kid`.
-- `/.well-known/truerolls-keys.json` is shaped as a list, but currently returns one active key.
-- `PublicKeyEntry` contains `kid`, `alg`, and `public_key`. It has no validity-window metadata.
+- `kd-receipt::verify_receipt(value, public_key_b64)` verifies against one caller-supplied Ed25519
+  public key. This is a manual audit override and carries no key-status semantics.
+- `kd-receipt::verify_receipt_with_key_set(value, keys)` selects the key whose `kid` matches
+  `receipt.sig.kid` and applies the published status.
 
-Therefore, rotation and revocation are not invisible plumbing. They require verifier semantics changes.
+`/.well-known/truerolls-keys.json` publishes a key set:
+
+```json
+{
+  "keys": [
+    { "kid": "issuer-2026-07", "alg": "Ed25519", "public_key": "<base64>", "status": "active" },
+    { "kid": "issuer-2026-06", "alg": "Ed25519", "public_key": "<base64>", "status": "retired" },
+    { "kid": "issuer-incident-1", "alg": "Ed25519", "public_key": "<base64>", "status": "revoked" }
+  ]
+}
+```
+
+Status semantics:
+
+- `active`: exactly one key may be active. It signs new receipts and verifies existing receipts.
+- `retired`: verifies historical receipts only. It never signs new receipts.
+- `revoked`: invalidates every receipt under that `kid`, including honest receipts.
+
+The verifier rejects unknown kids, duplicate kids in the supplied set, non-Ed25519 key entries, and
+revoked keys. It does not fetch keys itself. Fetching stays in callers: kd-api, kd-cli, and the WASM
+browser UI.
+
+`PublicKeyEntry` intentionally does not have validity-window metadata yet. A validity window without
+independent issuance evidence would be misleading, because a leaked key can sign a fresh receipt today
+that embeds an old drand pulse.
 
 ### Correct drand round time formula
 
@@ -132,13 +157,13 @@ be off by one round.
 
 ### Rotation: multi-kid key set
 
-Rotation is feasible:
+Rotation is implemented at the verifier and API key-discovery layer:
 
 - Publish a key set, not one key.
 - Give each key a `kid`.
-- Sign new receipts with one active kid.
+- Sign new receipts with exactly one active kid.
 - Keep retired uncompromised verify-only keys published permanently, because receipts do not expire.
-- Update `kd-receipt` to select the public key by `receipt.sig.kid`.
+- Verify by selecting the public key named by `receipt.sig.kid`.
 
 Removing an old uncompromised key from the published set invalidates honest historical receipts. That
 is not rotation, it is history deletion.
@@ -167,25 +192,38 @@ With that substrate, a verifier can ask two separate questions:
 
 Without that second evidence object, a compromised key remains able to manufacture old-looking receipts.
 
-### Future verifier contract
+### Current verifier contract
 
-A future revocation-capable verifier would need:
+The status-aware verifier requires:
 
 - a key set, not a single public key,
 - selection by `sig.kid`,
-- validity metadata for each key,
-- issuance evidence for each receipt hash,
-- policy for unknown kids, revoked kids, expired windows, and missing timestamps/log proofs.
+- a status value for each key,
+- a policy for unknown kids, duplicate kids, non-Ed25519 keys, and revoked kids.
 
-This is not a transparent change to existing callers. CLI and WASM callers currently pass a single key.
-They would need to fetch or receive a key set plus the revocation/issuance evidence policy.
+CLI, API, and WASM callers now have a key-set path. The manual single-key path remains available for
+raw audits, but it bypasses published status. User-facing issuer verification should prefer the key-set
+path.
+
+### Future revocation-capable verifier contract
+
+A future time-scoped revocation verifier would add:
+
+- validity metadata for each key,
+- independent issuance evidence for each receipt hash,
+- policy for expired windows and missing timestamp/log proofs.
+
+That is a receipt-semantics change, not invisible plumbing. It likely needs a receipt version bump or
+an explicitly versioned issuance-evidence extension.
 
 ### Practical ship order
 
-1. Multi-kid key publication and verifier selection by `sig.kid`.
-2. Issuance evidence: timestamp token or transparency-log inclusion for each receipt hash.
-3. Revocation policy that uses the issuance evidence, not the drand seed round alone.
-4. Optional stronger signing backend: KMS, HSM, or threshold signing.
+1. Multi-kid key publication and verifier selection by `sig.kid`. Implemented.
+2. Blunt emergency revocation by publishing `status: "revoked"` for a kid. Implemented.
+3. Issuance evidence: timestamp token or transparency-log inclusion for each receipt hash. V-next.
+4. Time-scoped revocation policy that uses the issuance evidence, not the drand seed round alone.
+   V-next.
+5. Optional stronger signing backend: KMS, HSM, or threshold signing.
 
 ---
 
@@ -197,7 +235,8 @@ They would need to fetch or receive a key set plus the revocation/issuance evide
 | Ownership-safe idempotency lock release on cap rejection | OPS-AUTH-01 | implemented |
 | ALTCHA invisible PoW (L1) | OPS-AUTH-01 | designed |
 | API keys + quota (L3) | OPS-AUTH-01 | designed |
-| Multi-kid rotation | OPS-KEY-01 | designed |
+| Multi-kid rotation | OPS-KEY-01 | implemented |
+| Blunt revoked-kid invalidation | OPS-KEY-02 | implemented |
 | Revocation using issuance timestamp/transparency evidence | OPS-KEY-02 | designed, not implemented |
 | Drand-round-only revocation windows | OPS-KEY-02 | rejected as insufficient |
 | Unleakable key backend | OPS-KEY-02 | designed fork |

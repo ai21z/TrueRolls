@@ -17,6 +17,8 @@ use std::path::Path;
 /// NEVER a production key.
 const TEST_SIGNING_SEED_HEX: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const TEST_SIGNING_SEED_2_HEX: &str =
+    "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
 
 fn kd() -> Command {
     #[allow(deprecated)]
@@ -40,7 +42,15 @@ fn golden(name: &str) -> String {
 /// Derive the test Ed25519 public key (base64) from the public test seed.
 /// Derived in code so the goldens and the tests can never drift apart.
 fn test_public_key_b64() -> String {
-    let seed_bytes = hex::decode(TEST_SIGNING_SEED_HEX).expect("test seed hex invalid");
+    public_key_b64_from_seed(TEST_SIGNING_SEED_HEX)
+}
+
+fn test_public_key_2_b64() -> String {
+    public_key_b64_from_seed(TEST_SIGNING_SEED_2_HEX)
+}
+
+fn public_key_b64_from_seed(seed_hex: &str) -> String {
+    let seed_bytes = hex::decode(seed_hex).expect("test seed hex invalid");
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&seed_bytes);
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
@@ -110,16 +120,18 @@ fn golden_bad_version_errors() {
 
 #[test]
 fn golden_receipt_valid_offline() {
-    kd().args([
-        "verify",
-        "--receipt",
-        &golden("golden_receipt_01_d20.json"),
-        "--public-key",
-        &test_public_key_b64(),
-    ])
-    .assert()
-    .success()
-    .stdout(predicates::str::contains("VALID"));
+    for (file, key) in [
+        ("golden_receipt_01_d20.json", test_public_key_b64()),
+        (
+            "golden_receipt_05_d20_test_kid_2.json",
+            test_public_key_2_b64(),
+        ),
+    ] {
+        kd().args(["verify", "--receipt", &golden(file), "--public-key", &key])
+            .assert()
+            .success()
+            .stdout(predicates::str::contains("VALID"));
+    }
 }
 
 #[test]

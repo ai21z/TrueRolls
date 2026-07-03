@@ -143,6 +143,28 @@ fn verify_receipt_json_impl(receipt_json: &str, public_key_b64: &str) -> String 
     }
 }
 
+fn verify_receipt_json_with_key_set_impl(receipt_json: &str, key_set_json: &str) -> String {
+    #[derive(Deserialize)]
+    struct KeysResponse {
+        keys: Vec<kd_receipt::PublicKeyEntry>,
+    }
+
+    let keys: KeysResponse = match serde_json::from_str(key_set_json) {
+        Ok(keys) => keys,
+        Err(e) => {
+            return serde_json::json!({
+                "verdict": "ERROR",
+                "error": format!("failed to parse key set: {e}")
+            })
+            .to_string();
+        }
+    };
+    match kd_receipt::verify_receipt_str_with_key_set(receipt_json, &keys.keys) {
+        Ok(report) => report.to_result_json().to_string(),
+        Err(e) => serde_json::json!({ "verdict": "ERROR", "error": e.to_string() }).to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // wasm-bindgen exports (thin JsError wrappers)
 // ---------------------------------------------------------------------------
@@ -197,6 +219,13 @@ pub fn compute_roll_replay_json(die: &str, kappa: f64, draw: u64) -> Result<Stri
 #[wasm_bindgen(js_name = verifyReceiptJson)]
 pub fn verify_receipt_json(receipt_json: &str, public_key_b64: &str) -> String {
     verify_receipt_json_impl(receipt_json, public_key_b64)
+}
+
+/// Verify a signed TrueRolls receipt against a published key set JSON object
+/// shaped like `/.well-known/truerolls-keys.json`.
+#[wasm_bindgen(js_name = verifyReceiptJsonWithKeySet)]
+pub fn verify_receipt_json_with_key_set(receipt_json: &str, key_set_json: &str) -> String {
+    verify_receipt_json_with_key_set_impl(receipt_json, key_set_json)
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +414,63 @@ mod tests {
             .to_result_json()
             .to_string();
         assert_eq!(wrapper, direct);
+    }
+
+    #[test]
+    fn verify_receipt_json_with_key_set_matches_kd_receipt_exactly() {
+        let pk = test_public_key_b64();
+        let receipt = golden_str("golden_receipt_01_d20.json");
+        let key_set = serde_json::json!({
+            "keys": [{
+                "kid": "test-kid-1",
+                "alg": "Ed25519",
+                "public_key": pk,
+                "status": "active"
+            }]
+        })
+        .to_string();
+
+        let wrapper = verify_receipt_json_with_key_set_impl(&receipt, &key_set);
+        let direct_keys: Vec<kd_receipt::PublicKeyEntry> =
+            serde_json::from_str::<serde_json::Value>(&key_set)
+                .unwrap()
+                .get("keys")
+                .cloned()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap();
+        let direct = kd_receipt::verify_receipt_str_with_key_set(&receipt, &direct_keys)
+            .unwrap()
+            .to_result_json()
+            .to_string();
+        assert_eq!(wrapper, direct);
+    }
+
+    #[test]
+    fn verify_receipt_json_with_key_set_rejects_revoked_key() {
+        let pk = test_public_key_b64();
+        let receipt = golden_str("golden_receipt_01_d20.json");
+        let key_set = serde_json::json!({
+            "keys": [{
+                "kid": "test-kid-1",
+                "alg": "Ed25519",
+                "public_key": pk,
+                "status": "revoked"
+            }]
+        })
+        .to_string();
+
+        let out = verify_receipt_json_with_key_set_impl(&receipt, &key_set);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["verdict"], "INVALID");
+        assert_eq!(v["valid_signature"], false);
+        assert!(
+            v["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e.as_str().unwrap_or_default().contains("revoked")),
+            "{out}"
+        );
     }
 
     #[test]
