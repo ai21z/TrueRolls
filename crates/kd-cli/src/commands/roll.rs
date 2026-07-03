@@ -18,7 +18,7 @@ pub const TRANSCRIPT_VERSION: &str = "kd.local.v2";
 /// Roll a die with guarded karma distribution.
 ///
 /// By default, performs a local roll via kd-core (no server needed).
-/// Use --remote to POST to a running kd-api server instead.
+/// Remote roll is disabled until the CLI implements the drand-backed API flow.
 #[derive(Args)]
 #[command(allow_negative_numbers = true)]
 pub struct RollArgs {
@@ -50,7 +50,7 @@ pub struct RollArgs {
     #[arg(long, default_value_t = false)]
     json: bool,
 
-    /// POST to a remote kd-api server instead of rolling locally.
+    /// Unsupported for drand-backed kd-api. Use the browser or API client flow.
     #[arg(long, default_value_t = false)]
     remote: bool,
 
@@ -146,46 +146,8 @@ pub fn execute(args: RollArgs) -> Result<()> {
 }
 
 fn execute_remote(args: &RollArgs) -> Result<()> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
-
-    for _ in 0..args.count {
-        let mut body = json!({
-            "die": args.die,
-            "kappa": args.kappa,
-        });
-        if let Some(s) = args.seed {
-            body["seed"] = json!(s.to_string());
-        }
-
-        let resp = client
-            .post(format!("{}/v1/roll", args.server))
-            .json(&body)
-            .send()
-            .context("failed to reach kd-api server")?;
-
-        let status = resp.status();
-        let text = resp.text()?;
-
-        if !status.is_success() && status.as_u16() != 201 {
-            bail!("server returned {status}: {text}");
-        }
-
-        if args.json {
-            // Pretty-print the server response
-            let v: serde_json::Value = serde_json::from_str(&text)?;
-            println!("{}", serde_json::to_string_pretty(&v)?);
-        } else {
-            let v: serde_json::Value = serde_json::from_str(&text)?;
-            if let Some(face) = v.get("face").and_then(|f| f.as_u64()) {
-                println!("{face}");
-            } else {
-                println!("{text}");
-            }
-        }
-    }
-    Ok(())
+    let _ = args;
+    bail!("remote roll is not implemented for drand-backed API; use the browser/API client flow")
 }
 
 /// Parse "d20" → 20, "d6" → 6, etc.

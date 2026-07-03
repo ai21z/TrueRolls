@@ -94,6 +94,16 @@ fn roll_invalid_die_rejected() {
 }
 
 #[test]
+fn roll_remote_is_explicitly_unsupported_in_drand_mode() {
+    kd().args(["roll", "--remote", "--kappa", "0.5"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "remote roll is not implemented for drand-backed API",
+        ));
+}
+
+#[test]
 fn roll_with_lambda_override() {
     kd().args([
         "roll", "--kappa", "1.0", "--lambda", "0.6", "--seed", "1", "--json",
@@ -217,6 +227,14 @@ fn verify_sweep_all_pass() {
         .assert()
         .success()
         .stdout(predicates::str::contains("\"all_pass\": true"));
+}
+
+#[test]
+fn verify_sweep_zero_is_rejected_without_nan() {
+    kd().args(["verify", "--kappa", "0", "--sweep", "0"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("sweep must be at least 1"));
 }
 
 #[test]
@@ -399,6 +417,93 @@ fn verify_transcript_tampered_draw_fails() {
         .failure()
         .stdout(predicates::str::contains("MISMATCH"))
         .stdout(predicates::str::contains("face"));
+}
+
+#[test]
+fn verify_transcript_oversized_face_fails_before_u32_wrap() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let transcript_path = dir.path().join("t.json");
+
+    kd().args([
+        "roll",
+        "--kappa",
+        "0.0",
+        "--die",
+        "d20",
+        "--seed",
+        "1",
+        "--output",
+        transcript_path.to_str().unwrap(),
+    ])
+    .assert()
+    .success();
+
+    let content = std::fs::read_to_string(&transcript_path).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let face = v["face"].as_u64().expect("face missing");
+    v["face"] = serde_json::json!(u32::MAX as u64 + 1 + face);
+    std::fs::write(&transcript_path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    kd().args(["verify", "--input", transcript_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicates::str::contains("out of range"));
+}
+
+#[test]
+fn verify_transcript_negative_lambda_fails() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let transcript_path = dir.path().join("t.json");
+
+    std::fs::write(
+        &transcript_path,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "transcript_version": "kd.local.v2",
+            "math_param_version": "roll.math.v1",
+            "die": "d20",
+            "kappa": 1.0,
+            "lambda": -0.5,
+            "face": 1,
+            "draw_u64": "0"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    kd().args(["verify", "--input", transcript_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicates::str::contains("lambda"));
+}
+
+#[test]
+fn verify_transcript_seed_draw_mismatch_fails() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let transcript_path = dir.path().join("t.json");
+
+    kd().args([
+        "roll",
+        "--kappa",
+        "0.0",
+        "--die",
+        "d20",
+        "--seed",
+        "1",
+        "--output",
+        transcript_path.to_str().unwrap(),
+    ])
+    .assert()
+    .success();
+
+    let content = std::fs::read_to_string(&transcript_path).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    v["seed"] = serde_json::json!("999999");
+    std::fs::write(&transcript_path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    kd().args(["verify", "--input", transcript_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicates::str::contains("seed"));
 }
 
 #[test]

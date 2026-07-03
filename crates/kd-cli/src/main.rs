@@ -4,9 +4,9 @@ use clap::{Parser, Subcommand};
 
 /// TrueRolls CLI, roll dice and verify distribution invariants.
 ///
-/// Two modes of operation:
-///   • Local (default): pure math via kd-core, no server needed
-///   • Remote (--remote): HTTP calls to a running kd-api server
+/// Local roll uses pure math via kd-core, no server needed.
+/// Remote verify can call a running kd-api server. Remote roll is disabled until
+/// the CLI implements the drand-backed API flow.
 #[derive(Parser)]
 #[command(name = "kd", version, about, long_about = None)]
 struct Cli {

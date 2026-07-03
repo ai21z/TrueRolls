@@ -7,6 +7,8 @@ use kd_core::{
     params::{Params, default_for_die},
 };
 use kd_receipt::verify_receipt;
+use rand_chacha::ChaCha20Rng;
+use rand_core::{RngCore, SeedableRng};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -98,6 +100,9 @@ fn verify_params(args: &VerifyArgs) -> Result<()> {
     let kappa_val = args.kappa.unwrap_or(0.0);
 
     let kappas: Vec<f64> = if let Some(steps) = args.sweep {
+        if steps == 0 {
+            bail!("sweep must be at least 1");
+        }
         (0..=steps)
             .map(|i| -1.0 + 2.0 * (i as f64) / (steps as f64))
             .collect()
@@ -308,7 +313,7 @@ fn verify_transcript_local(args: &VerifyArgs, transcript: &serde_json::Value) ->
         return verify_transcript_local_array(args, entries);
     }
 
-    let report = verify_transcript_entry(transcript)?;
+    let report = verify_transcript_entry_with_seed_index(transcript, 0)?;
     let pass = report.pass();
 
     if args.json {
@@ -339,7 +344,8 @@ fn verify_transcript_local_array(args: &VerifyArgs, entries: &[serde_json::Value
 
     let mut reports: Vec<EntryReport> = Vec::with_capacity(entries.len());
     for (i, entry) in entries.iter().enumerate() {
-        let report = verify_transcript_entry(entry).with_context(|| format!("entry[{i}]"))?;
+        let report = verify_transcript_entry_with_seed_index(entry, i)
+            .with_context(|| format!("entry[{i}]"))?;
         reports.push(report);
     }
 
@@ -373,7 +379,10 @@ fn verify_transcript_local_array(args: &VerifyArgs, entries: &[serde_json::Value
     }
 }
 
-fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport> {
+fn verify_transcript_entry_with_seed_index(
+    transcript: &serde_json::Value,
+    seed_draw_index: usize,
+) -> Result<EntryReport> {
     // Version gate 1: if a transcript_version is declared, it must be one we
     // understand. (Server transcripts do not carry this key, that is fine.)
     if let Some(tv) = transcript.get("transcript_version") {
@@ -417,7 +426,17 @@ fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport
         .and_then(|v| v.as_f64())
         .context("transcript missing 'kappa' field")?;
 
-    let lambda = transcript.get("lambda").and_then(|v| v.as_f64());
+    let (lambda, invalid_lambda) = match transcript.get("lambda") {
+        Some(v) => {
+            let l = v.as_f64().context("transcript 'lambda' is not a number")?;
+            if !(0.0..=1.0).contains(&l) {
+                (None, Some(l))
+            } else {
+                (Some(l), None)
+            }
+        }
+        None => (None, None),
+    };
 
     let claimed_alpha = transcript.get("alpha").and_then(|v| v.as_f64());
     let claimed_kl = transcript.get("kl").and_then(|v| v.as_f64());
@@ -440,6 +459,9 @@ fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport
     let tol = 1e-9; // tolerance for float comparison after JSON round-trip
     let mut mismatches: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+    if let Some(l) = invalid_lambda {
+        mismatches.push(format!("lambda {l} out of range [0, 1]"));
+    }
 
     // Compare alpha
     if let Some(ca) = claimed_alpha {
@@ -496,19 +518,47 @@ fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport
     // Face policy: a face claim is only verifiable when draw_u64 is present
     // and replayable. A face without a valid draw is a MISMATCH, not a
     // silent pass, otherwise tampered faces would verify as OK.
+    let draw: Option<u64> = transcript
+        .get("draw_u64")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u64>().ok());
+
+    if let Some(seed_value) = transcript.get("seed") {
+        let sampling_rng = transcript
+            .get("sampling")
+            .and_then(|v| v.get("rng"))
+            .and_then(|v| v.as_str());
+        if sampling_rng == Some("ChaCha20Rng(seed_from_u64)") {
+            match (seed_value.as_str(), draw) {
+                (Some(seed_str), Some(draw_u64)) => match seed_str.parse::<u64>() {
+                    Ok(seed) => {
+                        let mut rng = ChaCha20Rng::seed_from_u64(seed);
+                        let mut replayed = 0;
+                        for _ in 0..=seed_draw_index {
+                            replayed = rng.next_u64();
+                        }
+                        if replayed != draw_u64 {
+                            mismatches.push(format!(
+                                "seed/draw mismatch: seed replays {replayed}, transcript draw_u64={draw_u64}"
+                            ));
+                        }
+                    }
+                    Err(_) => mismatches.push("seed is not a valid u64".to_string()),
+                },
+                (None, _) => mismatches.push("seed is not a stringified u64".to_string()),
+                (_, None) => {}
+            }
+        }
+    }
+
     match transcript.get("face").and_then(|v| v.as_u64()) {
         None => {
             mismatches.push("face: missing from transcript".to_string());
         }
         Some(cf) => {
-            let cf = cf as u32;
-            if cf < 1 || cf > faces {
+            if cf < 1 || cf > u64::from(faces) {
                 mismatches.push(format!("face {cf} out of range for d{faces}"));
             }
-            let draw: Option<u64> = transcript
-                .get("draw_u64")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<u64>().ok());
             match draw {
                 None => {
                     mismatches.push(
@@ -518,7 +568,7 @@ fn verify_transcript_entry(transcript: &serde_json::Value) -> Result<EntryReport
                 }
                 Some(draw_u64) => {
                     let recomp_face = replay_face(faces, &recomp_probs, draw_u64)?;
-                    if cf != recomp_face {
+                    if cf != u64::from(recomp_face) {
                         mismatches.push(format!(
                             "face: claimed={cf}, recomputed={recomp_face} (from draw_u64)"
                         ));
