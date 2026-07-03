@@ -1,0 +1,208 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  rust:
+    name: Rust fmt, clippy, tests, goldens
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm pkg-config libssl-dev
+
+      - name: Rust toolchain
+        run: rustup show
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Workspace tests
+        run: cargo test --workspace --all-features
+
+      - name: Golden tests
+        run: cargo test -p kd-cli --test goldens
+
+  wasm-parity:
+    name: Committed wasm parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm pkg-config libssl-dev
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Rebuild wasm into scratch directory
+        run: |
+          rm -rf outputs/ci-kd-core-wasm
+          mkdir -p outputs
+          wasm-pack build crates/kd-core-wasm --target web --out-dir ../../outputs/ci-kd-core-wasm
+
+      - name: Compare committed wasm package
+        run: |
+          set -euo pipefail
+          for file in \
+            kd_core_wasm_bg.wasm \
+            kd_core_wasm_bg.wasm.d.ts \
+            kd_core_wasm.d.ts \
+            kd_core_wasm.js \
+            package.json
+          do
+            cmp "packages/kd-core-wasm/$file" "outputs/ci-kd-core-wasm/$file"
+          done
+
+  ui:
+    name: Loom demo build and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm -C services/loom-demo install --frozen-lockfile
+
+      - name: Build
+        run: corepack pnpm -C services/loom-demo build
+
+      - name: Lint
+        run: corepack pnpm -C services/loom-demo lint
+
+  integration:
+    name: Live kd-api integration
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://kd:kd_dev_only_pw@127.0.0.1:5432/kd
+      REDIS_URL: redis://:kd_dev_only@127.0.0.1:6379
+      S3_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: kd-transcripts
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: kdadmin
+      AWS_SECRET_ACCESS_KEY: kd_dev_only_123
+      KD_SIGNING_ED25519_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      KD_SIGNING_KID: test-kid-1
+      API_HOST: 127.0.0.1
+      API_PORT: "8080"
+      KD_ENV: dev
+      API_BASE_URL: http://127.0.0.1:8080
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm pkg-config libssl-dev curl
+
+      - name: Start Postgres, Redis, and MinIO
+        run: |
+          cp .env.example infra/.env
+          docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
+          for attempt in {1..60}; do
+            healthy=$(docker ps --filter 'name=kd-' --format '{{.Status}}' | grep -c healthy || true)
+            echo "healthy services: $healthy/3 (attempt $attempt)"
+            if [ "$healthy" -ge 3 ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker ps
+          docker logs kd-postgres || true
+          docker logs kd-redis || true
+          docker logs kd-minio || true
+          exit 1
+
+      - name: Create transcript bucket
+        run: |
+          docker exec kd-minio mc alias set local http://localhost:9000 "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"
+          docker exec kd-minio mc mb --ignore-existing local/"$S3_BUCKET"
+
+      - name: Build kd-api
+        run: cargo build -p kd-api
+
+      - name: Launch kd-api
+        run: |
+          mkdir -p outputs
+          target/debug/kd-api > outputs/kd-api-ci.log 2> outputs/kd-api-ci.log.err &
+          echo "$!" > outputs/kd-api-ci.pid
+          for attempt in {1..60}; do
+            echo "waiting for kd-api health (attempt $attempt)"
+            if curl -fsS "$API_BASE_URL/healthz"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "kd-api did not become healthy"
+          tail -100 outputs/kd-api-ci.log || true
+          tail -100 outputs/kd-api-ci.log.err || true
+          exit 1
+
+      - name: Run ignored live integration tests
+        run: |
+          set -euo pipefail
+          cargo test -p kd-api --all-features -- --include-ignored 2>&1 | tee outputs/kd-api-integration-tests.log
+
+      - name: Assert live integration tests executed
+        run: |
+          set -euo pipefail
+          log=outputs/kd-api-integration-tests.log
+          grep -q "running 36 tests" "$log"
+          grep -q "healthz_ok_or_degraded_has_fields ... ok" "$log"
+          grep -q "get_by_id_and_by_idem_key_consistent ... ok" "$log"
+          grep -q "post_roll_201_then_200_on_same_idem_key ... ok" "$log"
+          grep -q "post_roll_conflict_on_same_key_different_body ... ok" "$log"
+          grep -q "post_roll_validation_errors ... ok" "$log"
+          grep -q "post_roll_rejects_already_published_drand_target ... ok" "$log"
+          grep -q "post_roll_concurrent_same_key_thundering_herd ... ok" "$log"
+          grep -q "verify_d6_happy_path ... ok" "$log"
+          grep -q "verify_d20_happy_path ... ok" "$log"
+          grep -q "verify_d100_happy_path ... ok" "$log"
+          grep -q "verify_tampered_face_returns_422 ... ok" "$log"
+          grep -q "verify_tampered_kappa_returns_422 ... ok" "$log"
+          grep -q "verify_tampered_draw_u64_returns_422 ... ok" "$log"
+          grep -q "verify_bad_version_returns_400 ... ok" "$log"
+          grep -q "verify_bad_die_returns_400 ... ok" "$log"
+          grep -q "verify_kappa_zero_happy_path ... ok" "$log"
+          grep -q "verify_negative_kappa_happy_path ... ok" "$log"
+          grep -q "verify_kappa_above_one_returns_400 ... ok" "$log"
+          grep -q "verify_kappa_below_neg_one_returns_400 ... ok" "$log"
+          grep -q "verify_receipt_bad_math_param_version_returns_400 ... ok" "$log"
+
+      - name: Stop kd-api
+        if: always()
+        run: |
+          if [ -f outputs/kd-api-ci.pid ]; then
+            kill "$(cat outputs/kd-api-ci.pid)" || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kd-api-integration-logs
+          path: outputs/kd-api-*.log*
+
+      - name: Stop infrastructure
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env down

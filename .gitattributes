@@ -18,3 +18,4 @@
 *.gif -text
 *.pdf -text
 *.zip -text
+*.wasm binary

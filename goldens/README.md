@@ -10,8 +10,8 @@ regenerated in the v2 schema (the v1 files lacked `draw_u64`, so after the
 KD-023 face policy they all failed local verification as `face: unverifiable`).
 
 **Policy:** every `expected_local` verdict in `goldens.csv` is enforced by
-`crates/kd-cli/tests/goldens.rs` (runs in CI, never ignored); `expected_server`
-is enforced by the Phase-1 live smoke run.
+`crates/kd-cli/tests/goldens.rs` (never ignored). CI must run it on every push;
+`expected_server` is enforced by the live kd-api integration/smoke suite.
 
 ## Files
 
