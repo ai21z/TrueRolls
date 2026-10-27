@@ -2,11 +2,15 @@
   "name": "kd-core-wasm",
   "type": "module",
   "collaborators": [
-    "Vissarion Zounarakis <ariszoun@gmail.com>"
+    "Vissarion Zounarakis <aris@zounarakis.com>"
   ],
-  "description": "wasm-bindgen bindings exposing kd-core pure math to JavaScript (no math duplication)",
+  "description": "wasm-bindgen bindings for TrueRolls deterministic math and receipt verification",
   "version": "0.1.0",
-  "license": "Proprietary",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ai21z/truerolls"
+  },
   "files": [
     "kd_core_wasm_bg.wasm",
     "kd_core_wasm.js",

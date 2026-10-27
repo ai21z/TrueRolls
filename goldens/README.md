@@ -3,7 +3,7 @@
 Reference fixtures for regression-testing the verify pipeline:
 
 - 9 **transcript goldens** in the CLI `kd.local.v2` schema (4 clean, 5 tampered/broken)
-- 3 **receipt goldens** in the signed `truerolls-1` `ReceiptV2` schema (2 valid, 1 tampered)
+- 5 **receipt goldens** in the signed `ReceiptV2` schema (3 valid, 2 tampered; two are `truerolls-drand-1` drand fixtures)
 
 Supersedes the KD-022 v1 pack. The six v1 filenames are kept and their contents
 regenerated in the v2 schema (the v1 files lacked `draw_u64`, so after the
@@ -28,7 +28,9 @@ KD-023 face policy they all failed local verification as `face: unverifiable`).
 | 9 | `golden_09_d6_missing_draw.json` | d6 | 0.6 | 1001 | Missing draw_u64 | `MISMATCH` (`face: unverifiable`), exit 1 | 400 (missing draw_u64) |
 | R1 | `golden_receipt_01_d20.json` | d20 | 0.6 | n/a | Valid signed receipt | `VALID`, exit 0 | 200 via receipt mode when server kid matches test key |
 | R2 | `golden_receipt_02_d20_tampered_face.json` | d20 | 0.6 | n/a | Tampered receipt face | `INVALID`, exit 1 | n/a (offline CLI fixture) |
-| R3 | `golden_receipt_05_d20_test_kid_2.json` | d20 | 0.6 | n/a | Valid signed receipt, second public test key | `VALID`, exit 0 | n/a (offline CLI rotation fixture) |
+| R3 | `golden_receipt_03_d20_drand.json` | d20 | 0.6 | n/a | Valid signed `truerolls-drand-1` receipt | `VALID`, exit 0 | n/a (offline CLI drand fixture) |
+| R4 | `golden_receipt_04_d20_drand_tampered_sig.json` | d20 | 0.6 | n/a | Tampered drand receipt signature | `INVALID`, exit 1 | n/a (offline CLI drand fixture) |
+| R5 | `golden_receipt_05_d20_test_kid_2.json` | d20 | 0.6 | n/a | Valid signed receipt, second public test key | `VALID`, exit 0 | n/a (offline CLI rotation fixture) |
 
 \* κ was changed from 0.6 to -0.9 after generation; all other fields still
 reflect the honest κ=0.6 computation.
@@ -57,7 +59,7 @@ Everything in this directory is regenerated deterministically by one command
 deterministic Ed25519):
 
 ```powershell
-cargo test -p kd-cli --test gen_goldens -- --ignored
+cargo test --locked -p kd-cli --test gen_goldens -- --ignored
 ```
 
 The clean transcripts (1-3, 7) are produced by the real `kd` binary; the
@@ -130,12 +132,16 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/v1/verify -ContentType
 > the second PUBLIC rotation-test seed (kid `test-kid-2`). Both test keys must
 > NEVER be used in production, and a real deployment must reject them.
 
-Shape: `truerolls-1` `ReceiptV2` - fixed id
-`00000000-0000-0000-0000-00000000d201`, fixed
-`created_at: 2026-01-01T00:00:00Z`, no `transcript_key`,
-`proof.rng.drbg_key_hex` = `"42"` × 32 (so the draw replays as the first
-`next_u64()` of `ChaCha20Rng::from_seed([0x42; 32])`), face/alpha/kl/ev
-recomputed from kd-core at κ=0.6 d20 defaults. `receipt_hash` is
+Shape: `ReceiptV2`. The base `truerolls-1` fixtures (R1/R2) use id
+`00000000-0000-0000-0000-00000000d201`; the rotation fixture (R5) uses id
+`...d205` with a matching `transcript_url`, and the drand fixtures (R3/R4) are
+`truerolls-drand-1` and carry `proof.drand`. All share fixed
+`created_at: 2026-01-01T00:00:00Z` and no `transcript_key`. The legacy and
+rotation fixtures use `proof.rng.drbg_key_hex` = `"42"` x 32, so their draw
+replays as the first `next_u64()` of `ChaCha20Rng::from_seed([0x42; 32])`.
+The drand fixtures instead carry the deterministic HKDF key derived from their
+pinned quicknet pulses and request binding; the verifier rederives that key.
+Face/alpha/kl/ev are recomputed from kd-core at κ=0.6 d20 defaults. `receipt_hash` is
 `sha256:<hex>` over the JCS (RFC 8785) canonical bytes of the body without
 `sig`/`receipt_hash`; the Ed25519 signature covers the same bytes.
 

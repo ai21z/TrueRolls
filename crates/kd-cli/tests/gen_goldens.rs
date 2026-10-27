@@ -3,7 +3,7 @@
 //! Regenerates EVERY file in `goldens/`:
 //!
 //! ```text
-//! cargo test -p kd-cli --test gen_goldens -- --ignored
+//! cargo test --locked -p kd-cli --test gen_goldens -- --ignored
 //! ```
 //!
 //! Determinism contract: running the generator twice must produce
@@ -17,7 +17,7 @@
 //! Output format: pretty-printed JSON with sorted keys plus a trailing
 //! newline. serde_json without the `preserve_order` feature backs
 //! `serde_json::Map` with a BTreeMap (verified for this workspace via
-//! `cargo tree -p kd-cli -i serde_json -e features`, only `default`,
+//! `cargo tree --locked -p kd-cli -i serde_json -e features`, only `default`,
 //! `float_roundtrip`, `std` are unified), so keys are already sorted. The
 //! explicit `sort_keys` pass below keeps the output stable even if
 //! `preserve_order` is ever unified into the build later.
@@ -42,8 +42,7 @@ use std::path::{Path, PathBuf};
 const TEST_SIGNING_SEED_HEX: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const TEST_KID: &str = "test-kid-1";
-const TEST_SIGNING_SEED_2_HEX: &str =
-    "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
+const TEST_SIGNING_SEED_2_HEX: &str = kd_receipt::PUBLISHED_TEST_SEED_2_HEX;
 const TEST_KID_2: &str = "test-kid-2";
 
 /// Fixed receipt id for golden_receipt_01/02 (valid UUID, recognizable).
@@ -319,6 +318,14 @@ fn resign_receipt_with_test_key_2(receipt: &Value) -> Value {
         "id".to_string(),
         json!("00000000-0000-0000-0000-00000000d205"),
     );
+    // Keep transcript_url consistent with the rewritten id, so the signed fixture
+    // does not point at a different roll's transcript.
+    if obj.contains_key("transcript_url") {
+        obj.insert(
+            "transcript_url".to_string(),
+            json!("/v1/roll/00000000-0000-0000-0000-00000000d205/transcript"),
+        );
+    }
 
     let signer = ReceiptSigner::from_hex_seed(TEST_SIGNING_SEED_2_HEX, TEST_KID_2.to_string())
         .expect("test signer 2 build failed");
@@ -335,7 +342,7 @@ fn resign_receipt_with_test_key_2(receipt: &Value) -> Value {
 }
 
 #[test]
-#[ignore = "regenerates goldens - run explicitly: cargo test -p kd-cli --test gen_goldens -- --ignored"]
+#[ignore = "regenerates goldens - run explicitly: cargo test --locked -p kd-cli --test gen_goldens -- --ignored"]
 fn regenerate_goldens() {
     let dir = goldens_dir();
     std::fs::create_dir_all(&dir)

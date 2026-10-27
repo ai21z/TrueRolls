@@ -10,4 +10,6 @@ golden_08_d6_tampered_draw.json,1001,d6,0.5,0.6,tampered_draw,MISMATCH,422 MISMA
 golden_09_d6_missing_draw.json,1001,d6,0.5,0.6,missing_draw,MISMATCH (unverifiable),400 (missing draw_u64)
 golden_receipt_01_d20.json,n/a,d20,0.5,0.6,receipt_clean,VALID,200 via POST /v1/verify receipt mode when server kid matches test key
 golden_receipt_02_d20_tampered_face.json,n/a,d20,0.5,0.6,receipt_tampered_face,INVALID,n/a (offline CLI fixture)
+golden_receipt_03_d20_drand.json,n/a,d20,0.5,0.6,receipt_clean_drand,VALID,n/a (offline CLI drand fixture)
+golden_receipt_04_d20_drand_tampered_sig.json,n/a,d20,0.5,0.6,receipt_tampered_drand_sig,INVALID,n/a (offline CLI drand fixture)
 golden_receipt_05_d20_test_kid_2.json,n/a,d20,0.5,0.6,receipt_clean_test_kid_2,VALID,n/a (offline CLI rotation fixture)

@@ -5,7 +5,7 @@
 //! If a fixture is missing, regenerate first:
 //!
 //! ```text
-//! cargo test -p kd-cli --test gen_goldens -- --ignored
+//! cargo test --locked -p kd-cli --test gen_goldens -- --ignored
 //! ```
 
 use assert_cmd::Command;
@@ -17,8 +17,7 @@ use std::path::Path;
 /// NEVER a production key.
 const TEST_SIGNING_SEED_HEX: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const TEST_SIGNING_SEED_2_HEX: &str =
-    "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
+const TEST_SIGNING_SEED_2_HEX: &str = kd_receipt::PUBLISHED_TEST_SEED_2_HEX;
 
 fn kd() -> Command {
     #[allow(deprecated)]
@@ -33,7 +32,7 @@ fn golden(name: &str) -> String {
         .join(name);
     assert!(
         path.is_file(),
-        "missing golden fixture {} - regenerate with: cargo test -p kd-cli --test gen_goldens -- --ignored",
+        "missing golden fixture {} - regenerate with: cargo test --locked -p kd-cli --test gen_goldens -- --ignored",
         path.display()
     );
     path.to_string_lossy().into_owned()
@@ -122,6 +121,7 @@ fn golden_bad_version_errors() {
 fn golden_receipt_valid_offline() {
     for (file, key) in [
         ("golden_receipt_01_d20.json", test_public_key_b64()),
+        ("golden_receipt_03_d20_drand.json", test_public_key_b64()),
         (
             "golden_receipt_05_d20_test_kid_2.json",
             test_public_key_2_b64(),
@@ -140,6 +140,17 @@ fn golden_receipt_tampered_invalid() {
         "verify",
         "--receipt",
         &golden("golden_receipt_02_d20_tampered_face.json"),
+        "--public-key",
+        &test_public_key_b64(),
+    ])
+    .assert()
+    .failure()
+    .stdout(predicates::str::contains("INVALID"));
+
+    kd().args([
+        "verify",
+        "--receipt",
+        &golden("golden_receipt_04_d20_drand_tampered_sig.json"),
         "--public-key",
         &test_public_key_b64(),
     ])

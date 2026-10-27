@@ -2,13 +2,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveWasmPackagePair } from './wasm-package-paths.mjs';
 
 const ROOT = process.cwd();
-const [committedArg = 'packages/kd-core-wasm', rebuiltArg = 'outputs/ci-kd-core-wasm'] =
-  process.argv.slice(2);
-
-const committedDir = path.resolve(ROOT, committedArg);
-const rebuiltDir = path.resolve(ROOT, rebuiltArg);
 
 const cleanGoldens = [
   'golden_01_d6_k06.json',
@@ -81,6 +77,15 @@ async function loadGolden(name) {
   const text = await readFile(path.join(ROOT, 'goldens', name), 'utf8');
   return JSON.parse(text);
 }
+
+let packageDirs;
+try {
+  packageDirs = await resolveWasmPackagePair(ROOT, process.argv.slice(2), 'wasm-parity');
+} catch (error) {
+  console.error(`[wasm-parity] FAIL: ${error.message}`);
+  process.exit(1);
+}
+const { committedDir, rebuiltDir } = packageDirs;
 
 const committed = await loadPackage(committedDir, 'committed');
 const rebuilt = await loadPackage(rebuiltDir, 'rebuilt');

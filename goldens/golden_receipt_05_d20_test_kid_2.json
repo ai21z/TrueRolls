@@ -15,13 +15,13 @@
       "drbg_key_hex": "4242424242424242424242424242424242424242424242424242424242424242"
     }
   },
-  "receipt_hash": "sha256:45c906e19330482c45e9cc1d391f28bf872c8d1b1a1548b6c759ff9b46d38ab2",
+  "receipt_hash": "sha256:6b94ad9ed4bd821bc19430eef5837fef286275800d1548701f8098e35d293fdd",
   "sig": {
     "alg": "Ed25519",
     "canon": "JCS/RFC8785",
     "kid": "test-kid-2",
-    "signature_b64": "iEv2CPMCMDWK5EXZcfrqaLcHaLbWz7CpvR4KeHRz4FcSoTxR3LUhS+/FY6+OZQnQg0dmtNLpt/QhvOOgcK8FAQ=="
+    "signature_b64": "POBI07ARrJb6QVUWWbFK09wVx2kfW8L2lkbhFckEGEhZpzGer7ZH28Tn5YrsLs1MiecyKewO1aO/LliFUKxPBA=="
   },
-  "transcript_url": "/v1/roll/00000000-0000-0000-0000-00000000d201/transcript",
+  "transcript_url": "/v1/roll/00000000-0000-0000-0000-00000000d205/transcript",
   "v": "truerolls-1"
 }
