@@ -14,7 +14,7 @@ This is the reference for the TrueRolls HTTP API as **implemented** in the servi
 Read these before integrating. They bound what the API guarantees.
 
 - **No authentication.** None of the endpoints require or check credentials. There is no API key, token, or session.
-- **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` has the heavy mint protection stack. Verify/read routes have lighter per-IP throttles and body limits. `/healthz`, `/v1/drand/health`, and `/.well-known/*` stay public. The two health endpoints are currently unthrottled and touch backend or network dependencies, so do not treat them as free under hostile traffic. Do not treat any throttle as access control.
+- **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` has the heavy mint protection stack. Verify/read routes have lighter per-IP throttles and body limits. `/livez`, `/healthz`, `/v1/drand/health`, and `/.well-known/*` stay public. `/livez` does no dependency I/O. `/healthz` and `/v1/drand/health` are unthrottled and touch backend or network dependencies, so do not treat them as free under hostile traffic. Roll, verify, and read limits are configured independently (`KD_ROLL_RL_*`, `KD_VERIFY_RL_*`, `KD_READ_RL_*`). Do not treat any throttle as access control.
 - **What is proven today:**
   - **Tamper-evidence** of a signed receipt via an Ed25519 signature over the canonicalized receipt body.
   - **Drand seed provenance** for live `truerolls-drand-1` receipts: anyone with the receipt can verify the pinned drand quicknet BLS pulses and re-derive the seed from the target pulse.
@@ -26,7 +26,7 @@ Read these before integrating. They bound what the API guarantees.
 
 ## Conventions
 
-- **Base path:** roll/verify endpoints live under `/v1`. `/healthz` and `/.well-known/*` are unversioned.
+- **Base path:** roll/verify endpoints live under `/v1`. `/livez`, `/healthz`, and `/.well-known/*` are unversioned.
 - **Content types:** request and success bodies are `application/json`. Most client-caused error bodies (400 / 404 / 409 / 422) are plain-text messages. Internal 500 responses are sanitized JSON `{ "error": "internal" }`. Protective overload/timeout responses are JSON, see `POST /v1/roll`. (The 422 legacy-verify body is a special case, see that endpoint.)
 - **Dice:** the roll path accepts `d6`, `d20`, `d100`. The receipt verifier's die parser additionally accepts `d4`, `d8`, `d10`, `d12`, but only `d6` / `d20` / `d100` are reachable through `POST /v1/roll`.
 - **kappa (`κ`):** a signed stance. It is validated to be **finite and in `[-1, 1]`** on `POST /v1/roll` and on the **legacy** verify paths. In **receipt** verify mode κ is *not* range-checked at the request layer. An out-of-range κ instead fails inside the math recompute and is returned as a `400` (see receipt mode below).
@@ -34,9 +34,25 @@ Read these before integrating. They bound what the API guarantees.
 
 ---
 
+## GET /livez
+
+Process liveness probe. Always returns **200** while the server is accepting requests. It performs no
+database, Redis, object-store, or network work, so it is the probe for browsers and container health
+checks.
+
+**Response, `200`**
+
+```json
+{ "status": "ok" }
+```
+
+---
+
 ## GET /healthz
 
-Liveness/readiness probe. Always returns **200**. The body reports per-dependency status.
+Dependency readiness probe for operators. Always returns **200**, including when degraded. The body
+reports per-dependency status. Each call runs a database query, a Redis `PING`, and an object-store
+`head_bucket`, so bound it at the deployment edge.
 
 **Response, `200`**
 
@@ -437,6 +453,7 @@ To verify a receipt with status semantics: pass the whole key set to the shared 
 
 | Method | Path | Success | Body shape |
 |---|---|---|---|
+| GET | `/livez` | 200 | `{ "status": "ok" }` |
 | GET | `/healthz` | 200 | `Health` |
 | POST | `/v1/roll` | 201 / 200 / 202 | `ReceiptV2Response` / deduplicated receipt / processing |
 | GET | `/v1/roll?idem_key=` | 200 | `RollResponse` |

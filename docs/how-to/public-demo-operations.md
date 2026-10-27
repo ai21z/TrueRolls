@@ -17,9 +17,10 @@ unfavorable attempt. Keep that claim boundary in the site, API docs, and inciden
 | Signer | Inject one non-test active Ed25519 seed through the deployment secret store. Never put it in an image, repository, command log, or public environment dump. Production rejects both published test seeds, kids, and keys before service I/O. Environment-resident seed custody is the current A-tier limit; KMS/HSM custody is later work. |
 | Mint budget | Set finite `KD_ROLL_GLOBAL_CAP` and `KD_ROLL_GLOBAL_CAP_WINDOW_SECS`. Do not set `KD_ALLOW_UNCAPPED_ROLL=1` for a public demo. Anonymous callers can consume this shared budget. |
 | Client IP | Set `KD_TRUSTED_PROXY` to the real edge contract: `cloudflare`, `fly`, or `xff:<trusted-hops>`. The edge must overwrite or strip caller-supplied forwarding headers. Use `peer` only for direct exposure and set `KD_ALLOW_PEER_IP=1` deliberately. |
+| Per-IP limits | `KD_ROLL_RL_PERIOD_SECS`/`KD_ROLL_RL_BURST` limit roll attempts per client IP. Production refuses to start when `burst + ceil(window / period)` reaches `KD_ROLL_GLOBAL_CAP`, because one client could otherwise drain the window. With a 10 s period, burst 5, and a 3600 s window that bound is 365, so the cap must exceed it with a meaningful margin. This is a startup sanity check, not a per-IP quota: the limiter is process-local, resets on restart, and multiplies across instances, and attempts admitted just before a window boundary can still reserve budget after it. The global cap counts validated reservation attempts, not only delivered receipts. A guaranteed per-IP share would need a Redis-backed per-IP quota at the reservation point. Verify and read limits are separate (`KD_VERIFY_RL_*`, `KD_READ_RL_*`), so tightening minting does not throttle receipt browsing. Add edge rate rules on top. |
 | Capacity | Pin `KD_ROLL_MAX_INFLIGHT` and `KD_DB_MAX_CONNECTIONS` together after a load test. The default 32 in-flight requests share five DB connections; no connection is held during the drand wait, but the final write phase still queues on the pool. |
 | Timeouts | The conservative default whole-roll timeout is `target_wait + 4 * relay_count * relay_timeout + 2000 ms`: one full `/info` plus pulse pass across all relays for the initial frontier and one possible full pass as the target wait crosses its deadline. Keep the edge timeout above `KD_ROLL_TIMEOUT_MS`. A lower override can cancel honest rolls and consume a monotonic validated reservation attempt without minting a receipt. |
-| Public URL | Set `KD_PUBLIC_BASE_URL` to the externally reachable HTTPS issuer origin used in transcript links. |
+| Public URL | The issuer origin is whatever HTTPS origin serves `/.well-known/truerolls-keys.json` through DNS and proxy routing. `transcript_url` is API-relative, and `KD_PUBLIC_BASE_URL` is currently not read by any route. Build the site with `VITE_API_URL` set to that origin, or `/api` when it is routed same-origin. Never set `VITE_DEMO_FALLBACK` for a public build. |
 
 ## Transport And Credentials
 
@@ -49,6 +50,9 @@ adding authentication threat-model and CSRF review.
 - Alert on `roll.shed`, `roll.timeout`, global-cap 429s, lock-release failures, drand relay failures,
   signer startup failures, DB pool saturation, Redis memory/evictions, S3 errors, and health
   degradation.
+- Point browser, container, and platform liveness checks at `/livez`, which does no dependency I/O.
+  Plain Docker restart policies act on container exit, not on health status, so an unhealthy probe
+  alone does not restart the API. Dependency readiness is a `/healthz` and alerting concern.
 - Bound `/healthz` and `/v1/drand/health` at the deployment edge. The application currently leaves
   both public and unthrottled; they perform backend or public-network work and are operational probes,
   not cost-free endpoints.
@@ -116,5 +120,6 @@ does not bound every read, verification, health, or egress cost.
 - HTTPS/private-network and least-privilege credentials configured,
 - key set reachable and production test-key rejection observed,
 - logs, alerts, retention, backups, restore, rollback, and incident contacts configured,
-- candidate image health and live tamper workflow pass,
+- candidate image health and live tamper workflow pass; acceptance reads the `/healthz` body and requires
+  `"status":"ok"`, because the endpoint returns HTTP 200 even when degraded,
 - exact owner commit has green remote deterministic, controlled-integration, and external-network CI.
