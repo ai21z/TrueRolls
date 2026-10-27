@@ -1,0 +1,44 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Documented public TrueRolls test signer material at approved fixture and test paths"
+condition = "AND"
+regexTarget = "secret"
+paths = [
+  '''(?:^|/)\.github/workflows/ci\.yml$''',
+  '''(?:^|/)crates/kd-api/src/config\.rs$''',
+  '''(?:^|/)crates/kd-api/src/routes/roll\.rs$''',
+  '''(?:^|/)crates/kd-api/src/state\.rs$''',
+  '''(?:^|/)crates/kd-cli/tests/gen_goldens\.rs$''',
+  '''(?:^|/)crates/kd-cli/tests/goldens\.rs$''',
+  '''(?:^|/)crates/kd-core-wasm/src/lib\.rs$''',
+  '''(?:^|/)crates/kd-receipt/src/lib\.rs$''',
+  '''(?:^|/)crates/kd-receipt/src/sign\.rs$''',
+  '''(?:^|/)crates/kd-worker-wasm/src/lib\.rs$''',
+  '''(?:^|/)docs/operational-security-audit\.md$''',
+  '''(?:^|/)docs/verifying\.md$''',
+  '''(?:^|/)docs/how-to/key-rotation\.md$''',
+  '''(?:^|/)goldens/README\.md$''',
+  '''(?:^|/)goldens/golden_receipt_0[1-5].*\.json$''',
+  '''(?:^|/)infra/docker-compose\.candidate\.yml$''',
+  '''(?:^|/)scripts/README\.md$''',
+  '''(?:^|/)scripts/dev-up\.ps1$''',
+  '''(?:^|/)scripts/wasm-receipt-parity\.mjs$''',
+  '''(?:^|/)services/loom-demo/e2e/service-free\.spec\.ts$''',
+  '''(?:^|/)services/loom-demo/src/api/keys\.ts$''',
+  '''(?:^|/)services/loom-demo/src/generated/receiptFixtures\.ts$''',
+  '''(?:^|/)services/loom-demo/src/landing/behind/BehindARoll\.tsx$''',
+  '''(?:^|/)services/loom-demo/src/landing/verify/Verify\.tsx$''',
+]
+regexes = [
+  '''^0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef$''',
+  '''^89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567$''',
+  '''^IHoGeJKCHiXXcPH7oMR8Ef9LgT5UFi7Onrg54HYjGrY=$''',
+  '''^QycWCxDM\+\+7wJJeyTQHm3h8dNWxhPllY98M8wkVLFrQ=$''',
+  '''^a5de8cd6e63465bdfe3f4a7e8b5eefbb639b1e6415549567db780e3cd91d62e0$''',
+  '''^s3_put_failed$''',
+]

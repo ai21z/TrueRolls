@@ -3,6 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,36 +16,39 @@ env:
 
 jobs:
   rust:
-    name: Rust fmt, clippy, tests, goldens
-    runs-on: ubuntu-latest
+    name: "[D] Rust fmt, clippy, tests, goldens"
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install native build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake nasm pkg-config libssl-dev
 
-      - name: Rust toolchain
-        run: rustup show
+      - name: Record Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustc --version --verbose
+          cargo --version
 
       - name: Format
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Workspace tests
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-features
 
       - name: Golden tests
-        run: cargo test -p kd-cli --test goldens
+        run: cargo test --locked -p kd-cli --test goldens
 
   wasm-parity:
-    name: Committed wasm runtime parity
-    runs-on: ubuntu-latest
+    name: "[D] Fresh WASM parity"
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install native build tools
         run: |
@@ -49,42 +58,66 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.14.0 --locked
 
+      - name: Verify packaged verifier licenses are exact
+        run: |
+          cmp LICENSE-VERIFYING.md crates/kd-core-wasm/LICENSE
+          cmp LICENSE-VERIFYING.md packages/kd-core-wasm/LICENSE
+
       - name: Rebuild wasm into scratch directory
         run: |
           rm -rf outputs/ci-kd-core-wasm
           mkdir -p outputs
-          wasm-pack build crates/kd-core-wasm --target web --out-dir ../../outputs/ci-kd-core-wasm
+          wasm-pack build crates/kd-core-wasm --target web --out-dir ../../outputs/ci-kd-core-wasm -- --locked
 
       - name: Compare committed and rebuilt wasm runtime math
-        run: |
-          set -euo pipefail
-          node scripts/wasm-parity.mjs packages/kd-core-wasm outputs/ci-kd-core-wasm
+        run: node scripts/wasm-parity.mjs packages/kd-core-wasm outputs/ci-kd-core-wasm
+
+      - name: Compare committed and rebuilt wasm receipt verifier
+        run: node scripts/wasm-receipt-parity.mjs packages/kd-core-wasm outputs/ci-kd-core-wasm
 
   ui:
-    name: Loom demo build and lint
-    runs-on: ubuntu-latest
+    name: "[D] Loom demo build, lint, unit tests"
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 22.22.2
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Enable pnpm
+      - name: Enable pinned pnpm
         run: corepack enable
 
       - name: Install dependencies
         run: corepack pnpm -C services/loom-demo install --frozen-lockfile
 
+      - name: Check browser fixtures match committed goldens
+        run: corepack pnpm -C services/loom-demo fixtures:check
+
       - name: Build
         run: corepack pnpm -C services/loom-demo build
+
+      - name: Enforce bundle budgets and lazy hero split
+        run: corepack pnpm -C services/loom-demo bundle:check
 
       - name: Lint
         run: corepack pnpm -C services/loom-demo lint
 
-  integration:
-    name: Live kd-api integration
-    runs-on: ubuntu-latest
+      - name: Unit tests
+        run: corepack pnpm -C services/loom-demo test
+
+      - name: Install Playwright Chromium only
+        run: corepack pnpm -C services/loom-demo exec playwright install --with-deps chromium
+
+      - name: Service-free browser gates
+        run: corepack pnpm -C services/loom-demo test:e2e
+
+  integration-controlled:
+    name: "[C] Local-stack health and verify integration"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       DATABASE_URL: postgres://kd:kd_dev_only_pw@127.0.0.1:5432/kd
       REDIS_URL: redis://:kd_dev_only@127.0.0.1:6379
@@ -101,14 +134,14 @@ jobs:
       API_BASE_URL: http://127.0.0.1:8080
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install native build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake nasm pkg-config libssl-dev curl
 
-      - name: Start Postgres, Redis, and MinIO
+      - name: Start controlled local infrastructure
         run: |
           cp .env.example infra/.env
           docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
@@ -132,13 +165,13 @@ jobs:
           docker exec kd-minio mc mb --ignore-existing local/"$S3_BUCKET"
 
       - name: Build kd-api
-        run: cargo build -p kd-api
+        run: cargo build --locked -p kd-api
 
       - name: Launch kd-api
         run: |
           mkdir -p outputs
-          target/debug/kd-api > outputs/kd-api-ci.log 2> outputs/kd-api-ci.log.err &
-          echo "$!" > outputs/kd-api-ci.pid
+          target/debug/kd-api > outputs/kd-api-controlled.log 2> outputs/kd-api-controlled.log.err &
+          echo "$!" > outputs/kd-api-controlled.pid
           for attempt in {1..60}; do
             echo "waiting for kd-api health (attempt $attempt)"
             if curl -fsS "$API_BASE_URL/healthz"; then
@@ -147,53 +180,224 @@ jobs:
             sleep 2
           done
           echo "kd-api did not become healthy"
-          tail -100 outputs/kd-api-ci.log || true
-          tail -100 outputs/kd-api-ci.log.err || true
+          tail -100 outputs/kd-api-controlled.log || true
+          tail -100 outputs/kd-api-controlled.log.err || true
           exit 1
 
-      - name: Run ignored live integration tests
+      - name: Run controlled health integration binary
         run: |
           set -euo pipefail
-          cargo test -p kd-api --all-features -- --include-ignored 2>&1 | tee outputs/kd-api-integration-tests.log
+          cargo test --locked -p kd-api --test health -- --include-ignored --nocapture 2>&1 | tee outputs/health-integration.log
 
-      - name: Assert live integration tests executed
+      - name: Prove controlled health tests executed
         run: |
           set -euo pipefail
-          log=outputs/kd-api-integration-tests.log
-          grep -q "running 36 tests" "$log"
-          grep -q "healthz_ok_or_degraded_has_fields ... ok" "$log"
-          grep -q "get_by_id_and_by_idem_key_consistent ... ok" "$log"
-          grep -q "post_roll_201_then_200_on_same_idem_key ... ok" "$log"
-          grep -q "post_roll_conflict_on_same_key_different_body ... ok" "$log"
-          grep -q "post_roll_validation_errors ... ok" "$log"
-          grep -q "post_roll_rejects_already_published_drand_target ... ok" "$log"
-          grep -q "post_roll_concurrent_same_key_thundering_herd ... ok" "$log"
-          grep -q "verify_d6_happy_path ... ok" "$log"
-          grep -q "verify_d20_happy_path ... ok" "$log"
-          grep -q "verify_d100_happy_path ... ok" "$log"
-          grep -q "verify_tampered_face_returns_422 ... ok" "$log"
-          grep -q "verify_tampered_kappa_returns_422 ... ok" "$log"
-          grep -q "verify_tampered_draw_u64_returns_422 ... ok" "$log"
-          grep -q "verify_bad_version_returns_400 ... ok" "$log"
-          grep -q "verify_bad_die_returns_400 ... ok" "$log"
-          grep -q "verify_kappa_zero_happy_path ... ok" "$log"
-          grep -q "verify_negative_kappa_happy_path ... ok" "$log"
-          grep -q "verify_kappa_above_one_returns_400 ... ok" "$log"
-          grep -q "verify_kappa_below_neg_one_returns_400 ... ok" "$log"
-          grep -q "verify_receipt_bad_math_param_version_returns_400 ... ok" "$log"
+          log=outputs/health-integration.log
+          grep -Fq "test healthz_ok_or_degraded_has_fields ... ok" "$log"
+          grep -Eq "test result: ok\. [1-9][0-9]* passed; 0 failed;" "$log"
+          ! grep -Eq "test result: FAILED|[1-9][0-9]* failed" "$log"
+
+      - name: Run controlled verify integration binary
+        run: |
+          set -euo pipefail
+          cargo test --locked -p kd-api --test verify -- --include-ignored --nocapture 2>&1 | tee outputs/verify-integration.log
+
+      - name: Prove controlled verify tests executed
+        run: |
+          set -euo pipefail
+          log=outputs/verify-integration.log
+          for test_name in \
+            verify_d6_happy_path \
+            verify_d20_happy_path \
+            verify_d100_happy_path \
+            verify_tampered_face_returns_422 \
+            verify_tampered_kappa_returns_422 \
+            verify_tampered_draw_u64_returns_422 \
+            verify_bad_version_returns_400 \
+            verify_bad_die_returns_400 \
+            verify_kappa_zero_happy_path \
+            verify_negative_kappa_happy_path \
+            verify_kappa_above_one_returns_400 \
+            verify_kappa_below_neg_one_returns_400 \
+            verify_receipt_bad_math_param_version_returns_400; do
+            grep -Fq "test $test_name ... ok" "$log"
+          done
+          grep -Eq "test result: ok\. [1-9][0-9]* passed; 0 failed;" "$log"
+          ! grep -Eq "test result: FAILED|[1-9][0-9]* failed" "$log"
 
       - name: Stop kd-api
         if: always()
         run: |
-          if [ -f outputs/kd-api-ci.pid ]; then
-            kill "$(cat outputs/kd-api-ci.pid)" || true
+          if [ -f outputs/kd-api-controlled.pid ]; then
+            kill "$(cat outputs/kd-api-controlled.pid)" || true
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: kd-api-integration-logs
-          path: outputs/kd-api-*.log*
+          name: kd-api-controlled-integration-logs
+          path: outputs/*integration.log
+
+      - name: Stop infrastructure
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env down
+
+  integration-public-drand:
+    name: "[X] Public-drand roll integration"
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: postgres://kd:kd_dev_only_pw@127.0.0.1:5432/kd
+      REDIS_URL: redis://:kd_dev_only@127.0.0.1:6379
+      S3_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: kd-transcripts
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: kdadmin
+      AWS_SECRET_ACCESS_KEY: kd_dev_only_123
+      KD_SIGNING_ED25519_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      KD_SIGNING_KID: test-kid-1
+      API_HOST: 127.0.0.1
+      API_PORT: "8080"
+      KD_ENV: dev
+      API_BASE_URL: http://127.0.0.1:8080
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.2
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install UI dependencies
+        run: corepack pnpm -C services/loom-demo install --frozen-lockfile
+
+      - name: Build UI for live browser gate
+        run: corepack pnpm -C services/loom-demo build
+
+      - name: Install Playwright Chromium only
+        run: corepack pnpm -C services/loom-demo exec playwright install --with-deps chromium
+
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm pkg-config libssl-dev curl
+
+      - name: Start local infrastructure for external-network tests
+        run: |
+          cp .env.example infra/.env
+          docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
+          for attempt in {1..60}; do
+            healthy=$(docker ps --filter 'name=kd-' --format '{{.Status}}' | grep -c healthy || true)
+            echo "healthy services: $healthy/3 (attempt $attempt)"
+            if [ "$healthy" -ge 3 ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker ps
+          docker logs kd-postgres || true
+          docker logs kd-redis || true
+          docker logs kd-minio || true
+          exit 1
+
+      - name: Create transcript bucket
+        run: |
+          docker exec kd-minio mc alias set local http://localhost:9000 "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"
+          docker exec kd-minio mc mb --ignore-existing local/"$S3_BUCKET"
+
+      - name: Build kd-api
+        run: cargo build --locked -p kd-api
+
+      - name: Launch kd-api
+        run: |
+          mkdir -p outputs
+          target/debug/kd-api > outputs/kd-api-public-drand.log 2> outputs/kd-api-public-drand.log.err &
+          echo "$!" > outputs/kd-api-public-drand.pid
+          for attempt in {1..60}; do
+            echo "waiting for kd-api health (attempt $attempt)"
+            if curl -fsS "$API_BASE_URL/healthz"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "kd-api did not become healthy"
+          tail -100 outputs/kd-api-public-drand.log || true
+          tail -100 outputs/kd-api-public-drand.log.err || true
+          exit 1
+
+      - name: Record external-network evidence context
+        run: |
+          {
+            echo "commit_sha=$(git rev-parse HEAD)"
+            echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "chain_hash=52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971"
+            echo "client_fixture_relays=https://api.drand.sh,https://api2.drand.sh,https://api3.drand.sh"
+            echo "client_fixture_attempts_per_pulse=3_parallel"
+            echo "server_relays=https://api.drand.sh,https://api2.drand.sh,https://api3.drand.sh"
+            echo "server_application_retries=0"
+          } | tee outputs/public-drand-context.log
+
+      - name: Run public-drand roll GET integration binary
+        run: |
+          set -euo pipefail
+          cargo test --locked -p kd-api --test roll_get -- --include-ignored --nocapture 2>&1 | tee outputs/roll-get-integration.log
+
+      - name: Prove roll GET tests executed
+        run: |
+          set -euo pipefail
+          log=outputs/roll-get-integration.log
+          grep -Fq "test get_by_id_and_by_idem_key_consistent ... ok" "$log"
+          grep -Eq "test result: ok\. [1-9][0-9]* passed; 0 failed;" "$log"
+          ! grep -Eq "test result: FAILED|[1-9][0-9]* failed" "$log"
+
+      - name: Run public-drand idempotency integration binary
+        run: |
+          set -euo pipefail
+          cargo test --locked -p kd-api --test roll_idempotency -- --include-ignored --nocapture 2>&1 | tee outputs/roll-idempotency-integration.log
+
+      - name: Prove idempotency tests executed
+        run: |
+          set -euo pipefail
+          log=outputs/roll-idempotency-integration.log
+          for test_name in \
+            post_roll_201_then_200_on_same_idem_key \
+            post_roll_conflict_on_same_key_different_body \
+            post_roll_validation_errors \
+            post_roll_rejects_already_published_drand_target \
+            post_roll_concurrent_same_key_thundering_herd; do
+            grep -Fq "test $test_name ... ok" "$log"
+          done
+          grep -Eq "test result: ok\. [1-9][0-9]* passed; 0 failed;" "$log"
+          ! grep -Eq "test result: FAILED|[1-9][0-9]* failed" "$log"
+
+      - name: Run live-drand browser gate
+        env:
+          CANDIDATE_FINGERPRINT: ${{ github.sha }}
+        run: corepack pnpm -C services/loom-demo test:e2e:live 2>&1 | tee outputs/live-drand-browser.log
+
+      - name: Stop kd-api
+        if: always()
+        run: |
+          if [ -f outputs/kd-api-public-drand.pid ]; then
+            kill "$(cat outputs/kd-api-public-drand.pid)" || true
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: kd-api-public-drand-integration-logs
+          path: |
+            outputs/*integration.log
+            outputs/public-drand-context.log
+            outputs/live-drand-browser.log
+            outputs/playwright-results/
+            outputs/playwright-report/
 
       - name: Stop infrastructure
         if: always()
