@@ -133,9 +133,19 @@ jobs:
 
       # Each exception is documented in docs/dependency-review-policy.md. RUSTSEC-2023-0071 is
       # accepted only while rsa stays out of the compiled graph, so reachability fails the job.
+      # An unreachable rsa exits 0 ("nothing to print"). Any non-zero exit means reachability was
+      # not established and fails closed, including rsa leaving Cargo.lock (the ignore is stale).
       - name: Assert rsa stays unreachable
         run: |
-          out="$(cargo tree --locked --workspace --all-features --target all -i rsa 2>&1 || true)"
+          set +e
+          out="$(cargo tree --locked --workspace --all-features --target all -i rsa 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            printf '%s\n' "$out"
+            echo "::error::cargo tree exited $status; rsa reachability not established (if rsa left Cargo.lock, remove the RUSTSEC-2023-0071 exception)"
+            exit 1
+          fi
           if printf '%s\n' "$out" | grep -q '^rsa v'; then
             printf '%s\n' "$out"
             echo "::error::rsa is now in the compiled graph; RUSTSEC-2023-0071 exception no longer applies"

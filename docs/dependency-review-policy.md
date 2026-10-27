@@ -53,6 +53,11 @@ the same job if `cargo tree --locked --workspace --all-features --target all -i 
 therefore blocks the candidate until the advisory is resolved or the owner records an explicit
 security decision.
 
+The check fails closed. An unreachable `rsa` makes `cargo tree` exit 0 with "nothing to print"; any
+non-zero exit fails the job, because reachability was not established. That includes `rsa` leaving
+`Cargo.lock` entirely (exit 101, "did not match any packages"), which means the exception is stale
+and should be removed.
+
 ## Current Unsoundness Exception
 
 `RUSTSEC-2026-0253` reports `lru 0.16.4` as unsound: if a stored key's `Drop` implementation panics
