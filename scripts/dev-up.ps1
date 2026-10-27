@@ -10,14 +10,11 @@
 
   Order matters and is enforced here:
     1. docker compose up   (Postgres / Redis / MinIO) + wait for healthy
-    2. sqlx migrate run     (schema must exist BEFORE the build:
-                             kd-api's sqlx::query! macros validate against
-                             the live DB at COMPILE time)
+    2. sqlx migrate run     (runtime schema must be current before launch;
+                             committed .sqlx metadata supports offline builds)
     3. create the S3 bucket (idempotent)
-    4. cargo build -p kd-api (DEBUG - reuses the already-compiled
-                             aws-lc-sys artifact; a clean/release build
-                             would need NASM + cmake, which this repo's
-                             aws-lc-sys dependency requires on Windows)
+    4. cargo build --locked -p kd-api (DEBUG; a clean Windows build of
+                             aws-lc-sys requires NASM + cmake on PATH)
     5. launch target/debug/kd-api.exe detached (NOT `cargo run`, so a later
                              `cargo test` never collides with the exe lock)
     6. health-gate /healthz
@@ -64,7 +61,7 @@ do {
 if ($healthy -lt 3) { Die "infra did not become healthy in 120s. Check: docker ps" }
 Write-Host "  postgres / redis / minio healthy"
 
-# --- 2. migrations (BEFORE build - compile-time sqlx checks) -------------------
+# --- 2. migrations (runtime schema before launch) -----------------------------
 Step 2 "Apply database migrations"
 $env:DATABASE_URL = $DB
 sqlx migrate run --source crates/kd-api/migrations | ForEach-Object { "  $_" }
@@ -75,7 +72,7 @@ docker exec kd-minio mc alias set local http://localhost:9000 kdadmin kd_dev_onl
 docker exec kd-minio mc mb --ignore-existing local/kd-transcripts *> $null
 Write-Host "  bucket kd-transcripts ready"
 
-# --- 4. build (debug; reuses aws-lc-sys, no NASM needed) -----------------------
+# --- 4. locked debug build -----------------------------------------------------
 Step 4 "Build kd-api (debug)"
 # Stop a running kd-api BEFORE building: Windows will not let cargo replace a
 # locked exe, so a re-run with a live server would otherwise abort right here.
@@ -83,8 +80,8 @@ if (Get-Process kd-api -ErrorAction SilentlyContinue) {
   Write-Host "  kd-api already running - stopping it first"
   Get-Process kd-api | Stop-Process -Force; Start-Sleep 2
 }
-cargo build -p kd-api 2>&1 | Select-Object -Last 1 | ForEach-Object { "  $_" }
-if ($LASTEXITCODE -ne 0) { Die "cargo build -p kd-api failed (a clean/release build needs NASM + cmake for aws-lc-sys)." }
+cargo build --locked -p kd-api 2>&1 | Select-Object -Last 1 | ForEach-Object { "  $_" }
+if ($LASTEXITCODE -ne 0) { Die "cargo build --locked -p kd-api failed (a clean Windows build needs NASM + cmake for aws-lc-sys)." }
 
 # --- 5. launch kd-api detached, with the TEST signing key ---------------------
 Step 5 "Launch kd-api (detached, test signing key)"
@@ -94,8 +91,14 @@ $env:S3_BUCKET  = 'kd-transcripts'
 $env:AWS_REGION = 'us-east-1'
 $env:AWS_ACCESS_KEY_ID = 'kdadmin'
 $env:AWS_SECRET_ACCESS_KEY = 'kd_dev_only_123'
-$env:KD_SIGNING_ED25519_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' # TEST KEY - never production
-$env:KD_SIGNING_KID = 'test-kid-1'
+# Default to the legacy single-key TEST signer, but yield to a KD_SIGNING_KEYS
+# already in the environment (the multi-key rotation config). kd-api hard-refuses
+# the two together, so setting both here would block boot when following the
+# key-rotation runbook. TEST KEY - never production.
+if (-not $env:KD_SIGNING_KEYS) {
+  $env:KD_SIGNING_ED25519_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  $env:KD_SIGNING_KID = 'test-kid-1'
+}
 $env:API_HOST = '127.0.0.1'
 $env:API_PORT = "$Port"
 New-Item -ItemType Directory -Force outputs *> $null

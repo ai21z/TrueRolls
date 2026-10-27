@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: kd
+      POSTGRES_PASSWORD: candidate_dev_only_pw
+      POSTGRES_DB: kd
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=trust
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [truerolls-candidate]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kd -d kd -h 127.0.0.1"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    command: ["redis-server", "--requirepass", "candidate_dev_only_redis"]
+    networks: [truerolls-candidate]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "candidate_dev_only_redis", "PING"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: candidateadmin
+      MINIO_ROOT_PASSWORD: candidate_dev_only_minio
+    volumes:
+      - minio-data:/data
+    networks: [truerolls-candidate]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  minio-init:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 candidateadmin candidate_dev_only_minio
+        && mc mb --ignore-existing local/kd-transcripts
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [truerolls-candidate]
+    restart: "no"
+
+  api:
+    image: truerolls-kd-api:a-tier-candidate
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      DATABASE_URL: postgres://kd:candidate_dev_only_pw@postgres:5432/kd
+      REDIS_URL: redis://:candidate_dev_only_redis@redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: kd-transcripts
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: candidateadmin
+      AWS_SECRET_ACCESS_KEY: candidate_dev_only_minio
+      KD_ENV: dev
+      KD_PUBLIC_BASE_URL: http://127.0.0.1:18080
+      KD_SIGNING_ED25519_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      KD_SIGNING_KID: test-kid-1
+      KD_TRUSTED_PROXY: peer
+      KD_ROLL_GLOBAL_CAP: 100
+      KD_ROLL_GLOBAL_CAP_WINDOW_SECS: 3600
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [truerolls-candidate]
+    ports:
+      - "127.0.0.1:18080:8080"
+
+networks:
+  truerolls-candidate:
+    name: truerolls-candidate
+
+volumes:
+  postgres-data:
+  minio-data:
