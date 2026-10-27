@@ -157,6 +157,11 @@ export function Landing({ state }: Props) {
           Demo mode, receipts are simulated. Start the API for real Ed25519 signing.
         </div>
       )}
+      {state.apiUnavailable && (
+        <div className={css.mockBanner} role="status" data-api-state="unavailable">
+          Live rolling is unavailable right now. Nothing is simulated; try again shortly.
+        </div>
+      )}
 
       <header className={css.nav}>
         <div className={css.navLeft}>

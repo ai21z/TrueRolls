@@ -5,9 +5,26 @@ import { parseTruerollsKeys } from './keys';
 import { fetchLatestDrandPulse } from './drandClient';
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 const TARGET_DELAY_ROUNDS = 2;
-let _mockMode = false;
+// Simulated receipts are a local-development and test affordance. A production build
+// never falls back to them unless VITE_DEMO_FALLBACK=1 was set at build time.
+const DEMO_FALLBACK_ENABLED =
+  import.meta.env.DEV || import.meta.env.VITE_DEMO_FALLBACK === '1';
+export const API_UNAVAILABLE_MESSAGE =
+  'The TrueRolls API is unavailable right now. No receipt was created.';
+
+/** live: real API; demo: simulated receipts; unavailable: API unreachable, nothing simulated. */
+export type ClientMode = 'live' | 'demo' | 'unavailable';
+export function resolveClientMode(apiReachable: boolean, demoFallback: boolean): ClientMode {
+  if (apiReachable) return 'live';
+  return demoFallback ? 'demo' : 'unavailable';
+}
+
+let _mode: ClientMode = 'live';
 export function isMockMode(): boolean {
-  return _mockMode;
+  return _mode === 'demo';
+}
+export function getClientMode(): ClientMode {
+  return _mode;
 }
 export interface TruerollsKey {
   kid: string;
@@ -30,25 +47,37 @@ export function getApiBaseForCli(): string {
   return new URL(BASE, window.location.origin).toString().replace(/\/$/, '');
 }
 
-export async function initClient(): Promise<boolean> {
-  // Kick off the kd-core wasm engine alongside the health probe. The engine
+// Liveness only: /livez does no backend I/O, so every page load does not touch the
+// database, Redis, or object storage.
+async function probeApi(): Promise<boolean> {
+  try {
+    const res = await fetch(BASE + '/livez', { signal: AbortSignal.timeout(3000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function initClient(): Promise<ClientMode> {
+  // Kick off the kd-core wasm engine alongside the liveness probe. The engine
   // is required for the distribution preview and for mock-mode rolls. An init
   // failure is surfaced (not silently swallowed into fallback math).
   const wasmInit = initKdCoreWasm().catch((err: unknown) => {
     console.error('[kd] kd-core wasm engine failed to initialize:', err);
   });
-  let live = false;
-  try {
-    const res = await fetch(BASE + '/healthz', { signal: AbortSignal.timeout(3000) });
-    if (res.ok) live = true;
-  } catch { /* unreachable */ }
-  _mockMode = !live;
-  if (!live) console.warn('[kd] API unreachable, mock mode');
+  _mode = resolveClientMode(await probeApi(), DEMO_FALLBACK_ENABLED);
+  if (_mode === 'demo') console.warn('[kd] API unreachable, mock mode');
+  if (_mode === 'unavailable') console.warn('[kd] API unreachable, live rolling unavailable');
   await wasmInit;
-  return live;
+  return _mode;
 }
 export async function postRoll(die: Die, kappa: number): Promise<RollResponse> {
-  if (_mockMode) return mockRoll(die, kappa);
+  if (_mode === 'demo') return mockRoll(die, kappa);
+  if (_mode === 'unavailable') {
+    // Re-probe so a cold start or brief outage recovers without a page reload.
+    if (!(await probeApi())) throw new Error(API_UNAVAILABLE_MESSAGE);
+    _mode = 'live';
+  }
   const clientNonce = randomHex32();
   const observed = await fetchLatestDrandPulse();
   const body: RollRequest = {
@@ -62,15 +91,35 @@ export async function postRoll(die: Die, kappa: number): Promise<RollResponse> {
       target_round: observed.round + TARGET_DELAY_ROUNDS,
     },
   };
-  const res = await fetch(BASE + '/v1/roll', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(BASE + '/v1/roll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    // No HTTP response at all: let liveness decide whether the API is gone.
+    if (await markUnavailableIfApiDown()) throw new Error(API_UNAVAILABLE_MESSAGE);
+    throw err;
+  }
   if (!res.ok && res.status !== 201) {
+    // A 5xx can come from the edge or tunnel rather than the API. A 4xx (400, 409, 429)
+    // is an answer from a reachable API and never changes the connection state.
+    if (res.status >= 500 && (await markUnavailableIfApiDown())) {
+      throw new Error(API_UNAVAILABLE_MESSAGE);
+    }
     throw new Error('Roll failed (' + res.status + '): ' + (await res.text()));
   }
   return res.json() as Promise<RollResponse>;
+}
+
+// After a failed live call, re-probe liveness. A down API becomes 'unavailable', never
+// 'demo': simulated receipts are only ever chosen at startup.
+async function markUnavailableIfApiDown(): Promise<boolean> {
+  if (await probeApi()) return false;
+  _mode = 'unavailable';
+  return true;
 }
 
 function randomHex32(): string {
@@ -79,7 +128,7 @@ function randomHex32(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 export async function postVerify(rollId: string): Promise<VerifyResponse> {
-  if (_mockMode) return mockVerify();
+  if (_mode === 'demo') return mockVerify();
   // GET /v1/verify/:id, server fetches transcript from S3 and re-verifies
   // (legacy math-only path, performs NO signature checking)
   const res = await fetch(BASE + `/v1/verify/${rollId}`, { method: 'GET' });
@@ -99,7 +148,7 @@ export async function postVerify(rollId: string): Promise<VerifyResponse> {
  * flags. Only malformed bodies return 400.
  */
 export async function postVerifyReceipt(receipt: unknown): Promise<ReceiptVerifyResponse> {
-  if (_mockMode) {
+  if (_mode === 'demo') {
     throw new Error('receipt verification requires live API');
   }
   const res = await fetch(BASE + '/v1/verify', {
@@ -114,7 +163,7 @@ export async function postVerifyReceipt(receipt: unknown): Promise<ReceiptVerify
 }
 /** GET /.well-known/truerolls-keys.json, published Ed25519 verification keys. */
 export async function getTruerollsKeys(): Promise<TruerollsKeys> {
-  if (_mockMode) {
+  if (_mode === 'demo') {
     throw new Error('key fetch requires live API');
   }
   const res = await fetch(BASE + '/.well-known/truerolls-keys.json');

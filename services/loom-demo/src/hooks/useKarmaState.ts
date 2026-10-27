@@ -1,6 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow, VerifyStatus } from '../types/kd';
-import { initClient, isMockMode, postRoll, postVerify, postVerifyReceipt } from '../api/client';
+import {
+  getClientMode,
+  initClient,
+  isMockMode,
+  postRoll,
+  postVerify,
+  postVerifyReceipt,
+  type ClientMode,
+} from '../api/client';
 import { buildReceiptBody, hasDrandProof, receiptVerifierAccepts } from '../api/receipt';
 import { isMockArtifact, normalizePersistedVerifyStatus } from '../api/trustPresentation';
 
@@ -89,7 +97,7 @@ export function useKarmaState() {
   const [rolls, setRolls] = useState<TranscriptEntry[]>(loadRolls);
   const [isRolling, setIsRolling] = useState(false);
   const [rollStatus, setRollStatus] = useState<string | null>(null);
-  const [mock, setMock] = useState(false);
+  const [mode, setMode] = useState<ClientMode>('live');
   const [ready, setReady] = useState(false);
   const [rollError, setRollError] = useState<string | null>(null);
   const nextId = useRef(initialNextId(loadRolls()));
@@ -100,8 +108,8 @@ export function useKarmaState() {
   }, [rolls]);
 
   useEffect(() => {
-    initClient().then((live) => {
-      setMock(!live);
+    initClient().then((initialMode) => {
+      setMode(initialMode);
       setReady(true);
     });
   }, []);
@@ -126,6 +134,8 @@ export function useKarmaState() {
       console.warn('[kd] roll failed:', msg);
       setRollError(msg);
     } finally {
+      // A roll re-probes an unavailable API, so the connection state may have changed.
+      setMode(getClientMode());
       setIsRolling(false);
       setRollStatus(null);
     }
@@ -272,7 +282,8 @@ export function useKarmaState() {
     rolls,
     isRolling,
     rollStatus,
-    mock: mock || isMockMode(),
+    mock: mode === 'demo' || isMockMode(),
+    apiUnavailable: mode === 'unavailable',
     ready,
     roll,
     rollError,

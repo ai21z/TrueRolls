@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
-    "test:e2e": "playwright test --project=service-free-desktop --project=service-free-mobile",
+    "test:e2e": "playwright test --project=service-free-desktop --project=service-free-mobile --project=production-mode-desktop",
     "test:e2e:live": "playwright test --project=live-drand-desktop",
     "perf:observe": "node scripts/performance-observation.mjs"
   },

@@ -105,8 +105,10 @@ corepack pnpm -C services/loom-demo test
 corepack pnpm -C services/loom-demo build
 ```
 
-With no API reachable the demo runs in **demo mode** (receipts are simulated -
-that is *not* cryptographic verification). Start the API for real Ed25519
+In `dev`, or a build made with `VITE_DEMO_FALLBACK=1`, an unreachable API puts the demo in
+**demo mode** (receipts are simulated -
+that is *not* cryptographic verification). A production build without that flag shows the API
+as unavailable instead and never simulates receipts. Start the API for real Ed25519
 signing and drand-backed receipts.
 
 ### The local API stack

@@ -21,11 +21,13 @@ interface Props {
   die: Die;
   kappa: number;
   mock: boolean;
+  /** API unreachable and nothing simulated (production builds). */
+  unavailable?: boolean;
   onDieChange: (d: Die) => void;
   onKappaChange: (k: number) => void;
 }
 
-export function ControlRail({ die, kappa, mock, onDieChange, onKappaChange }: Props) {
+export function ControlRail({ die, kappa, mock, unavailable = false, onDieChange, onKappaChange }: Props) {
   const hint = kappaHint(kappa);
   const [showKappaHelp, setShowKappaHelp] = useState(false);
 
@@ -122,9 +124,9 @@ export function ControlRail({ die, kappa, mock, onDieChange, onKappaChange }: Pr
 
       <div className={css.section}>
         <span className={css.label}>Connection</span>
-        <InkFrame inline seed={74} className={`${css.badge} ${mock ? css.badgeMock : css.badgeLive}`}>
-          <span className={`${css.dot} ${mock ? css.dotMock : css.dotLive}`} />
-          {mock ? 'Demo mode' : 'API live'}
+        <InkFrame inline seed={74} className={`${css.badge} ${mock || unavailable ? css.badgeMock : css.badgeLive}`}>
+          <span className={`${css.dot} ${mock || unavailable ? css.dotMock : css.dotLive}`} />
+          {mock ? 'Demo mode' : unavailable ? 'API unavailable' : 'API live'}
         </InkFrame>
       </div>
 

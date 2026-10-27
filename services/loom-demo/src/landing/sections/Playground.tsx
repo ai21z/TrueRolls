@@ -32,6 +32,7 @@ export const Playground = forwardRef<HTMLElement, Props>(function Playground({ s
             die={state.die}
             kappa={state.kappa}
             mock={state.mock}
+            unavailable={state.apiUnavailable}
             onDieChange={state.setDie}
             onKappaChange={state.setKappa}
           />
