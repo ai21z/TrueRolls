@@ -22,14 +22,14 @@ fn build_verify_payload(die: &str, kappa: f64) -> Value {
         PARAM_VERSION, die::Die, distribution::compute_distribution, params::default_for_die,
         sample::prefix_cdf_index_from_u64,
     };
-    use rand::RngCore;
-
-    // Build the distribution and sample, mirroring roll_math.rs logic
+    // Build the distribution and map a fixed draw, mirroring roll_math.rs without
+    // introducing nondeterminism or a server-local RNG dependency into this test.
+    const DRAW: u64 = 0x0123_4567_89ab_cdef;
     let (face, draw_u64, alpha, kl, ev, probs_vec) = match die {
         "d6" => {
             let params = default_for_die(6);
             let out = compute_distribution::<6>(Die::<6>, kappa, &params).unwrap();
-            let draw = rand::rng().next_u64();
+            let draw = DRAW;
             let idx = prefix_cdf_index_from_u64::<6>(&out.probs, draw);
             let face = (idx + 1) as u32;
             let probs: Vec<f64> = out.probs.into_iter().collect();
@@ -38,7 +38,7 @@ fn build_verify_payload(die: &str, kappa: f64) -> Value {
         "d20" => {
             let params = default_for_die(20);
             let out = compute_distribution::<20>(Die::<20>, kappa, &params).unwrap();
-            let draw = rand::rng().next_u64();
+            let draw = DRAW;
             let idx = prefix_cdf_index_from_u64::<20>(&out.probs, draw);
             let face = (idx + 1) as u32;
             let probs: Vec<f64> = out.probs.into_iter().collect();
@@ -47,7 +47,7 @@ fn build_verify_payload(die: &str, kappa: f64) -> Value {
         "d100" => {
             let params = default_for_die(100);
             let out = compute_distribution::<100>(Die::<100>, kappa, &params).unwrap();
-            let draw = rand::rng().next_u64();
+            let draw = DRAW;
             let idx = prefix_cdf_index_from_u64::<100>(&out.probs, draw);
             let face = (idx + 1) as u32;
             let probs: Vec<f64> = out.probs.into_iter().collect();

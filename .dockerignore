@@ -18,6 +18,7 @@ infra/.env
 # VCS, IDE, transient outputs, OS cruft.
 .git/
 .gitignore
+.local-work/
 .vscode/
 .idea/
 outputs/

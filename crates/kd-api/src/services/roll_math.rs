@@ -10,7 +10,7 @@ use kd_core::{
     params::{Params, default_for_die},
     sample::prefix_cdf_index_from_u64,
 };
-use rand::RngCore;
+use rand_core::RngCore;
 
 /// What the route expects. If you already have this type, keep your version
 /// and adapt the return mapping below.
@@ -101,25 +101,6 @@ pub fn compute_roll_with_rng_labeled(
             param_version: KD_PARAM_VERSION,
         })
     })
-}
-
-/// Backward-compat: existing call sites can keep calling this variant. It will
-/// mark `sampling.rng = "unknown"`. Prefer the `_labeled` variant above.
-#[allow(dead_code)]
-pub fn compute_roll_with_rng(
-    die: &str,
-    kappa: f64,
-    rng: &mut impl RngCore,
-    params_override: Option<Params>,
-) -> anyhow::Result<ComputeResult> {
-    compute_roll_with_rng_labeled(die, kappa, rng, params_override, "unknown")
-}
-
-/// Convenience wrapper used by older call sites. Keep it compiling but use rand 0.9 API.
-#[allow(dead_code)]
-pub fn compute_roll(die: &str, kappa: f64, _seed: Option<&str>) -> anyhow::Result<ComputeResult> {
-    let mut rng = rand::rng(); // temporary fallback
-    compute_roll_with_rng_labeled(die, kappa, &mut rng, None, "thread_rng")
 }
 
 /// Internal enum to hold Output<N> of any supported die. Lets us extract common scalars.
