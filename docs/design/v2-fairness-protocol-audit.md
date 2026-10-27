@@ -2,7 +2,13 @@
 
 > **Provenance.** Adversarial audit, 2026-06-28, of [`v2-fairness-protocol.md`](v2-fairness-protocol.md) and the planned **Layer-2** batch-commitment design (many rolls committed under one pre-published Merkle root resolved by a single future drand round, with per-roll domain-separated HKDF seeds). The design doc is strong and already anticipates the major attack classes. This companion **confirms the sound parts against primary sources (RFC 6962, C2SP)** and **sharpens four under-stated gaps**. Related: [`beacon-skew-measurement.md`](beacon-skew-measurement.md).
 >
-> **Editor's correction (folded in by the human reviewer):** the audit agent originally called `crates/kd-api/src/services/rng.rs` (`kd-roll-v1`) "the only shipping seed-derivation code." That is stale. The **shipping v1 per-roll seed derivation is `kd_drand::derive_roll_seed`**, HKDF-SHA256, `salt = idem_payload_sha256`, `IKM = the target round randomness`, `info = JCS array` binding version/chain/**round**/die/kappa/nonce/idem-hash (`roll.rs:301`). It already binds the round. The older `rng.rs` module is **dead legacy**, not wired into `post_roll`. Where the catalogue below contrasts v2 against a "v1 with no round binding," that refers to the dead `rng.rs`, not the live drand path.
+> **Correction:** earlier catalogue text called `crates/kd-api/src/services/rng.rs` (`kd-roll-v1`)
+> "the only shipping seed-derivation code." That is stale. The shipping v1 per-roll seed derivation is
+> `kd_drand::derive_roll_seed`, HKDF-SHA256, `salt = idem_payload_sha256`, `IKM = the target-round
+> randomness`, and a JCS `info` array binding version, chain, round, die, kappa, nonce, and idem hash
+> (`roll.rs`). It already binds the round. The older `rng.rs` module was dead legacy and has been
+> removed. Where the catalogue below contrasts v2 against a "v1 with no round binding," that
+> refers to the historical deleted module, not the live drand path.
 
 **Status: design only, NOT YET BUILT.** No batch/Merkle code exists yet. Every `kd-receipt` v2 finding below is about code to be written. The existing design already covers grinding (A), withholding (B), backdating (C), equivocation (D), front-running (E), boundary-gaming (F), non-inclusion (G), downgrade (H) and correctly refuses a "trustless" claim.
 

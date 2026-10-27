@@ -10,8 +10,8 @@
 Companion notes:
 
 - [`../operational-security-audit.md`](../operational-security-audit.md)
-- [`l2-hardening-codex-brief.md`](l2-hardening-codex-brief.md)
-- [`global-mint-cap-review-brief.md`](global-mint-cap-review-brief.md)
+- [`../how-to/public-demo-operations.md`](../how-to/public-demo-operations.md)
+- [`../how-to/key-rotation.md`](../how-to/key-rotation.md)
 
 ---
 

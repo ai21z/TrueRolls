@@ -23,7 +23,7 @@ green.**
    in `window(R)`. Real witnesses are independent operators on **their own hosts and
    clocks**. Each witness must record *its own* role on *its own* host; a cross-host
    reducer joins them. (This needs a single-role mode of the recorder, or an equivalent
-   per-witness agent - see §6.)
+   per-witness recorder process - see §6.)
 2. **Clocks: free → NTP-disciplined + skew-bounded.** Across independent hosts,
    `window(R) = t_quorum_lost − t_server` is a difference of times on **different
    clocks**. Discipline every host, measure the residual inter-host skew bound `S`, and

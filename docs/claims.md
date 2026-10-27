@@ -32,20 +32,24 @@ favorable completed receipt. Strict witnessed fairness is the v2 protocol.
 
 ### Latency
 
-In this measured run, about 4 seconds was beacon wait. The protocol wait varies
-with round timing and network latency.
+Typical quicknet delay is target-round dependent. The live per-roll product uses
+`target_round = client_observed_round + 2`, so users should expect a short beacon
+wait plus network and signing time. There is no committed production measurement
+artifact yet.
 
 ### Comparison
 
-On-chain VRF systems often wait multiple block confirmations and can take much
-longer than drand quicknet.
+TrueRolls' current advantage is not an on-chain speed claim. It is a no-chain,
+no-token, portable receipt that verifies offline in a browser or CLI. Do not
+claim it is faster than a specific VRF system unless a committed benchmark and
+official source support the comparison.
 
 ## What Current TrueRolls Proves
 
 The live product mints `truerolls-drand-1` receipts.
 
-- **Tamper-evidence:** the receipt body is exactly what the named Ed25519 key
-  signed under JCS / RFC 8785 canonicalization.
+- **Tamper-evidence:** the receipt's JCS / RFC 8785 canonical signed content
+  matches what the named Ed25519 key signed.
 - **Drand seed provenance:** the verifier checks pinned quicknet parameters,
   BLS-verifies the client-observed and target pulses, checks
   `target_round = client_observed_round + 2`, checks

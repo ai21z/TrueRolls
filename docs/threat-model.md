@@ -2,13 +2,16 @@
 
 This document states what a TrueRolls receipt proves today and what it does not. Claims here are grounded in the shipping verifier/signing code (`crates/kd-receipt`), the drand verifier/derivation layer (`crates/kd-drand`), and the server integration (`crates/kd-api`).
 
-TrueRolls is proprietary software, all rights reserved. "You can run the verifier" means the verifier logic is shared by the server, CLI, and browser. It does not mean the source is openly licensed.
+TrueRolls is source-available proprietary software, not open source. "You can run the verifier"
+means the verifier logic is shared by the server, CLI, and browser. The exact dependency closure and
+permitted verification uses are defined in `LICENSE-VERIFYING.md`; it is not a license to operate a
+minting service or issue TrueRolls receipts.
 
 ## TL;DR
 
 Live TrueRolls rolls mint `truerolls-drand-1` receipts. A receipt that verifies `VALID` proves:
 
-1. **Tamper-evidence**, the receipt is bit-for-bit what the server's Ed25519 key signed.
+1. **Tamper-evidence**, the receipt's JCS-canonical signed values match what the server's Ed25519 key signed.
 2. **Drand seed provenance**, the roll seed re-derives from a BLS-verified drand quicknet target pulse, with `target_round = client_observed_round + 2`.
 3. **Deterministic replay**, the draw, face, and metrics reproduce from the receipt.
 4. **Bounded behavior-weighting**, the distribution is guard-capped by KL/EV limits, and out-of-range `kappa` is refused.

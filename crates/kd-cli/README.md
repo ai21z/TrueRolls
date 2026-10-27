@@ -10,7 +10,7 @@ Cross-platform CLI for the TrueRolls verifiable dice system.
 ## Quick Start
 
 ```bash
-cargo build -p kd-cli
+cargo build --locked -p kd-cli
 
 # Roll a d20 with κ=0.5
 ./target/debug/kd roll --kappa 0.5
@@ -31,11 +31,10 @@ guide with all options, examples, and CI integration instructions.
 ## Tests
 
 ```bash
-cargo test -p kd-cli
+cargo test --locked -p kd-cli
 ```
 
 22 integration tests covering:
 - Roll: basic, JSON, determinism, all die sizes, lambda override, file output, error cases
 - Verify: parameter mode (single, sweep, all dice), transcript mode (OK + tampered detection)
 - Help output
-

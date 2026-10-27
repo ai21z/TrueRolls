@@ -15,7 +15,7 @@ The browser verifier, the CLI (`kd verify --receipt`), and the server all run th
 
 | Check | What it does | What a pass means |
 |---|---|---|
-| Signature | Verifies `sig.signature_b64` as Ed25519 over the JCS-canonical receipt body, using the issuer key set or a supplied public key. | The receipt body is byte-for-byte what the named key holder signed. |
+| Signature | Verifies `sig.signature_b64` as Ed25519 over the JCS-canonical receipt body, using the issuer key set or a supplied public key. | The receipt's canonical signed values match what the named key holder signed. |
 | Drand | For `truerolls-drand-1`, checks pinned quicknet chain params, verifies the client-observed BLS pulse, requires `target_round = client_observed_round + 2`, verifies the target BLS pulse, checks `randomness = SHA256(signature)`, and re-derives the seed with canonical HKDF metadata. | The seed is bound to a real public drand quicknet pulse and to the client nonce/request. |
 | Seed replay | Reseeds ChaCha20 from `proof.rng.drbg_key_hex`, takes one `next_u64()`, and compares it to `proof.draw_u64`. | The published draw is exactly what that seed produces. |
 | Face | Recomputes the guarded distribution from `(die, kappa)` and maps `draw_u64` through prefix-CDF sampling. | The published face is the one the recomputed distribution produces. |
@@ -97,7 +97,7 @@ For production receipts, verify against the key set published by that production
 
 For `truerolls-drand-1`, `VALID` proves:
 
-- The receipt body is exactly what the named Ed25519 key signed.
+- The receipt's JCS-canonical signed values match what the named Ed25519 key signed.
 - The seed came from a verified public drand quicknet target pulse, with `target_round = client_observed_round + 2`.
 - The target pulse randomness is `SHA256(signature)`, and the seed re-derives from that randomness plus the client nonce/request binding.
 - The draw, face, and bounded math replay exactly.
@@ -130,4 +130,6 @@ Per-roll drand is implemented. Commit/reveal, transparency-log anchoring, witnes
 
 The shared verifier lives in `crates/kd-receipt`. The browser entrypoint is `verifyReceiptJson` in `crates/kd-core-wasm`. The CLI entrypoint is `kd verify --receipt` in `crates/kd-cli`.
 
-*This repository is proprietary, all rights reserved.*
+*This repository is source-available and proprietary, not open source. The exact verifier dependency
+closure and permitted integration rights are defined in `LICENSE-VERIFYING.md`; all other rights
+remain reserved.*

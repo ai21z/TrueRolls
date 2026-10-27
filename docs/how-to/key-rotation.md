@@ -124,12 +124,12 @@ Emergency example:
 After every key lifecycle change:
 
 ```powershell
-cargo test -p kd-receipt --lib
-cargo test -p kd-api --bin kd-api
-cargo test -p kd-core-wasm --lib
-cargo test -p kd-cli --test goldens
-pnpm -C services/loom-demo build
-pnpm -C services/loom-demo lint
+cargo test --locked -p kd-receipt --lib
+cargo test --locked -p kd-api --bin kd-api
+cargo test --locked -p kd-core-wasm --lib
+cargo test --locked -p kd-cli --test goldens
+corepack pnpm -C services/loom-demo build
+corepack pnpm -C services/loom-demo lint
 ```
 
 Manual checks:

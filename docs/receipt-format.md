@@ -4,7 +4,9 @@ A TrueRolls receipt is a self-contained JSON document returned for every live ro
 
 This page documents the current live version, `truerolls-drand-1`, and the legacy saved-receipt version, `truerolls-1`.
 
-> This document and the TrueRolls verifier are proprietary, all rights reserved.
+> This document and the TrueRolls verifier are source-available and proprietary, not open source.
+> The exact verifier dependency closure and permitted integration rights are defined in
+> `LICENSE-VERIFYING.md`; all other rights remain reserved.
 
 ## What a receipt proves
 
@@ -200,4 +202,6 @@ A valid receipt requires all reported checks to pass. Structural problems such a
 }
 ```
 
-*This repository is proprietary, all rights reserved.*
+*This repository is source-available and proprietary, not open source. The exact verifier dependency
+closure and permitted integration rights are defined in `LICENSE-VERIFYING.md`; all other rights
+remain reserved.*

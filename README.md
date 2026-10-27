@@ -1,9 +1,9 @@
 # TrueRolls
 
-**Verifiable dice.** Every roll returns an Ed25519-signed receipt. Change a single
-byte of that receipt and the signature breaks. Anyone can re-verify a receipt
-offline, in the browser or from the command line, without trusting the server
-that produced it.
+**Verifiable dice.** Every roll returns an Ed25519-signed receipt. Change a signed
+value and its JCS-canonical signing bytes change, so signature verification fails. Anyone can re-verify a receipt
+offline, in the browser or from the command line. Browser key discovery may fetch
+the issuer's published `/.well-known` key set; the receipt bytes stay local.
 
 Live `truerolls-drand-1` rolls are seeded from a public drand quicknet beacon
 (BLS-verified), and the die is **uniform by default**. A game can opt into a signed
@@ -24,7 +24,11 @@ expected-value guards. Bounded risk, never a secret pick.
 > for saved receipts and goldens. See
 > [docs/threat-model.md](docs/threat-model.md) for the precise limits.
 
-This repository is **proprietary**. See [LICENSE](LICENSE). No license is granted.
+This is a **source-available proprietary repository**, not an open-source project. See
+[LICENSE](LICENSE). The exact verifier dependency closure has a narrow use, modification, and
+distribution grant in [LICENSE-VERIFYING.md](LICENSE-VERIFYING.md) for receipt verification
+integrations. No right is granted to operate the minting service, issue TrueRolls receipts, use
+production signing keys, or use the brand.
 
 ---
 
@@ -38,7 +42,7 @@ crates/
   kd-api          Axum HTTP server: drand-backed roll, sign, verify, health; Postgres/Redis/S3
   kd-cli          local roll + local/remote verify; transcript/receipt files
   kd-core-wasm    wasm-bindgen bindings exposing kd-core math + verify to the browser
-  kd-worker-wasm  wasm roll+sign over the shared signer (server-side; never shipped to the browser)
+  kd-worker-wasm  non-release server-side roll+sign artifact; never shipped to the browser
 services/
   loom-demo       the public web demo (React + Vite + Three.js)
 packages/
@@ -55,13 +59,17 @@ docs/             this reference set
 - [docs/verifying.md](docs/verifying.md), how to verify a receipt offline (browser + CLI) and exactly what a VALID result does and does not prove.
 - [docs/threat-model.md](docs/threat-model.md), what an attacker can and cannot do, what is proven vs roadmap.
 - [docs/api.md](docs/api.md), the HTTP endpoints as implemented.
+- [docs/how-to/public-demo-operations.md](docs/how-to/public-demo-operations.md), production-profile
+  configuration, caps, proxy trust, backup/restore, alerts, rollback, and incident response for a
+  budgeted anonymous demo.
+- [LICENSE-VERIFYING.md](LICENSE-VERIFYING.md), scoped rights for external receipt-verifier integrations.
 
 ## Standards we use
 
 No house crypto. TrueRolls is built from public, well-specified primitives, each checkable against its spec:
 
 - **drand quicknet**. Public randomness beacon (BLS, scheme `bls-unchained-g1-rfc9380`). The roll seed derives from a future beacon round. The verifier checks a public drand source, not a server-made random value. (`kd-drand`)
-- **Ed25519** ([RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)). Signs the receipt body. Change one byte and it fails. (`kd-receipt`)
+- **Ed25519** ([RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)). Signs JCS-canonical receipt content. Change a signed value and verification fails. (`kd-receipt`)
 - **JCS** ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)). Canonical JSON, so the signature is byte-reproducible. (`kd-receipt`)
 - **HKDF-SHA256** ([RFC 5869](https://www.rfc-editor.org/rfc/rfc5869)). Derives the per-roll seed from beacon randomness and client nonce. (`kd-drand`)
 - **SHA-256** ([FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final)). Randomness = `SHA-256(verified signature)`, and the receipt hash.
@@ -69,30 +77,32 @@ No house crypto. TrueRolls is built from public, well-specified primitives, each
 
 ## Quick start
 
-Prerequisites: Rust (stable, pinned by [rust-toolchain.toml](rust-toolchain.toml)),
-Node ≥ 20.19 with pnpm 10, Docker (for the local API stack), and
+Prerequisites: Rust 1.93.1 (pinned by [rust-toolchain.toml](rust-toolchain.toml)),
+Node 22.22.2 (pinned by [.node-version](.node-version)), pnpm 10.30.2 (pinned by
+[package.json](package.json)), Docker (for the local API stack), and
 [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) only if you rebuild the wasm.
 
 ### Rust, math + verifier
 
 ```powershell
-cargo test -p kd-core          # the bounded-math engine
-cargo test -p kd-drand         # drand quicknet proof + HKDF derivation
-cargo test -p kd-receipt       # the signer/verifier (checks the committed goldens)
-cargo test -p kd-cli           # CLI roll + verify against the goldens
-cargo test --workspace         # service-free suite; live kd-api integration tests are ignored
+cargo test --locked -p kd-core --all-features     # the bounded-math engine
+cargo test --locked -p kd-drand --all-features    # drand quicknet proof + HKDF derivation
+cargo test --locked -p kd-receipt --all-features  # signer/verifier + committed goldens
+cargo test --locked -p kd-cli --all-features      # CLI roll + verify against the goldens
+cargo test --locked --workspace --all-features    # service-free suite; live tests stay ignored
 ```
 
 The ignored `kd-api` integration tests expect the live stack (Postgres/Redis/MinIO +
 the server on `:8080`). Start it with `scripts/dev-up.ps1`, then run
-`cargo test -p kd-api --all-features -- --include-ignored`.
+`cargo test --locked -p kd-api --all-features -- --include-ignored`.
 
 ### The web demo
 
 ```powershell
-pnpm install
-pnpm -C services/loom-demo dev      # http://localhost:5173 - proxies /api -> :8080
-pnpm -C services/loom-demo build
+corepack pnpm -C services/loom-demo install --frozen-lockfile
+corepack pnpm -C services/loom-demo dev      # http://localhost:5173 - proxies /api -> :8080
+corepack pnpm -C services/loom-demo test
+corepack pnpm -C services/loom-demo build
 ```
 
 With no API reachable the demo runs in **demo mode** (receipts are simulated -
@@ -103,7 +113,7 @@ signing and drand-backed receipts.
 
 ```powershell
 pwsh -File scripts/dev-up.ps1       # infra containers + kd-api on http://127.0.0.1:8080
-pwsh -File scripts/tamper-demo.ps1  # roll -> verify VALID -> flip a byte -> verify INVALID
+pwsh -File scripts/tamper-demo.ps1  # roll -> verify VALID -> alter a signed value -> verify INVALID
 pwsh -File scripts/dev-down.ps1
 ```
 
@@ -113,8 +123,11 @@ must never be used in production, and a real deployment must reject it.
 ### Rebuilding the browser wasm
 
 The prebuilt package in `packages/kd-core-wasm/` is committed, so the demo builds
-without a wasm toolchain. To rebuild it from `crates/kd-core-wasm`:
+without a wasm toolchain. Build a comparison package under ignored `outputs/`; do
+not overwrite the committed package just to make a parity check pass:
 
 ```powershell
-wasm-pack build crates/kd-core-wasm --target web --out-dir ../../packages/kd-core-wasm
+wasm-pack build crates/kd-core-wasm --target web --out-dir ../../outputs/manual-kd-core-wasm -- --locked
+node scripts/wasm-parity.mjs packages/kd-core-wasm outputs/manual-kd-core-wasm
+node scripts/wasm-receipt-parity.mjs packages/kd-core-wasm outputs/manual-kd-core-wasm
 ```

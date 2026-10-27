@@ -2,7 +2,10 @@
 
 This is the reference for the TrueRolls HTTP API as **implemented** in the service code. It describes the live request/response shapes, status codes, and verification semantics. Where it matters, it states plainly what each endpoint proves and what it does not.
 
-> **Proprietary. All rights reserved.** This document and the service it describes are not open source.
+> **Source-available proprietary software, not open source.** External receipt-verifier integrations
+> are covered only for the exact dependency closure and purposes defined in
+> `LICENSE-VERIFYING.md`; minting, server operation, brand use, and production signing keys remain
+> rights reserved.
 
 > All example values below, UUIDs, key ids (e.g. `kd-dev-1`), `drbg_key_hex`, `draw_u64`, `signature_b64`, `receipt_hash`, `public_key`, are **illustrative placeholders**, not real or reproducible cryptographic artifacts. Actual values are produced at runtime. The signing key id is configured per deployment.
 
@@ -11,7 +14,7 @@ This is the reference for the TrueRolls HTTP API as **implemented** in the servi
 Read these before integrating. They bound what the API guarantees.
 
 - **No authentication.** None of the endpoints require or check credentials. There is no API key, token, or session.
-- **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` is throttled per client IP. Every other route, all GETs, both verify routes, `/healthz`, `/.well-known/*`, is unthrottled. Do not treat the throttle as access control.
+- **Rate limiting is an abuse throttle, not a security control.** `POST /v1/roll` has the heavy mint protection stack. Verify/read routes have lighter per-IP throttles and body limits. `/healthz`, `/v1/drand/health`, and `/.well-known/*` stay public. The two health endpoints are currently unthrottled and touch backend or network dependencies, so do not treat them as free under hostile traffic. Do not treat any throttle as access control.
 - **What is proven today:**
   - **Tamper-evidence** of a signed receipt via an Ed25519 signature over the canonicalized receipt body.
   - **Drand seed provenance** for live `truerolls-drand-1` receipts: anyone with the receipt can verify the pinned drand quicknet BLS pulses and re-derive the seed from the target pulse.
@@ -24,7 +27,7 @@ Read these before integrating. They bound what the API guarantees.
 ## Conventions
 
 - **Base path:** roll/verify endpoints live under `/v1`. `/healthz` and `/.well-known/*` are unversioned.
-- **Content types:** request and success bodies are `application/json`. Most validation/storage error bodies (400 / 404 / 409 / 422 / 500) are **plain-text messages**, not JSON. Protective overload/timeout responses are JSON, see `POST /v1/roll`. (The 422 legacy-verify body is a special case, see that endpoint.)
+- **Content types:** request and success bodies are `application/json`. Most client-caused error bodies (400 / 404 / 409 / 422) are plain-text messages. Internal 500 responses are sanitized JSON `{ "error": "internal" }`. Protective overload/timeout responses are JSON, see `POST /v1/roll`. (The 422 legacy-verify body is a special case, see that endpoint.)
 - **Dice:** the roll path accepts `d6`, `d20`, `d100`. The receipt verifier's die parser additionally accepts `d4`, `d8`, `d10`, `d12`, but only `d6` / `d20` / `d100` are reachable through `POST /v1/roll`.
 - **kappa (`κ`):** a signed stance. It is validated to be **finite and in `[-1, 1]`** on `POST /v1/roll` and on the **legacy** verify paths. In **receipt** verify mode κ is *not* range-checked at the request layer. An out-of-range κ instead fails inside the math recompute and is returned as a `400` (see receipt mode below).
 - **`draw_u64`** is a **stringified `u64`** everywhere it appears (JSON numbers cannot represent every `u64` exactly).
@@ -53,6 +56,45 @@ Liveness/readiness probe. Always returns **200**. The body reports per-dependenc
 ## POST /v1/roll
 
 Compute a karma-weighted roll and return a **signed receipt** (when a signing key is configured).
+
+### First roll with curl
+
+`/v1/drand/health` proves the API can reach and verify quicknet, but it does not return the observed BLS signature a client needs for `POST /v1/roll`. A client constructs the first roll by fetching the latest quicknet pulse directly, then sending that pulse and `target_round = round + 2` to the API. The API verifies the pulse again and fails closed if anything is wrong. Production clients should query multiple official quicknet relays concurrently and choose the highest structurally valid round before submission; a lagging relay can otherwise make `round + 2` no longer future by the time the API checks it. This freshest-frontier selection improves liveness only and does not replace the API's pinned BLS verification.
+
+```bash
+CHAIN_HASH="52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971"
+PULSE="$(curl -fsS "https://api.drand.sh/${CHAIN_HASH}/public/latest")"
+ROUND="$(printf '%s' "$PULSE" | jq -r '.round')"
+SIG="$(printf '%s' "$PULSE" | jq -r '.signature')"
+RANDOMNESS="$(printf '%s' "$PULSE" | jq -r '.randomness')"
+NONCE="$(openssl rand -hex 32)"
+
+curl -fsS http://127.0.0.1:8080/v1/roll \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: demo-${NONCE}" \
+  -d "{
+    \"die\": \"d20\",
+    \"kappa\": 0,
+    \"client_nonce\": \"${NONCE}\",
+    \"drand\": {
+      \"client_observed_round\": ${ROUND},
+      \"client_observed_signature_hex\": \"${SIG}\",
+      \"client_observed_randomness_hex\": \"${RANDOMNESS}\",
+      \"target_round\": $((ROUND + 2))
+    }
+  }"
+```
+
+Field mapping from the drand response:
+
+| drand latest field | `POST /v1/roll` field |
+|---|---|
+| `round` | `drand.client_observed_round` |
+| `signature` | `drand.client_observed_signature_hex` |
+| `randomness` | `drand.client_observed_randomness_hex` |
+| `round + 2` | `drand.target_round` |
+
+Clients that need independent client-side assurance should verify the observed pulse against the pinned quicknet parameters before sending it. The API still verifies it again fail-closed.
 
 **Request body, `RollRequest`**
 
@@ -169,7 +211,7 @@ Compute a karma-weighted roll and return a **signed receipt** (when a signing ke
 - **`429`**, per-client-IP token bucket exhausted. Carries `x-ratelimit-after` from `tower_governor`.
 - **`503`**, global in-flight roll limit is saturated. JSON: `{ "error": "overloaded" }`, includes `Retry-After: 1`.
 - **`504`**, whole-roll handler timeout. JSON: `{ "error": "timeout" }`, includes `Retry-After: 1`.
-- **`500`**, DB / Redis / object-store failure. Plain text.
+- **`500`**, DB / Redis / object-store / drand dependency failure. Sanitized JSON: `{ "error": "internal" }`.
 
 **Drand derivation note.** The browser observes a quicknet frontier and sends a client nonce plus `target_round = observed_round + 2`. The API verifies the observed pulse, rejects targets that are not future versus `max(server latest relay round, local wall-clock quicknet schedule round)`, waits for the target pulse, verifies the target BLS signature, computes `randomness = SHA256(signature)`, and derives the 32-byte ChaCha20 seed with HKDF-SHA256 bound to the canonical request hash. There is no production fallback to local server RNG in drand mode.
 
@@ -221,7 +263,8 @@ Return the stored transcript JSON for a roll, served verbatim over HTTP so a ver
 - **`200`**, `application/json`, the transcript bytes exactly as stored.
 - **`400`**, malformed UUID. Plain text.
 - **`404`**, roll not found, or transcript not yet uploaded. Plain text.
-- **`500`**, object-store fetch failure. Plain text.
+- **`429`**, per-client-IP read throttle exhausted.
+- **`500`**, object-store fetch failure. Sanitized JSON: `{ "error": "internal" }`.
 
 The transcript holds the flat math fields the legacy verify path consumes (`die`, `kappa`, `face`, `draw_u64`, `alpha`, `kl`, `ev`, `probs`) plus `sampling` and `rng` provenance metadata. **The derived DRBG key is not in the transcript**, it appears only in the receipt's `proof.rng.drbg_key_hex`. Provenance inputs in the transcript are redacted hashes (first 12 hex chars of SHA-256 over the respective input), not raw values.
 
@@ -249,7 +292,7 @@ Fetch and verify the latest drand quicknet pulse through the server's configured
 }
 ```
 
-If the configured relays fail, return mismatched `/info`, or serve an invalid BLS pulse, the endpoint fails closed with `500`.
+If the configured relays fail, return mismatched `/info`, or serve an invalid BLS pulse, the endpoint fails closed with sanitized `500` JSON.
 
 ---
 
@@ -308,6 +351,10 @@ The signature is verified against the server's currently published key set. A re
 
 **`400` (receipt mode)**, body that cannot be verified at all. The verifier maps every hard error to `400`: undeserializable receipt, unsupported `proof.math_param_version`, invalid or wrong-length `drbg_key_hex`, unparsable `draw_u64`, unsupported die, **and any math-recompute error, including a `kappa` outside `[-1, 1]`** (out-of-range κ hard-fails the recompute rather than returning a soft INVALID). Plain text.
 
+**`413`**, POST body exceeds the verify body cap.
+
+**`429`**, per-client-IP verify throttle exhausted.
+
 ### Legacy transcript mode (no `v` discriminator)
 
 The body is parsed as a flat `VerifyRequest`. The server recomputes the distribution from `(die, kappa)`, replays sampling with `draw_u64`, and compares `face`, `alpha`, `kl`, `ev`, and `probs` against the submitted values.
@@ -351,7 +398,8 @@ Convenience endpoint. The server looks up the roll, fetches its stored transcrip
 - **`400`**, malformed UUID, or the stored transcript fails validation (e.g. written under a different `math_param_version` than the server now runs). Plain text.
 - **`404`**, roll not found, or transcript not yet uploaded. Plain text.
 - **`422`**, MISMATCH, same plain-text-JSON-string quirk as legacy POST.
-- **`500`**, object-store fetch failure, or a stored transcript that does not parse. Plain text.
+- **`429`**, per-client-IP read throttle exhausted.
+- **`500`**, object-store fetch failure, or a stored transcript that does not parse. Sanitized JSON: `{ "error": "internal" }`.
 
 This checks the server's **own** stored transcript against the server's **own** math, a consistency check, not an independent audit. For an independent check, verify the receipt (and transcript) with your own verifier rather than trusting this endpoint.
 
@@ -412,8 +460,10 @@ through `KD_TRUSTED_PROXY`: default `peer` ignores forwarded headers, `xff:<hops
 from the right, and `cloudflare` / `fly` read the provider's authoritative client-IP header. Under
 `KD_ENV=prod`, `peer` mode fails closed unless `KD_ALLOW_PEER_IP=1` is set deliberately. When the
 token bucket is exceeded the request gets **`429 Too Many Requests`** with `x-ratelimit-after`.
-Overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. GET roll
-lookup, verify, health, drand health, and well-known routes are not wrapped in the heavy stack.
-Treat all of this as abuse/load protection, not authentication.
+Overload returns **503 + `Retry-After: 1`**, timeout returns **504 + `Retry-After: 1`**. A timeout
+may consume a validated mint reservation attempt, but it cannot mint a receipt. Verify/read routes
+have lighter throttles and a verify body limit. GET roll lookup, health, drand health, and well-known
+routes are not wrapped in the heavy stack. Treat all of this as abuse/load protection, not
+authentication.
 
 Example key ids and crypto values in this document are placeholders, not code constants.
