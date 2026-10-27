@@ -47,9 +47,37 @@ no dependency path:
 cargo tree --locked --workspace --all-features --target all -i rsa@0.9.10
 ```
 
-No cargo-audit exception suppresses the advisory. Enabling SQLx MySQL support, or any future change
-that makes `rsa` reachable, blocks the candidate until the advisory is resolved or the owner records
-an explicit security decision.
+CI accepts this one advisory through a narrow exception (`--ignore RUSTSEC-2023-0071`) and fails
+the same job if `cargo tree --locked --workspace --all-features --target all -i rsa` ever prints an
+`rsa` dependency path. Enabling SQLx MySQL support, or any future change that makes `rsa` reachable,
+therefore blocks the candidate until the advisory is resolved or the owner records an explicit
+security decision.
+
+## Current Unsoundness Exception
+
+`RUSTSEC-2026-0253` reports `lru 0.16.4` as unsound: if a stored key's `Drop` implementation panics
+inside `LruCache::pop()` and the panic is caught with `catch_unwind`, later evictions can write to
+freed memory. The fix is `lru >= 0.18.2`, which `aws-sdk-s3 1.123.0` does not accept.
+
+`lru` is compiled into kd-api only through `aws-sdk-s3`. Its single use is the S3 Express identity
+cache (`s3_express.rs`), keyed by `CacheKey(String)`. `String`'s `Drop` cannot panic, so the trigger
+condition is not reachable. The cache also serves only S3 Express directory buckets (`--x-s3`), which
+R2 and MinIO never use. CI ignores this one advisory while still denying every other unsound
+finding. Re-evaluate on each `aws-sdk-s3` upgrade and remove the exception once `lru >= 0.18.2`
+resolves.
+
+## CI Audit Gate
+
+The `[X] Supply-chain advisories` job runs nightly and on every push:
+
+```bash
+cargo audit --deny unsound --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0253
+corepack pnpm -C services/loom-demo audit --prod --audit-level high
+```
+
+Any new vulnerability or unsoundness advisory fails the job. Yanked lockfile-only crates are reported
+but do not fail it. An advisory-database or registry outage fails the job and is recorded as an
+external blocker, never converted to PASS.
 
 ## Current UI Dependency Notice
 

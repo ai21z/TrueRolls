@@ -114,6 +114,40 @@ jobs:
       - name: Service-free browser gates
         run: corepack pnpm -C services/loom-demo test:e2e
 
+  supply-chain:
+    name: "[X] Supply-chain advisories"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.2
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      # Each exception is documented in docs/dependency-review-policy.md. RUSTSEC-2023-0071 is
+      # accepted only while rsa stays out of the compiled graph, so reachability fails the job.
+      - name: Assert rsa stays unreachable
+        run: |
+          out="$(cargo tree --locked --workspace --all-features --target all -i rsa 2>&1 || true)"
+          if printf '%s\n' "$out" | grep -q '^rsa v'; then
+            printf '%s\n' "$out"
+            echo "::error::rsa is now in the compiled graph; RUSTSEC-2023-0071 exception no longer applies"
+            exit 1
+          fi
+
+      - name: cargo-audit (vulnerabilities and unsound fail; two documented exceptions)
+        run: cargo audit --deny unsound --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0253
+
+      - name: pnpm production audit
+        run: corepack pnpm -C services/loom-demo audit --prod --audit-level high
+
   integration-controlled:
     name: "[C] Local-stack health and verify integration"
     runs-on: ubuntu-24.04
