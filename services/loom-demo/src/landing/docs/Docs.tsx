@@ -280,7 +280,7 @@ export function Docs() {
             <p className={css.note}>
               The draw is derived from a verified future drand quicknet pulse. The verifier
               checks the BLS beacon signature, recomputes the HKDF seed, replays the draw,
-              and checks the signature over the receipt body. Changing any field breaks at
+              and checks the signature over the receipt body. Changing any signed value breaks at
               least one check.
             </p>
           </section>
@@ -290,7 +290,7 @@ export function Docs() {
             <span className={css.eyebrow}>Don't trust. Verify.</span>
             <h2 className={css.h2}>Verify it yourself</h2>
             <p className={css.p}>
-              Five independent checks any drand receipt verifier runs, derived 1:1 from the receipt:
+              Five explicit checks any drand receipt verifier runs, derived 1:1 from the receipt:
             </p>
 
             <ul className={css.checkList}>
@@ -334,8 +334,9 @@ export function Docs() {
             <p className={css.p}>How you verify:</p>
             <ul className={css.wayList}>
               <li className={css.wayItem}>
-                <b>In your browser</b>, with no server call and nothing to install, using
-                the same <code className={css.code}>kd-core</code> compiled to WASM. The{' '}
+                <b>In your browser</b>, with nothing to install, using the same{' '}
+                <code className={css.code}>kd-core</code> compiled to WASM. Receipt bytes are
+                checked locally; issuer-key discovery may fetch <code>/.well-known</code>. The{' '}
                 <a className={css.inlineLink} href="#verify">
                   in-browser verifier
                 </a>{' '}
@@ -343,15 +344,17 @@ export function Docs() {
               </li>
               <li className={css.wayItem}>
                 The receipt carries its own proof and the key is published, so you can verify
-                it independently with any Ed25519 tool, not just ours. We never install
-                anything on your machine.
+                it independently with any implementation that reproduces JCS/RFC8785 bytes
+                and Ed25519 verification, not just ours. We never install anything on your
+                machine.
               </li>
             </ul>
 
             <CodeBlock label="verify" right="in your browser · wasm">
-{`receipt.json  →  checked locally, no server
+{`receipt.json  →  checked locally; key discovery may use /.well-known
 `}<span className={css.codeOk}>{`✓ VALID
   signature  OK   (Ed25519)
+  drand      OK   (BLS quicknet pulse)
   sampling   OK   (draw_u64 replayed)
   face       OK
   metrics    OK   (α · KL · EV)`}</span>
@@ -384,12 +387,16 @@ export function Docs() {
                 </span>
                 <ul className={css.calloutList}>
                   <li>
-                    The receipt is internally consistent and Ed25519-signed. Tampering
-                    any field is detected.
+                    The receipt is internally consistent and Ed25519-signed. Changes to
+                    signed values are detected.
                   </li>
                   <li>
                     Deterministic replay: from the published draw you reproduce the
                     exact face and math, anywhere.
+                  </li>
+                  <li>
+                    For <code className={css.code}>truerolls-drand-1</code>, the seed's
+                    drand quicknet provenance is verified and replayed.
                   </li>
                   <li>
                     Bounded shaping: the receipt proves the roll stayed inside the KL
@@ -463,7 +470,11 @@ export function Docs() {
             <p className={css.note}>
               Transparency comes from the receipt, the public standards, and the
               shared verifier path used by the server, CLI, and browser. The repository
-              is proprietary, all rights reserved.
+              is source-available and proprietary, not open source. External receipt verification
+              is covered only for the dependency closure and purposes defined in{' '}
+              <code className={css.code}>LICENSE-VERIFYING.md</code>.
+              Minting, brand use, server operation, and production signing keys remain
+              rights reserved.
             </p>
           </section>
 
@@ -489,7 +500,7 @@ export function Docs() {
               <div className={css.defRow}>
                 <dt className={css.dt}>Ed25519 (RFC 8032)</dt>
                 <dd className={css.dd}>
-                  Signs the receipt body. Change one byte and verification fails (
+                  Signs JCS-canonical receipt content. Change a signed value and verification fails (
                   <code className={css.code}>kd-receipt</code>).
                 </dd>
               </div>

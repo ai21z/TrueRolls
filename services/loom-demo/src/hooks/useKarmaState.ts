@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow, VerifyStatus } from '../types/kd';
 import { initClient, isMockMode, postRoll, postVerify, postVerifyReceipt } from '../api/client';
 import { buildReceiptBody, hasDrandProof, receiptVerifierAccepts } from '../api/receipt';
+import { isMockArtifact, normalizePersistedVerifyStatus } from '../api/trustPresentation';
 
 const STORAGE_KEY = 'kd-rolls';
 
@@ -20,11 +21,6 @@ function isValidSig(sig: unknown): boolean {
     typeof sig.signature_b64 === 'string' &&
     typeof sig.canon === 'string'
   );
-}
-
-function normalizeVerifyStatus(value: unknown): VerifyStatus {
-  if (value === 'verified_server' || value === 'mismatch' || value === 'error') return value;
-  return 'not_checked';
 }
 
 function normalizeEntry(r: unknown): TranscriptEntry | null {
@@ -47,7 +43,7 @@ function normalizeEntry(r: unknown): TranscriptEntry | null {
     typeof e.ev === 'number'
   ) {
     const entry = r as unknown as TranscriptEntry;
-    const verifyStatus = normalizeVerifyStatus(entry.verifyStatus);
+    const verifyStatus = normalizePersistedVerifyStatus(entry.verifyStatus);
     return {
       ...entry,
       verifyStatus,
@@ -127,9 +123,8 @@ export function useKarmaState() {
       setRolls((prev) => [entry, ...prev]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Roll failed';
-      console.error('[kd] roll error:', err);
+      console.warn('[kd] roll failed:', msg);
       setRollError(msg);
-      setTimeout(() => setRollError(null), 3000);
     } finally {
       setIsRolling(false);
       setRollStatus(null);
@@ -150,7 +145,7 @@ export function useKarmaState() {
       // A mock-minted artifact (unsigned, id prefixed `mock-`) is a demo receipt
       // the live server never knew. Treat it as demo regardless of the current
       // session mode, so it is not sent to GET /v1/verify/:id (which would 404).
-      const isMockEntry = entry.sig == null && entry.id.startsWith('mock-');
+      const isMockEntry = isMockArtifact(entry);
       const isMock = isMockMode() || isMockEntry;
       let status: VerifyStatus;
       let checks: VerifyCheckRow[];
@@ -242,6 +237,10 @@ export function useKarmaState() {
     setRolls([]);
   }, []);
 
+  const clearRollError = useCallback(() => {
+    setRollError(null);
+  }, []);
+
   // Record that a die was broken by a tamper: store the forged body + the verifier's
   // real failing result ON the entry, so every surface (hero, seed, transcript, modal)
   // renders the same broken artifact AND it survives re-rolls and reloads. The roll's
@@ -277,6 +276,7 @@ export function useKarmaState() {
     ready,
     roll,
     rollError,
+    clearRollError,
     verify,
     clearHistory,
     markTampered,

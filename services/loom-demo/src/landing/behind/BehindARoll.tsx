@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTruerollsKeys, type TruerollsKey } from '../../api/client';
-import { DEMO_TEST_KEY, resolveReceiptKey } from '../../api/keys';
+import { DEMO_TEST_KEY, resolveReceiptKey, type KeySource } from '../../api/keys';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
@@ -8,6 +8,13 @@ import { CeremonyRail } from './CeremonyRail';
 import { ContactSheet } from './ContactSheet';
 import { KappaBaseline } from './KappaBaseline';
 import { asRecord, hasBeacon, isLegacyReceipt, proofScope, readField, shorten } from './receiptFields';
+import { PRIMARY_DRAND_RECEIPT } from '../../generated/receiptFixtures';
+import {
+  keyTrustExplanation,
+  verificationState as deriveVerificationState,
+  verificationStateLabel,
+  type VerificationPhase,
+} from '../../api/trustPresentation';
 import {
   initKdCoreWasm,
   isKdCoreWasmReady,
@@ -26,54 +33,7 @@ import css from './BehindARoll.module.css';
  * drand stratum as absent, never as if it had a beacon seed.
  */
 
-// Bundled real truerolls-drand-1 sample: a verbatim copy of the committed golden
-// goldens/golden_receipt_03_d20_drand.json, signed by the PUBLIC test key below
-// (never a production signer). If the goldens are ever regenerated, this sample
-// will visibly verify INVALID on load. The mount auto-verify is the canary.
-const SAMPLE_DRAND_RECEIPT = `{
-  "alpha": 0.3213648106902838,
-  "created_at": "2026-01-01T00:00:00Z",
-  "die": "d20",
-  "ev": 11.65325625845831,
-  "face": 2,
-  "id": "00000000-0000-0000-0000-00000000d123",
-  "kappa": 0.6,
-  "kl": 0.02011901380257613,
-  "proof": {
-    "drand": {
-      "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
-      "client_nonce": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "client_observed_randomness_hex": "9f041d26fd999c82fabf50a22fc7e0be9b068623df1c00d7c8849cdf5da6d25f",
-      "client_observed_round": 121,
-      "client_observed_signature_hex": "add0b70bf54c5dacfc7289994e085c3a635442f524088b1734c908a4278b2567188d8fa569752d9b4d68e2ccd0e023bd",
-      "genesis_time": 1692803367,
-      "idem_payload_sha256_hex": "1111111111111111111111111111111111111111111111111111111111111111",
-      "period_seconds": 3,
-      "public_key": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
-      "scheme": "bls-unchained-g1-rfc9380",
-      "target_delay_rounds": 2,
-      "target_randomness_hex": "fb8f7bc29bf24db51871ec8c79f3a1e4bd0557bc0dfcee9ed1d924e69d1c60dc",
-      "target_round": 123,
-      "target_signature_hex": "b75c69d0b72a5d906e854e808ba7e2accb1542ac355ae486d591aa9d43765482e26cd02df835d3546d23c4b13e0dfc92"
-    },
-    "draw_u64": "1102664356705973204",
-    "math_param_version": "roll.math.v1",
-    "rng": {
-      "algo": "drand-quicknet+HKDF(SHA-256)->ChaCha20Rng",
-      "drbg_key_hex": "a5de8cd6e63465bdfe3f4a7e8b5eefbb639b1e6415549567db780e3cd91d62e0"
-    }
-  },
-  "receipt_hash": "sha256:9665b3493f518b738e4bb6ad3d4c9cbc951a45b57369987e3af5a69ca472f8fc",
-  "sig": {
-    "alg": "Ed25519",
-    "canon": "JCS/RFC8785",
-    "kid": "test-kid-1",
-    "signature_b64": "c8nbZbq4I1OwuNqYpso5ym1ZdhQEYzqdugTTRfbht2Ga9AtS7bw1AmfdIrKzgKAjJ9Gx5rrQ4dIaxWRN3ffCDw=="
-  },
-  "transcript_url": "/v1/roll/x/transcript",
-  "v": "truerolls-drand-1"
-}`;
-
+const SAMPLE_DRAND_RECEIPT = PRIMARY_DRAND_RECEIPT;
 type StratumStatus = 'pass' | 'fail' | 'absent' | 'pending';
 
 interface StratumField {
@@ -135,7 +95,7 @@ function buildStrata(parsed: Record<string, unknown> | null, report: WasmVerifyR
         { label: 'receipt_hash', value: shorten(readField(parsed ?? {}, 'receipt_hash')) || '-' },
       ],
       proves:
-        'The body, canonicalised (JCS / RFC 8785), is checked against the Ed25519 public key shown below. Any edit cracks the seal.',
+        'The body, canonicalised (JCS / RFC 8785), is checked against the Ed25519 public key shown below. Any signed-value edit cracks the seal.',
       limit: 'Proves integrity and who signed, not when it was signed.',
     },
   ];
@@ -262,7 +222,13 @@ export function BehindARoll() {
   const [receiptText, setReceiptText] = useState<string>(SAMPLE_DRAND_RECEIPT);
   const [publicKey, setPublicKey] = useState<string>(DEMO_TEST_KEY);
   const [keyEdited, setKeyEdited] = useState<boolean>(false);
+  const [keySource, setKeySource] = useState<KeySource>('demo');
+  const [keyKid, setKeyKid] = useState<string | null>('test-kid-1');
+  // See Verify.tsx: only the bundled sample (loaded or edited in place) resolves
+  // the PUBLIC demo key; an arbitrary pasted/uploaded receipt is fail-closed.
+  const [sampleContext, setSampleContext] = useState(true);
   const [report, setReport] = useState<WasmVerifyReport | null>(null);
+  const [verificationPhase, setVerificationPhase] = useState<VerificationPhase>('loading');
   const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
   const [active, setActive] = useState<number>(0);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -286,24 +252,36 @@ export function BehindARoll() {
   };
 
   const runWithResolved = (text: string, resolved: ReturnType<typeof resolveReceiptKey>) => {
+    // Reflect the resolved key provenance immediately, BEFORE the engine-readiness
+    // early return, so the badge and key input can never desync from the last
+    // resolution (e.g. a slow first wasm load leaving stale mount defaults).
+    setKeySource(resolved.source);
+    setKeyKid(resolved.kid);
+    setActive(0);
+    setVerificationPhase('verifying');
     if (!isKdCoreWasmReady()) {
       setReport({ verdict: 'ERROR', error: 'verifier engine still loading, try again in a moment' });
+      setVerificationPhase('complete');
       return;
     }
-    setReport(
+    const nextReport =
       resolved.kind === 'manual'
         ? verifyReceiptWasm(text, resolved.publicKey)
-        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson),
-    );
-    setActive(0);
+        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson);
+    setReport(nextReport);
+    setVerificationPhase('complete');
   };
 
-  const verify = (text: string, edited: boolean = keyEdited) => {
+  const verify = (
+    text: string,
+    edited: boolean = keyEdited,
+    allowDemoFallback: boolean = sampleContext,
+  ) => {
     // A key the user typed wins as-is, otherwise resolve well-known/demo by kid.
     // `edited` is threaded explicitly so loadSample/onFile can force a re-resolve
     // without waiting on the async keyEdited state update.
     const resolved = resolveReceiptKey(text, wellKnownKeys, edited ? publicKey : null, {
-      allowDemoFallback: text === SAMPLE_DRAND_RECEIPT,
+      allowDemoFallback,
     });
     setPublicKey(resolved.publicKey);
     runWithResolved(text, resolved);
@@ -339,12 +317,17 @@ export function BehindARoll() {
   const onReceiptChange = (text: string) => {
     setReceiptText(text);
     setReport(null);
+    setVerificationPhase('not_checked');
+    // Editing the textarea here IS the tamper action (there are no separate
+    // tamper buttons), so a loaded sample stays in sample-context and shows its
+    // signature breaking via the demo key. Only load-sample / upload change it.
   };
 
   const loadSample = () => {
     setReceiptText(SAMPLE_DRAND_RECEIPT);
     setKeyEdited(false);
-    verify(SAMPLE_DRAND_RECEIPT, false);
+    setSampleContext(true);
+    verify(SAMPLE_DRAND_RECEIPT, false, true);
   };
 
   const onFile = async (file: File | undefined) => {
@@ -354,11 +337,13 @@ export function BehindARoll() {
       text = await file.text();
     } catch {
       setReport({ verdict: 'ERROR', error: 'could not read file' });
+      setVerificationPhase('complete');
       return;
     }
     setReceiptText(text);
     setKeyEdited(false);
-    verify(text, false);
+    setSampleContext(false);
+    verify(text, false, false);
   };
 
   const step = (delta: number) => {
@@ -366,11 +351,20 @@ export function BehindARoll() {
     setActive((a) => (a + delta + strata.length) % strata.length);
   };
 
-  const verdict = report?.verdict;
-  const isError = verdict === 'ERROR';
-  const isValid = verdict === 'VALID';
-  const verdictWord = isError ? 'UNVERIFIABLE' : isValid ? 'VALID' : 'INVALID';
-  const verdictClass = isError ? css.verdictError : isValid ? css.verdictValid : css.verdictInvalid;
+  const presentationState = deriveVerificationState({
+    phase: verificationPhase,
+    report,
+    keySource,
+  });
+  const isValid = presentationState === 'valid';
+  const noTrustRoot = presentationState === 'unverifiable' && keySource === 'unresolved';
+  const verdictWord = verificationStateLabel(presentationState);
+  const verdictClass =
+    presentationState === 'valid'
+      ? css.verdictValid
+      : presentationState === 'invalid'
+        ? css.verdictInvalid
+        : css.verdictError;
   const beacon = hasBeacon(parsed);
   // Precise version (NOT just "non-drand"): an unsupported-version or malformed
   // receipt is neither drand nor legacy, and must not be narrated as legacy.
@@ -416,9 +410,9 @@ export function BehindARoll() {
         <span className={css.eyebrow}>Behind a TrueRoll</span>
         <h1 className={css.title}>Read a roll under glass.</h1>
         <p className={css.lead}>
-          The receipt is the residue of a roll. Move the loupe down its strata: each layer is{' '}
-          <b>recomputed in your browser</b> by the same engine the CLI runs, and assayed against the
-          bytes. Nothing here is the server's word for it.
+          Receipt bytes are checked <b>locally in your browser</b> by the same engine the CLI runs.
+          The verifier may fetch the issuer's published key set unless you supplied the key. The
+          receipt itself is not uploaded by this browser-verifier path.
         </p>
       </section>
 
@@ -435,7 +429,7 @@ export function BehindARoll() {
       <ContactSheet
         cells={cells}
         active={active}
-        verdict={report?.verdict}
+        verificationState={presentationState}
         scope={scopeText}
         onSelect={(i) => {
           setActive(i);
@@ -490,6 +484,9 @@ export function BehindARoll() {
 
           <label className={css.keyLabel} htmlFor="pubkey">
             Ed25519 public key (base64)
+            {keySource === 'manual' && (
+              <span className={css.keyBypassBadge}>manual key, status bypassed</span>
+            )}
           </label>
           <input
             id="pubkey"
@@ -499,9 +496,13 @@ export function BehindARoll() {
             onChange={(e) => {
               setPublicKey(e.target.value);
               setKeyEdited(true);
+              setKeySource('manual');
+              setKeyKid(null);
               setReport(null);
+              setVerificationPhase('not_checked');
             }}
           />
+          <p className={css.keyTrustNote}>{keyTrustExplanation(keySource)}</p>
 
           <div className={css.runRow}>
             <InkButton
@@ -519,20 +520,38 @@ export function BehindARoll() {
         <InkFrame seed={41} id="specimen-plate" className={css.panel}>
           <div className={css.panelHead}>
             <span className={css.panelTitle}>Specimen plate</span>
-            <span className={css.localBadge}>● recomputed locally</span>
+            <span
+              className={css.localBadge}
+              title="Local receipt verification. Issuer key discovery may use /.well-known."
+            >
+              ● recomputed locally
+            </span>
           </div>
 
-          <div className={`${css.verdict} ${verdictClass}`} role="status" aria-live="polite">
+          <div
+            className={`${css.verdict} ${verdictClass}`}
+            role="status"
+            aria-live="polite"
+            data-verification-state={presentationState}
+          >
             <span className={css.verdictWord}>{verdictWord}</span>
             {scopeText && <span className={css.verdictScope}>{scopeText}</span>}
             <span className={css.verdictSub}>
-              {isError
-                ? report?.error
-                : isValid
+              {presentationState === 'loading'
+                ? 'Loading the verifier engine and issuer key information.'
+                : presentationState === 'verifying'
+                  ? 'Recomputing the receipt checks locally.'
+                  : presentationState === 'not_checked'
+                    ? 'Receipt or key changed. Re-examine to compute a verdict.'
+                    : noTrustRoot
+                      ? `No published key matched kid ${keyKid}. Supply the issuer key set or paste the issuer's public key before the signature can be checked.`
+                      : presentationState === 'unverifiable'
+                        ? report?.error ?? 'The verifier could not compute a meaningful verdict.'
+                        : isValid
                   ? isLegacy
                     ? 'Signed and replayable. Legacy receipt, no drand provenance.'
                     : 'Signed, drand-seeded, and bit-for-bit replayable.'
-                  : 'One or more strata did not hold.'}
+                          : 'One or more strata did not hold.'}
             </span>
           </div>
 
@@ -608,18 +627,19 @@ export function BehindARoll() {
           {beacon ? (
             <>
               When every stratum holds, a drand receipt is <b>drand-seeded and bit-for-bit
-              replayable</b>, and you confirmed it yourself, with no server in the loop.
+              replayable</b>. The receipt bytes were checked locally; issuer key discovery may have
+              used the published <code>/.well-known</code> key set.
             </>
           ) : isLegacy ? (
             <>
               When every stratum holds, a legacy receipt is <b>signed and bit-for-bit replayable</b>,
-              and you confirmed it yourself, with no server in the loop. It carries{' '}
+              and checked locally. Issuer key discovery may have used the published key set. It carries{' '}
               <b>no public-beacon seed provenance</b>.
             </>
           ) : (
             <>
               When every stratum holds, a receipt is <b>signed and bit-for-bit replayable</b>, and you
-              confirmed it yourself, with no server in the loop.
+              checked locally. Issuer key discovery may have used the published key set.
             </>
           )}{' '}
           It does <b>not</b> prove the operator could not have privately failed an unfavourable attempt

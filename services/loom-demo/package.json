@@ -5,9 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "fixtures:generate": "node ../../scripts/generate-browser-fixtures.mjs",
+    "fixtures:check": "node ../../scripts/generate-browser-fixtures.mjs --check",
+    "bundle:check": "node ../../scripts/bundle-report.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run src",
+    "test:e2e": "playwright test --project=service-free-desktop --project=service-free-mobile",
+    "test:e2e:live": "playwright test --project=live-drand-desktop",
+    "perf:observe": "node scripts/performance-observation.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -19,7 +26,9 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
     "@eslint/js": "^9.33.0",
+    "@playwright/test": "1.61.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/three": "^0.184.1",
@@ -30,6 +39,7 @@
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "vitest": "^4.1.9"
   }
 }

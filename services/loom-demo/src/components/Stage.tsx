@@ -71,6 +71,8 @@ interface Props {
   rollStatus: string | null;
   onRoll: () => void;
   rollError: string | null;
+  /** Dismiss the current roll error (it no longer auto-clears after 3s). */
+  onDismissError?: () => void;
   die: Die;
   kappa: number;
   /** The latest die has been broken by a tamper anywhere on the page. */
@@ -79,7 +81,7 @@ interface Props {
   brokenFace: number | null;
 }
 
-export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, die, kappa, broken, brokenFace }: Props) {
+export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, onDismissError, die, kappa, broken, brokenFace }: Props) {
   const [animKey, setAnimKey] = useState(0);
   const uid = useId().replace(/[:]/g, '');
   const voidId = `seed-void-${uid}`;
@@ -218,6 +220,7 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, di
             className={`${css.distBar} ${bar.isRolled ? css.distBarRolled : ''}`}
             style={{ height: `${bar.value * 100}%` }}
             title={bar.label}
+            data-probability={probs.length <= 20 ? probs[i] : undefined}
           />
         ))}
       </div>
@@ -268,7 +271,17 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, di
 
       {rollError && (
         <div className={css.rollError} role="alert" aria-live="assertive">
-          {rollError}
+          <span>{rollError}</span>
+          {onDismissError && (
+            <button
+              type="button"
+              className={css.rollErrorDismiss}
+              onClick={onDismissError}
+              aria-label="Dismiss error"
+            >
+              Dismiss
+            </button>
+          )}
         </div>
       )}
     </section>

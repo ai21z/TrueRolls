@@ -242,7 +242,7 @@ export function RollSigil({ receiptText, report, editable, onTamper }: RollSigil
       <svg
         className={css.svg}
         viewBox={`0 0 ${W} ${H}`}
-        role="img"
+        role="group"
         aria-label={
           nRun === 0
             ? 'Provenance graph of the receipt: facts of the roll bonded to a central seal, not yet verified.'

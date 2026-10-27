@@ -41,6 +41,7 @@ export const Playground = forwardRef<HTMLElement, Props>(function Playground({ s
             rollStatus={state.rollStatus}
             onRoll={state.roll}
             rollError={state.rollError}
+            onDismissError={state.clearRollError}
             die={state.die}
             kappa={state.kappa}
             broken={broken}

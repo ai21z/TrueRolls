@@ -57,7 +57,7 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
   },
   face: {
     eyebrow: 'face',
-    body: 'The number that was rolled. Recomputed from the draw and the guarded distribution, so it cannot be forged.',
+    body: 'The number that was rolled. It is recomputed from the draw and guarded distribution, so a changed face fails verification.',
   },
   kappa: {
     eyebrow: 'κ · karma',
@@ -69,7 +69,7 @@ const INFO: Record<Key, { eyebrow: string; body: ReactNode }> = {
   },
   hash: {
     eyebrow: 'hash',
-    body: 'The receipt hash. Change any single field and it no longer matches.',
+    body: 'The receipt hash. Change a signed value and the recomputed hash no longer matches.',
   },
   sig: {
     eyebrow: 'sig',
@@ -143,7 +143,7 @@ export function SeedSocket() {
           <svg
             className={css.svg}
             viewBox={`0 0 ${VB_W} ${VB_H}`}
-            role="img"
+            role="group"
             aria-label="Seed honesty specimen: a germinating seed whose six re-derivable facts feed it as roots, with the seventh, seed honesty, left as a missing taproot. Use the cells, or read the explanation."
             xmlns="http://www.w3.org/2000/svg"
           >

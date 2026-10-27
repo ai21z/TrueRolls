@@ -301,6 +301,15 @@
   color: var(--kd-text-muted);
 }
 
+.keyBypassBadge {
+  padding: 2px 8px;
+  border-radius: var(--kd-radius-pill);
+  background: var(--kd-fail-dim);
+  color: var(--kd-fail);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
 .keyInput {
   width: 100%;
   box-sizing: border-box;
@@ -318,6 +327,13 @@
 .keyInput:focus {
   outline: none;
   border-color: var(--kd-border-accent);
+}
+
+.keyTrustNote {
+  margin: 7px 0 0;
+  color: var(--kd-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .runRow {

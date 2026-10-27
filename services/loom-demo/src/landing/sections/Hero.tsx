@@ -53,7 +53,7 @@ export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
           <p className={css.lead}>
             Every completed roll returns a signed, drand-backed receipt players can verify
             locally. Public beacon seed, Ed25519 signature, deterministic offline replay.
-            Change one byte and it shatters.
+            Change a signed value and verification fails.
           </p>
           <div className={css.ctaRow}>
             <InkButton
@@ -69,6 +69,14 @@ export function Hero({ state, onSeeProof, onOpenPlayground }: Props) {
               See the proof
             </InkButton>
           </div>
+          {state.rollError && (
+            <div className={css.heroError} role="alert" aria-live="assertive">
+              <span>{state.rollError}</span>
+              <button type="button" onClick={state.clearRollError} aria-label="Dismiss roll error">
+                Dismiss
+              </button>
+            </div>
+          )}
           <p className={css.trust}>
             Public drand seed · deterministic offline replay · in-browser verifier.
             <br className={css.trustBreak} />

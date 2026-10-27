@@ -1,9 +1,9 @@
 import type { Die, ReceiptVerifyResponse, RollRequest, RollResponse, VerifyResponse } from '../types/kd';
 import { mockRoll, mockVerify } from './mock';
 import { initKdCoreWasm } from './wasmEngine';
+import { parseTruerollsKeys } from './keys';
+import { fetchLatestDrandPulse } from './drandClient';
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
-const DRAND_CHAIN = '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971';
-const DRAND_RELAY = 'https://api.drand.sh';
 const TARGET_DELAY_ROUNDS = 2;
 let _mockMode = false;
 export function isMockMode(): boolean {
@@ -13,12 +13,18 @@ export interface TruerollsKey {
   kid: string;
   alg: string;
   public_key: string;
-  status?: 'active' | 'retired' | 'revoked';
+  status?: string;
 }
 export interface TruerollsKeys {
   keys: TruerollsKey[];
 }
 
+// Absolute base the copied `kd verify --server <base>` command targets. It is the
+// same base the browser uses for every API call (`/v1/*` AND `/.well-known/*`), so
+// the CLI command reaches the key set wherever the browser's own calls already do.
+// When VITE_API_URL is an absolute URL it is used verbatim (the real API origin);
+// otherwise the relative dev-proxy base (`/api`) resolves against the page origin
+// and must be proxied to kd-api consistently for both path prefixes.
 export function getApiBaseForCli(): string {
   if (typeof window === 'undefined') return BASE;
   return new URL(BASE, window.location.origin).toString().replace(/\/$/, '');
@@ -65,26 +71,6 @@ export async function postRoll(die: Die, kappa: number): Promise<RollResponse> {
     throw new Error('Roll failed (' + res.status + '): ' + (await res.text()));
   }
   return res.json() as Promise<RollResponse>;
-}
-
-interface DrandApiPulse {
-  round: number;
-  signature: string;
-  randomness: string;
-}
-
-async function fetchLatestDrandPulse(): Promise<DrandApiPulse> {
-  const res = await fetch(`${DRAND_RELAY}/${DRAND_CHAIN}/public/latest`, {
-    signal: AbortSignal.timeout(3000),
-  });
-  if (!res.ok) {
-    throw new Error(`drand latest failed (${res.status}): ${await res.text()}`);
-  }
-  const pulse = (await res.json()) as DrandApiPulse;
-  if (!Number.isSafeInteger(pulse.round) || !pulse.signature || !pulse.randomness) {
-    throw new Error('drand latest response was malformed');
-  }
-  return pulse;
 }
 
 function randomHex32(): string {
@@ -135,5 +121,6 @@ export async function getTruerollsKeys(): Promise<TruerollsKeys> {
   if (!res.ok) {
     throw new Error(`Key fetch failed (${res.status}): ${await res.text()}`);
   }
-  return res.json() as Promise<TruerollsKeys>;
+  const body: unknown = await res.json();
+  return parseTruerollsKeys(body);
 }

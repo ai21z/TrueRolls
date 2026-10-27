@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow } from '../types/kd';
 import { KL_CAPS, FACES } from '../constants/caps';
-import { getApiBaseForCli, getTruerollsKeys, postVerifyReceipt } from '../api/client';
+import { getApiBaseForCli, postVerifyReceipt } from '../api/client';
+import { DEMO_TEST_KEY, DEMO_TEST_KID } from '../api/keys';
 import {
   buildReceiptBody,
   hasDrandProof as receiptHasDrandProof,
@@ -9,6 +10,7 @@ import {
   receiptVerifierAccepts,
   tamperedView,
 } from '../api/receipt';
+import { isMockArtifact, statusPillForArtifact } from '../api/trustPresentation';
 import css from './TranscriptReceipt.module.css';
 
 interface Props {
@@ -22,26 +24,6 @@ interface Props {
 const PUBKEY_PLACEHOLDER = '<public-key-from-/.well-known/truerolls-keys.json>';
 
 type PillTone = 'ok' | 'fail' | 'pending' | 'neutral';
-
-function statusPill(entry: TranscriptEntry, mock: boolean): { label: string; tone: PillTone } {
-  switch (entry.verifyStatus) {
-    case 'verified_local':
-      return mock
-        ? { label: 'Demo', tone: 'neutral' }
-        : { label: 'Verified · local', tone: 'ok' };
-    case 'verified_server':
-      return { label: 'Verified · server', tone: 'ok' };
-    case 'mismatch':
-      return { label: 'Mismatch', tone: 'fail' };
-    case 'pending':
-      return { label: 'Verifying…', tone: 'pending' };
-    case 'error':
-      return { label: 'Error', tone: 'fail' };
-    case 'not_checked':
-    default:
-      return { label: 'Not verified', tone: 'neutral' };
-  }
-}
 
 /** Check rows derived 1:1 from a ReceiptVerifyResponse, never fabricated. */
 function receiptCheckRows(
@@ -103,7 +85,8 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   // Tamper demo is only shown for signed receipts from the live API. Mock
   // receipts have no signature and nothing real to verify against.
   const isReceiptVersion = entry.v === 'truerolls-1' || entry.v === 'truerolls-drand-1';
-  const isSignedLive = isReceiptVersion && !!entry.sig && !mock;
+  const mockArtifact = isMockArtifact(entry);
+  const isSignedLive = isReceiptVersion && !!entry.sig && !mockArtifact && !mock;
   const entryReceiptBody = buildReceiptBody(entry);
   const activeReceiptBody = broken && tampered ? tampered.body : entryReceiptBody;
   const hasDrandProof = receiptHasDrandProof(activeReceiptBody);
@@ -117,7 +100,6 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   const [tamperResult, setTamperResult] = useState<ReceiptVerifyResponse | null>(null);
   const [tamperError, setTamperError] = useState<string | null>(null);
   const [tamperBusy, setTamperBusy] = useState(false);
-  const [publicKey, setPublicKey] = useState<string | null>(null);
 
   const sigKid = entry.sig?.kid ?? null;
 
@@ -154,24 +136,6 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
       previouslyFocused?.focus?.();
     };
   }, [onClose]);
-
-  // Fetch the published Ed25519 key once for the offline-verify snippet.
-  useEffect(() => {
-    if (!isSignedLive) return;
-    let cancelled = false;
-    getTruerollsKeys()
-      .then((res) => {
-        if (cancelled) return;
-        const match = res.keys.find((k) => k.kid === sigKid) ?? res.keys[0];
-        if (match) setPublicKey(match.public_key);
-      })
-      .catch(() => {
-        /* key fetch failed, the snippet keeps the placeholder */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isSignedLive, sigKid]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
@@ -251,7 +215,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   const checks = broken && tampered ? receiptCheckRows(tampered.result, tampered.body) : storedChecks;
   const pill = broken
     ? { label: 'Tampered', tone: 'fail' as PillTone }
-    : statusPill(entry, mock);
+    : statusPillForArtifact(entry.verifyStatus, mockArtifact);
   const verifyDetailText = broken && tampered
     ? tamperSummary(tampered.result, tampered.body)
     : entry.verifyDetail;
@@ -276,7 +240,11 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
         transcript_key: entry.transcript_key ?? '',
       }, null, 2);
 
-  const keyForSnippet = publicKey ?? PUBKEY_PLACEHOLDER;
+  // Signed-live receipts verify via --server (which fetches the issuer key set),
+  // so no key is embedded. For the non-live public-key snippet we only ever fill
+  // in the PUBLIC demo key for a demo-kid receipt (runnable offline); any other
+  // kid keeps an explicit placeholder rather than guessing a wrong key.
+  const keyForSnippet = sigKid === DEMO_TEST_KID ? DEMO_TEST_KEY : PUBKEY_PLACEHOLDER;
   const cliVerifyOptions = isSignedLive
     ? { kind: 'server' as const, server: getApiBaseForCli() }
     : { kind: 'public-key' as const, publicKey: keyForSnippet };
@@ -361,7 +329,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
               {signedKid ? `Ed25519 · ${signedKid}` : 'unsigned'}
             </dd>
           </div>
-          {entry.proof.drand && (
+          {hasDrandProof && entry.proof.drand && (
             <div className={css.metaRow}>
               <dt>Drand</dt>
               <dd className={`${css.mono} ${css.truncate}`}>
@@ -419,7 +387,7 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
             <div className={css.tamperTitle}>Tamper demo</div>
             <p className={css.tamperNote}>
               Edit a copy of this signed receipt and re-verify it against the server.
-              Ed25519 signature verification catches any post-signing edit. Deterministic
+              Ed25519 signature verification catches changes to signed values. Deterministic
               replay recomputes draw, face and metrics. For drand receipts, VALID also verifies
               the public drand seed provenance and the replay from that seed. (It does not yet
               prove an unfavourable completed roll could not have been withheld. That is the v2

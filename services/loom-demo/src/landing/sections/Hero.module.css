@@ -64,6 +64,31 @@
   margin-top: 4px;
 }
 
+.heroError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 34em;
+  padding: 10px 12px;
+  border: 1px solid rgba(181, 71, 77, 0.36);
+  border-radius: var(--kd-radius);
+  background: var(--kd-fail-dim);
+  color: var(--kd-fail);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.heroError button {
+  border: 1px solid rgba(181, 71, 77, 0.36);
+  border-radius: var(--kd-radius-sm);
+  background: transparent;
+  color: var(--kd-fail);
+  font: inherit;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
 /* dark ink reads on the filled accent button */
 .inkDark {
   --ink-stroke: rgba(10, 10, 11, 0.55);

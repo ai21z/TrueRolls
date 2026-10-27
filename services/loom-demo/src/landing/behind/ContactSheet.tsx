@@ -1,3 +1,4 @@
+import { verificationStateLabel, type VerificationState } from '../../api/trustPresentation';
 import css from './ContactSheet.module.css';
 
 /**
@@ -21,28 +22,26 @@ export interface Cell {
 interface ContactSheetProps {
   cells: Cell[];
   active: number;
-  verdict?: 'VALID' | 'INVALID' | 'ERROR';
+  verificationState: VerificationState;
   /** Version-aware proof scope from B's proof model. Null unless VALID. */
   scope?: string | null;
   onSelect: (index: number) => void;
 }
 
-const VERDICT_LABEL: Record<string, string> = {
-  VALID: 'VALID',
-  INVALID: 'INVALID',
-  ERROR: 'UNVERIFIABLE',
-};
-
-export function ContactSheet({ cells, active, verdict, scope, onSelect }: ContactSheetProps) {
+export function ContactSheet({ cells, active, verificationState, scope, onSelect }: ContactSheetProps) {
   const vClass =
-    verdict === 'VALID' ? css.vValid : verdict === 'INVALID' ? css.vInvalid : css.vNeutral;
+    verificationState === 'valid'
+      ? css.vValid
+      : verificationState === 'invalid'
+        ? css.vInvalid
+        : css.vNeutral;
   return (
     <section className={css.sheet} aria-label="Custody index">
       <div className={css.head}>
         <span className={css.eyebrow}>The chain at a glance</span>
-        {verdict && (
-          <span className={`${css.verdict} ${vClass}`}>{VERDICT_LABEL[verdict] ?? verdict}</span>
-        )}
+        <span className={`${css.verdict} ${vClass}`}>
+          {verificationStateLabel(verificationState)}
+        </span>
         {scope && <span className={css.scope}>{scope}</span>}
       </div>
       <div className={css.grid}>

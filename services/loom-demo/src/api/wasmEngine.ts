@@ -153,7 +153,7 @@ export interface WasmVerifyReport {
 /**
  * Verify a signed TrueRolls receipt entirely in the browser via the shared
  * `kd_receipt` engine (Ed25519 signature + JCS canon + DRBG replay + metric
- * caps). No network call, no server trust, the verdict is computed locally.
+ * caps). No network call to the minting server, the verdict is computed locally.
  * Never throws: unverifiable input returns `{ verdict: 'ERROR', error }`.
  */
 export function verifyReceiptWasm(receiptJson: string, publicKeyB64: string): WasmVerifyReport {

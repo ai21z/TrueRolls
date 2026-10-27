@@ -8,6 +8,7 @@ import {
   receiptVerifierAccepts,
   tamperedView,
 } from '../../api/receipt';
+import { heroReceiptPill, isMockArtifact } from '../../api/trustPresentation';
 import { postVerifyReceipt } from '../../api/client';
 import { FACES } from '../../constants/caps';
 import { InkFrame } from '../system/InkFrame';
@@ -38,7 +39,8 @@ export function HeroCredential({ state, onPhase }: Props) {
   const tamperState = entry?.tampered ?? null;
   const tamper = tamperState?.result ?? null;
 
-  const signed = !!entry?.sig && !state.mock;
+  const mockArtifact = isMockArtifact(entry);
+  const signed = !!entry?.sig && !mockArtifact && !state.mock;
   const hasDrandProof = entry ? receiptHasDrandProof(entry) : false;
 
   // New roll → reset, signal 'settled', then auto-verify the clean receipt.
@@ -53,7 +55,7 @@ export function HeroCredential({ state, onPhase }: Props) {
     lastId.current = entry.localId;
     setVerify(null);
     onPhase('settled');
-    if (state.mock || !entry.sig) return;
+    if (state.mock || mockArtifact || !entry.sig) return;
 
     let cancelled = false;
     postVerifyReceipt(buildReceiptBody(entry))
@@ -69,7 +71,7 @@ export function HeroCredential({ state, onPhase }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [entry, hasDrandProof, state.mock, onPhase]);
+  }, [entry, hasDrandProof, mockArtifact, state.mock, onPhase]);
 
   const doTamper = useCallback(async () => {
     if (!entry?.sig) return;
@@ -77,7 +79,7 @@ export function HeroCredential({ state, onPhase }: Props) {
     try {
       const body = buildReceiptBody(entry) as Record<string, unknown>;
       const faces = FACES[entry.die as Die] ?? 20;
-      body.face = (entry.face % faces) + 1; // flip one byte
+      body.face = (entry.face % faces) + 1; // alter a signed result value
       const res = await postVerifyReceipt(body);
       // Lift the break into shared state with the tampered body, the hero die, the
       // playground seed, the transcript row and the receipt modal all read it, so
@@ -108,20 +110,19 @@ export function HeroCredential({ state, onPhase }: Props) {
   const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
 
   let pill: { label: string; tone: string };
-  if (tampered) pill = { label: 'Tampered', tone: css.toneFail };
-  else if (verify) {
-    pill = verifiedOk
-      ? { label: 'Verified', tone: css.toneOk }
-      : { label: 'Invalid', tone: css.toneFail };
-  }
-  else if (state.mock) pill = { label: 'Demo', tone: css.toneNeutral };
-  else pill = { label: 'Signed', tone: css.toneNeutral };
+  const trustPill = heroReceiptPill({ entry, verify, tampered, verifiedOk });
+  if (trustPill.tone === 'fail') pill = { label: trustPill.label, tone: css.toneFail };
+  else if (trustPill.tone === 'ok') pill = { label: trustPill.label, tone: css.toneOk };
+  else if (trustPill.tone === 'pending') pill = { label: trustPill.label, tone: css.toneNeutral };
+  else pill = { label: trustPill.label, tone: css.toneNeutral };
 
   return (
     <InkFrame seed={65} className={`${css.card} ${tampered ? css.cardFail : ''}`}>
       <div className={css.head}>
         <span className={css.brand}>Receipt</span>
-        <span className={`${css.pill} ${pill.tone}`}>{pill.label}</span>
+        <span className={`${css.pill} ${pill.tone}`} data-trust-label={pill.label}>
+          {pill.label}
+        </span>
       </div>
 
       <div className={css.result}>
@@ -150,7 +151,7 @@ export function HeroCredential({ state, onPhase }: Props) {
         className={css.tamperBtn}
         onClick={doTamper}
         disabled={!signed || busy || tampered}
-        title={signed ? 'Flip one byte and re-verify' : 'Start the API for real signing'}
+        title={signed ? 'Alter the signed face and re-verify' : 'Start the API for real signing'}
       >
         {busy ? 'Re-verifying…' : tampered ? 'Signature broke' : 'Tamper & re-verify'}
       </InkButton>

@@ -120,7 +120,7 @@ const STEPS = [
   {
     n: '02',
     title: 'Sign',
-    body: 'The server returns an Ed25519-signed receipt, the draw, the math, and the face, sealed against any later edit.',
+    body: 'The server returns an Ed25519-signed receipt, the draw, the math, and the face, sealed against later changes to its signed values.',
   },
   {
     n: '03',
@@ -286,8 +286,9 @@ export function Landing({ state }: Props) {
               <h2 className={css.h2}>Verify any receipt yourself.</h2>
               <p className={css.lead}>
                 The receipt is self-contained and the signing key is published. Check a receipt
-                right in your browser, locally, with nothing to install, and confirm the
-                signature and the math yourself. No server, no account, no leap of faith.
+                right in your browser and confirm the signature and math locally. Issuer-key
+                discovery may use <code>/.well-known</code>; the receipt itself is not uploaded.
+                No account or installation is required.
               </p>
               <InkFrame inline seed={52} className={css.verifyCtaWrap}>
                 <a className={css.verifyCta} href="#verify">
@@ -303,10 +304,11 @@ export function Landing({ state }: Props) {
                   <span>in your browser · wasm</span>
                 </div>
                 <pre className={css.codeBody}>
-{`receipt.json  →  checked locally, no server
+{`receipt.json  →  checked locally; key discovery may use /.well-known
 
 `}<span className={css.codeOk}>{`✓ VALID
   signature  OK   (Ed25519)
+  drand      OK   (BLS quicknet pulse)
   sampling   OK   (draw_u64 replayed)
   face       OK
   metrics    OK   (α · KL · EV)`}</span>

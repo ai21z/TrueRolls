@@ -271,6 +271,10 @@
 }
 
 .rollError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   font-size: 12px;
   color: var(--kd-fail);
   background: var(--kd-fail-dim);
@@ -279,4 +283,19 @@
   padding: 7px 16px;
   text-align: center;
   animation: fadeUp 0.3s var(--kd-ease) forwards;
+}
+
+.rollErrorDismiss {
+  flex: none;
+  font: inherit;
+  color: var(--kd-fail);
+  background: transparent;
+  border: 1px solid rgba(181, 71, 77, 0.4);
+  border-radius: var(--kd-radius);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.rollErrorDismiss:hover {
+  background: rgba(181, 71, 77, 0.14);
 }

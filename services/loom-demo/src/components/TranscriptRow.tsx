@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Die, ReceiptVerifyResponse, TranscriptEntry } from '../types/kd';
 import { KL_CAPS } from '../constants/caps';
 import { tamperedView } from '../api/receipt';
+import { isMockArtifact, transcriptRowVerdict } from '../api/trustPresentation';
 import { TranscriptReceipt } from './TranscriptReceipt';
 import css from './TranscriptRow.module.css';
 
@@ -13,22 +14,21 @@ interface Props {
   mock: boolean;
 }
 
-function verdictLabel(entry: TranscriptEntry): { text: string; cls: string } {
-  switch (entry.verifyStatus) {
-    case 'not_checked':
-      return { text: '', cls: '' };
+function verdictClass(kind: ReturnType<typeof transcriptRowVerdict>['kind']): string {
+  switch (kind) {
+    case 'demo':
+      return css.verdictDemo;
+    case 'ok':
+      return css.verdictOk;
     case 'pending':
-      return { text: 'Verifying…', cls: css.verdictPending };
-    case 'verified_local':
-      // A demo/mock artifact: no cryptographic check ran, so it is never labelled
-      // "Verified", even if the session later reconnects to a live API.
-      return { text: 'Demo', cls: css.verdictDemo };
-    case 'verified_server':
-      return { text: '✓ Verified', cls: css.verdictOk };
+      return css.verdictPending;
     case 'mismatch':
-      return { text: '✕ Mismatch', cls: css.verdictMismatch };
+      return css.verdictMismatch;
     case 'error':
-      return { text: '✕ Error', cls: css.verdictError };
+      return css.verdictError;
+    case 'none':
+    default:
+      return '';
   }
 }
 
@@ -64,7 +64,8 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
     ? tamperedView(tampered.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
     : { face: entry.face, kappa: entry.kappa, die: entry.die };
 
-  const isVerified = !broken && entry.verifyStatus === 'verified_server';
+  const mockArtifact = isMockArtifact(entry);
+  const isVerified = !broken && !mockArtifact && entry.verifyStatus === 'verified_server';
   const isFailed = broken || entry.verifyStatus === 'mismatch' || entry.verifyStatus === 'error';
 
   const rowClass = [
@@ -76,7 +77,10 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
   const klCap = KL_CAPS[entry.die as Die] ?? KL_CAPS.d20;
   const verdict = broken
     ? { text: '✕ Tampered', cls: css.verdictMismatch }
-    : verdictLabel(entry);
+    : (() => {
+        const v = transcriptRowVerdict(entry.verifyStatus, mockArtifact);
+        return { text: v.text, cls: verdictClass(v.kind) };
+      })();
   const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
 
   return (

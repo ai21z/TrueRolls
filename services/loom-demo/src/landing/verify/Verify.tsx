@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { getApiBaseForCli, getTruerollsKeys, type TruerollsKey } from '../../api/client';
 import { DEMO_TEST_KEY, resolveReceiptKey, type KeySource } from '../../api/keys';
 import { DRAND_RECEIPT_VERSION, offlineVerifyCommand } from '../../api/receipt';
+import {
+  drandSummaryForReceipt,
+  keyTrustExplanation,
+  verificationState as deriveVerificationState,
+  verificationStateLabel,
+  type VerificationPhase,
+} from '../../api/trustPresentation';
+import {
+  LEGACY_RECEIPT,
+  PRIMARY_DRAND_RECEIPT,
+  TAMPERED_DRAND_RECEIPT,
+} from '../../generated/receiptFixtures';
 import { RollSigil } from '../../components/RollSigil';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
@@ -17,45 +29,12 @@ import {
 import css from './Verify.module.css';
 
 /**
- * Client-side receipt verifier. The entire verdict, Ed25519 signature, DRBG
- * sampling replay, face, and metric caps, is computed in the browser by the
- * shared kd_receipt engine (wasm), the same code `kd verify --receipt` runs.
- * No receipt or key ever leaves the page.
+ * Client-side receipt verifier. Receipt bytes are checked locally by the shared
+ * kd_receipt WASM engine. Automatic issuer-key discovery may fetch the site's
+ * published /.well-known key set; the receipt itself is not uploaded by this path.
  */
 
-// A signed sample receipt (kd-api ReceiptV2, d20 κ=0.6) so a first-time visitor
-// can verify something instantly. It is a verbatim copy of the committed golden
-// `goldens/golden_receipt_01_d20.json`, signed by the PUBLIC test key below,
-// never a production signer. If the goldens are ever regenerated, this sample
-// will visibly verify as INVALID on load (the mount auto-verify is the canary).
-// Re-copy the golden when that happens.
-const SAMPLE_RECEIPT = `{
-  "v": "truerolls-1",
-  "id": "00000000-0000-0000-0000-00000000d201",
-  "die": "d20",
-  "kappa": 0.6,
-  "face": 10,
-  "alpha": 0.3213648106902838,
-  "kl": 0.02011901380257613,
-  "ev": 11.65325625845831,
-  "created_at": "2026-01-01T00:00:00Z",
-  "transcript_url": "/v1/roll/00000000-0000-0000-0000-00000000d201/transcript",
-  "proof": {
-    "math_param_version": "roll.math.v1",
-    "rng": {
-      "algo": "HKDF(SHA-256)->ChaCha20Rng",
-      "drbg_key_hex": "4242424242424242424242424242424242424242424242424242424242424242"
-    },
-    "draw_u64": "7618457241228926372"
-  },
-  "receipt_hash": "sha256:a1dc5db031880eed1b20ef0042dedfae74df895b2bbe88a12a79221413bb350c",
-  "sig": {
-    "alg": "Ed25519",
-    "kid": "test-kid-1",
-    "signature_b64": "vsBiCDnNYIx0DduzM/rC3ogH9bOXbqN74khtHPMCvHAGr5/JlwgRjgu8kotUUM8fHSYc2TXue/k+TQqmIEuSDg==",
-    "canon": "JCS/RFC8785"
-  }
-}`;
+const SAMPLE_RECEIPT = PRIMARY_DRAND_RECEIPT;
 
 function receiptHasDrandProof(text: string): boolean {
   try {
@@ -70,19 +49,20 @@ function receiptHasDrandProof(text: string): boolean {
 }
 
 interface CheckRowProps {
+  checkId: string;
   ok: boolean | undefined;
   label: string;
   detail: string;
 }
 
-function CheckRow({ ok, label, detail }: CheckRowProps) {
+function CheckRow({ checkId, ok, label, detail }: CheckRowProps) {
   // Honest tri-state. A check the engine did not report (undefined) is shown as
   // an empty cell / "not run", never as a pass OR a fail. State is carried by the
   // carved cell's fill plus the real checkState word, never a check or cross badge.
   const state = ok === undefined ? 'not run' : ok ? 'pass' : 'fail';
   const stateClass = ok === undefined ? css.checkUnknown : ok ? css.checkPass : css.checkFail;
   return (
-    <div className={`${css.checkRow} ${stateClass}`}>
+    <div className={`${css.checkRow} ${stateClass}`} data-check-id={checkId}>
       <span className={css.checkMark} aria-hidden="true" />
       <span className={css.checkLabel}>{label}</span>
       <span className={css.checkDetail}>{detail}</span>
@@ -100,27 +80,36 @@ export function Verify() {
   const [keyStatus, setKeyStatus] = useState<string | null>('active');
   const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
   const [report, setReport] = useState<WasmVerifyReport | null>(null);
+  const [verificationPhase, setVerificationPhase] = useState<VerificationPhase>('loading');
   const [tampered, setTampered] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  // True while the on-screen receipt derives from our bundled sample (loaded or
+  // tampered). Only in that context do we resolve the PUBLIC demo key for a
+  // test-kid-1 receipt, so the sample and its tampered variants can show the
+  // signature passing/failing. An arbitrary pasted/uploaded receipt is fail-closed.
+  const [sampleContext, setSampleContext] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const runWithResolved = (text: string, resolved: ReturnType<typeof resolveReceiptKey>) => {
+    setVerificationPhase('verifying');
     if (!isKdCoreWasmReady()) {
       setReport({ verdict: 'ERROR', error: 'verifier engine still loading, try again in a moment' });
+      setVerificationPhase('complete');
       return;
     }
-    setReport(
+    const nextReport =
       resolved.kind === 'manual'
         ? verifyReceiptWasm(text, resolved.publicKey)
-        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson),
-    );
+        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson);
+    setReport(nextReport);
+    setVerificationPhase('complete');
   };
 
   // Resolve the key for `text` against the fetched /.well-known keys, reflect the choice in
   // the key badge, then verify.
   const verify = (text: string) => {
     const r = resolveReceiptKey(text, wellKnownKeys, keySource === 'manual' ? publicKey : null, {
-      allowDemoFallback: text === SAMPLE_RECEIPT,
+      allowDemoFallback: sampleContext,
     });
     setPublicKey(r.publicKey);
     setKeySource(r.source);
@@ -169,7 +158,10 @@ export function Verify() {
   const onReceiptChange = (text: string) => {
     setReceiptText(text);
     setReport(null);
+    setVerificationPhase('not_checked');
     setTampered(false);
+    // Hand-edited text is no longer the bundled sample: fail closed, no demo key.
+    setSampleContext(false);
   };
 
   const onKeyChange = (key: string) => {
@@ -178,21 +170,24 @@ export function Verify() {
     setKeyKid(null);
     setKeyStatus(null);
     setReport(null);
+    setVerificationPhase('not_checked');
   };
 
-  const loadSample = () => {
-    setReceiptText(SAMPLE_RECEIPT);
-    setTampered(false);
-    // Resolve the sample against its own signing key, ignoring any prior manual
-    // key edit (mirrors the mount canary), so the bundled sample always verifies
-    // VALID rather than failing the signature check against a stale manual key.
-    const r = resolveReceiptKey(SAMPLE_RECEIPT, wellKnownKeys, null, { allowDemoFallback: true });
+  const loadFixture = (text: string, fixtureTampered: boolean) => {
+    setReceiptText(text);
+    setTampered(fixtureTampered);
+    setSampleContext(true);
+    const r = resolveReceiptKey(text, wellKnownKeys, null, { allowDemoFallback: true });
     setPublicKey(r.publicKey);
     setKeySource(r.source);
     setKeyKid(r.kid);
     setKeyStatus(r.status ?? null);
-    runWithResolved(SAMPLE_RECEIPT, r);
+    runWithResolved(text, r);
   };
+
+  const loadSample = () => loadFixture(SAMPLE_RECEIPT, false);
+  const loadLegacyControl = () => loadFixture(LEGACY_RECEIPT, false);
+  const loadTamperedControl = () => loadFixture(TAMPERED_DRAND_RECEIPT, true);
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
@@ -201,11 +196,21 @@ export function Verify() {
       text = await file.text();
     } catch {
       setReport({ verdict: 'ERROR', error: 'could not read file' });
+      setVerificationPhase('complete');
       return;
     }
     setReceiptText(text);
     setTampered(false);
-    verify(text);
+    setSampleContext(false);
+    // Re-resolve against the uploaded receipt's own kid, ignoring any prior
+    // manual key so a genuinely issuer-signed upload is not checked against a
+    // stale pasted key (which would report a false INVALID).
+    const r = resolveReceiptKey(text, wellKnownKeys, null, { allowDemoFallback: false });
+    setPublicKey(r.publicKey);
+    setKeySource(r.source);
+    setKeyKid(r.kid);
+    setKeyStatus(r.status ?? null);
+    runWithResolved(text, r);
   };
 
   const copy = (text: string, label: string) => {
@@ -229,10 +234,12 @@ export function Verify() {
       parsed = JSON.parse(receiptText);
     } catch {
       setReport({ verdict: 'ERROR', error: 'receipt is not valid JSON, cannot tamper' });
+      setVerificationPhase('complete');
       return;
     }
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
       setReport({ verdict: 'ERROR', error: 'receipt must be a JSON object, cannot tamper' });
+      setVerificationPhase('complete');
       return;
     }
     const obj = parsed as Record<string, unknown>;
@@ -243,6 +250,7 @@ export function Verify() {
         verdict: 'ERROR',
         error: e instanceof Error ? e.message : 'cannot tamper this receipt',
       });
+      setVerificationPhase('complete');
       return;
     }
     const next = JSON.stringify(obj, null, 2);
@@ -270,13 +278,23 @@ export function Verify() {
       r[field] = value;
     });
 
-  const verdict = report?.verdict;
-  const isError = verdict === 'ERROR';
-  const isValid = verdict === 'VALID';
+  const presentationState = deriveVerificationState({
+    phase: verificationPhase,
+    report,
+    keySource,
+  });
+  const isValid = presentationState === 'valid';
   const hasDrandProof = receiptHasDrandProof(receiptText);
+  const noTrustRoot = presentationState === 'unverifiable' && keySource === 'unresolved';
+  let parsedReceiptForSummary: { v?: unknown; proof?: unknown } = {};
+  try {
+    parsedReceiptForSummary = JSON.parse(receiptText) as { v?: unknown; proof?: unknown };
+  } catch {
+    parsedReceiptForSummary = {};
+  }
   const cliCommand = offlineVerifyCommand(
     receiptText,
-    keySource === 'well-known'
+    keySource === 'well-known' || keySource === 'unresolved'
       ? { kind: 'server', server: getApiBaseForCli() }
       : { kind: 'public-key', publicKey },
   );
@@ -285,8 +303,10 @@ export function Verify() {
     keySource === 'well-known'
       ? `from /.well-known${keyKid ? ` · ${keyKid}` : ''}${keyStatus ? ` · ${keyStatus}` : ''}`
       : keySource === 'demo'
-        ? 'demo test key'
-        : 'manual';
+        ? 'public demo key (not issuer-backed)'
+        : keySource === 'unresolved'
+          ? `no published key for ${keyKid ?? 'this kid'}`
+          : 'manual';
 
   return (
     <main className={css.page}>
@@ -317,9 +337,9 @@ export function Verify() {
         <span className={css.eyebrow}>Don't trust. Verify.</span>
         <h1 className={css.title}>Verify a receipt in your browser.</h1>
         <p className={css.lead}>
-          Paste or drop a TrueRolls receipt. The Ed25519 signature, the sampling replay, the
-          face, and the metric caps are all checked <b>locally</b> by the same engine the CLI
-          runs, compiled to WebAssembly. No upload, no account, no server to trust.
+          Receipt bytes are checked <b>locally in your browser</b> by the same engine the CLI runs.
+          The verifier may fetch the issuer's published key set unless you already pinned or
+          supplied the verification key. The receipt itself is not uploaded by this path.
         </p>
       </section>
 
@@ -330,7 +350,13 @@ export function Verify() {
             <span className={css.panelTitle}>Receipt</span>
             <div className={css.panelActions}>
               <InkButton seed={5} className={css.ghostBtn} onClick={loadSample}>
-                Load sample
+                Current drand sample
+              </InkButton>
+              <InkButton seed={12} className={css.ghostBtn} onClick={loadLegacyControl}>
+                Legacy control
+              </InkButton>
+              <InkButton seed={13} className={css.ghostBtn} onClick={loadTamperedControl}>
+                Tampered control
               </InkButton>
               <InkButton seed={6} className={css.ghostBtn} onClick={() => fileRef.current?.click()}>
                 Upload .json
@@ -356,7 +382,10 @@ export function Verify() {
 
           <label className={css.keyLabel} htmlFor="pubkey">
             Ed25519 public key (base64)
-            <span className={css.keyBadge}>{keyBadgeText}</span>
+            <span className={css.keyBadge} data-key-source={keySource}>{keyBadgeText}</span>
+            {keySource === 'manual' && (
+              <span className={css.keyBypassBadge}>manual key, status bypassed</span>
+            )}
           </label>
           <input
             id="pubkey"
@@ -365,6 +394,7 @@ export function Verify() {
             spellCheck={false}
             onChange={(e) => onKeyChange(e.target.value)}
           />
+          <p className={css.keyTrustNote}>{keyTrustExplanation(keySource)}</p>
 
           <div className={css.runRow}>
             <InkButton seed={7} frameClassName={css.inkAccent} className={css.primaryBtn} onClick={onVerifyClick}>
@@ -402,7 +432,11 @@ export function Verify() {
             <span className={css.panelTitle}>Verdict</span>
             <span
               className={css.localBadge}
-              title={isKdCoreWasmReady() ? kdCoreWasmEngineLabel() : ''}
+              title={
+                isKdCoreWasmReady()
+                  ? `${kdCoreWasmEngineLabel()}. Issuer key discovery may use /.well-known.`
+                  : 'Issuer key discovery may use /.well-known.'
+              }
             >
               ● verified locally
             </span>
@@ -410,51 +444,74 @@ export function Verify() {
 
           <RollSigil receiptText={receiptText} report={report} editable onTamper={onSigilTamper} />
 
-          <div className={css.result} role="status" aria-live="polite">
-            {report === null ? (
+          <div
+            className={css.result}
+            role="status"
+            aria-live="polite"
+            data-verification-state={presentationState}
+          >
+            {presentationState === 'not_checked' ? (
               <div className={css.empty}>Verify a receipt to see the result.</div>
-            ) : isError ? (
+            ) : presentationState === 'loading' || presentationState === 'verifying' ? (
+              <div className={`${css.verdict} ${css.verdictError}`}>
+                <span className={css.verdictWord}>{verificationStateLabel(presentationState)}</span>
+                <span className={css.verdictSub}>
+                  {presentationState === 'loading'
+                    ? 'Loading the verifier engine and issuer key information.'
+                    : 'Recomputing the receipt checks locally.'}
+                </span>
+              </div>
+            ) : presentationState === 'unverifiable' ? (
               <div className={`${css.verdict} ${css.verdictError}`}>
                 <span className={css.verdictWord}>UNVERIFIABLE</span>
-                <span className={css.verdictSub}>{report.error}</span>
+                <span className={css.verdictSub}>
+                  {noTrustRoot
+                    ? `No published key matched kid ${keyKid}. Supply the issuer key set or paste the issuer's public key before the signature can be checked.`
+                    : report?.error ?? 'The verifier could not compute a meaningful verdict.'}
+                </span>
               </div>
-            ) : (
+            ) : report ? (
               <>
                 <div className={`${css.verdict} ${isValid ? css.verdictValid : css.verdictInvalid}`}>
                   <span className={css.verdictWord}>{isValid ? 'VALID' : 'INVALID'}</span>
                   <span className={css.verdictSub}>
-                    {isValid
-                      ? 'VALID proves the roll seed came from a verified public drand beacon when proof.drand is present, and the outcome replays from that seed.'
+                    {presentationState === 'valid'
+                      ? drandSummaryForReceipt(parsedReceiptForSummary)
                       : tampered
-                        ? 'Edited. The receipt no longer matches its signature.'
-                        : 'One or more checks failed.'}
+                          ? 'Edited. The receipt no longer matches its signature.'
+                          : 'One or more checks failed.'}
                   </span>
                 </div>
 
                 <div className={css.checks}>
                   <CheckRow
+                    checkId="signature"
                     ok={report.valid_signature}
                     label="Signature"
                     detail="Ed25519 over the JCS-canonical body"
                   />
                   {hasDrandProof && typeof report.valid_drand === 'boolean' && (
                     <CheckRow
+                      checkId="drand"
                       ok={report.valid_drand}
                       label="Drand"
                       detail="verified quicknet beacon proof and target binding"
                     />
                   )}
                   <CheckRow
+                    checkId="sampling"
                     ok={report.valid_sampling}
                     label="Seed replay"
                     detail="verified seed → ChaCha20 → draw replayed"
                   />
                   <CheckRow
+                    checkId="face"
                     ok={report.face_ok}
                     label="Face"
                     detail="recomputed from the guarded distribution"
                   />
                   <CheckRow
+                    checkId="metrics"
                     ok={report.metrics_ok}
                     label="Metrics"
                     detail="α · KL · EV within caps (tol 1e-9)"
@@ -490,6 +547,11 @@ export function Verify() {
                   </ul>
                 )}
               </>
+            ) : (
+              <div className={`${css.verdict} ${css.verdictError}`}>
+                <span className={css.verdictWord}>UNVERIFIABLE</span>
+                <span className={css.verdictSub}>No verifier report was produced.</span>
+              </div>
             )}
           </div>
         </InkFrame>
@@ -499,10 +561,15 @@ export function Verify() {
         <h2 className={css.honestTitle}>What this proves. And what it doesn't.</h2>
         <p>
           A VALID verdict proves the receipt was signed by the holder of the named issuer key, and,
-          when <code>proof.drand</code> is present, that the seed came from a verified public drand
-          beacon and the outcome replays from it. It does <b>not yet</b> prove the operator could not
+          for <code>truerolls-drand-1</code>, that the seed came from a verified public drand
+          beacon and the outcome replays from it. For legacy <code>truerolls-1</code>, VALID proves
+          signed replay and bounded math only. It does <b>not yet</b> prove the operator could not
           privately discard an unfavourable completed roll and publish only this one. Strict witnessed
           fairness is the v2 protocol, not this per-roll receipt.
+        </p>
+        <p>
+          A published issuer key authenticates the named issuer. It does not remove issuer trust.
+          Pasting a manual key bypasses the issuer's published key-status semantics.
         </p>
         <p className={css.honestLinks}>
           <a href="#docs">Read the docs</a> · <a href="#docs-threat-model">the threat model</a>
