@@ -3,3 +3,7 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
+overrides:
+  # GHSA-px8p-9vwx-vf98: fflate <0.6.11 can loop forever on malformed ZIP64 in unzipSync.
+  # Reached only via @react-three/drei > three-stdlib; pinned to the fixed 0.6 release.
+  'fflate@>=0.6.0 <0.6.11': 0.6.11
