@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
@@ -96,6 +96,7 @@ async function main() {
       static: false,
     },
   };
+  await mkdir(path.dirname(REPORT), { recursive: true });
   await writeFile(REPORT, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
   console.log('artifact\traw\tgzip-9\tbrotli-11\traw budget\tgzip budget');
