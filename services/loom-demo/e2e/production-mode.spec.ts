@@ -46,7 +46,7 @@ test('unreachable API shows unavailable state and never simulates a receipt', as
   await expect(
     page
       .getByLabel('Playground', { exact: true })
-      .getByText('The TrueRolls API is unavailable right now. No receipt was created.'),
+      .getByText('The TrueRolls API is unavailable right now. No roll request was sent.'),
   ).toBeVisible();
   await expect(page.locator('[data-trust-label]')).toHaveCount(0);
 });

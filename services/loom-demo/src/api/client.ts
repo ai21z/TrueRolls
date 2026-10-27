@@ -9,8 +9,11 @@ const TARGET_DELAY_ROUNDS = 2;
 // never falls back to them unless VITE_DEMO_FALLBACK=1 was set at build time.
 const DEMO_FALLBACK_ENABLED =
   import.meta.env.DEV || import.meta.env.VITE_DEMO_FALLBACK === '1';
-export const API_UNAVAILABLE_MESSAGE =
-  'The TrueRolls API is unavailable right now. No receipt was created.';
+// Only claim nothing was minted when the roll request was never sent. Once it may have
+// reached the API, a lost response or a 5xx (even a lost commit ack) can follow a stored receipt.
+export const ROLL_NOT_SENT_MESSAGE =
+  'The TrueRolls API is unavailable right now. No roll request was sent.';
+export const ROLL_OUTCOME_UNKNOWN_MESSAGE = 'The roll outcome could not be confirmed.';
 
 /** live: real API; demo: simulated receipts; unavailable: API unreachable, nothing simulated. */
 export type ClientMode = 'live' | 'demo' | 'unavailable';
@@ -75,7 +78,7 @@ export async function postRoll(die: Die, kappa: number): Promise<RollResponse> {
   if (_mode === 'demo') return mockRoll(die, kappa);
   if (_mode === 'unavailable') {
     // Re-probe so a cold start or brief outage recovers without a page reload.
-    if (!(await probeApi())) throw new Error(API_UNAVAILABLE_MESSAGE);
+    if (!(await probeApi())) throw new Error(ROLL_NOT_SENT_MESSAGE);
     _mode = 'live';
   }
   const clientNonce = randomHex32();
@@ -99,27 +102,34 @@ export async function postRoll(die: Die, kappa: number): Promise<RollResponse> {
       body: JSON.stringify(body),
     });
   } catch (err) {
-    // No HTTP response at all: let liveness decide whether the API is gone.
-    if (await markUnavailableIfApiDown()) throw new Error(API_UNAVAILABLE_MESSAGE);
-    throw err;
+    // No HTTP response at all. The request may still have been stored, so the outcome is
+    // unknown; liveness only decides the connection state.
+    await markUnavailableIfApiDown();
+    throw new Error(ROLL_OUTCOME_UNKNOWN_MESSAGE, { cause: err });
   }
-  if (!res.ok && res.status !== 201) {
-    // A 5xx can come from the edge or tunnel rather than the API. A 4xx (400, 409, 429)
-    // is an answer from a reachable API and never changes the connection state.
-    if (res.status >= 500 && (await markUnavailableIfApiDown())) {
-      throw new Error(API_UNAVAILABLE_MESSAGE);
-    }
+  if (res.status >= 500) {
+    // A 5xx can come from the edge or tunnel, or from the API after a commit whose ack was
+    // lost. Either way the receipt may exist.
+    await markUnavailableIfApiDown();
+    throw new Error(ROLL_OUTCOME_UNKNOWN_MESSAGE, { cause: new Error('HTTP ' + res.status) });
+  }
+  if (!res.ok) {
+    // A 4xx (400, 409, 429) is a definite refusal from a reachable API and never changes
+    // the connection state.
     throw new Error('Roll failed (' + res.status + '): ' + (await res.text()));
   }
-  return res.json() as Promise<RollResponse>;
+  try {
+    return (await res.json()) as RollResponse;
+  } catch (err) {
+    // The API answered success but the body was lost or truncated: the receipt exists.
+    throw new Error(ROLL_OUTCOME_UNKNOWN_MESSAGE, { cause: err });
+  }
 }
 
 // After a failed live call, re-probe liveness. A down API becomes 'unavailable', never
 // 'demo': simulated receipts are only ever chosen at startup.
-async function markUnavailableIfApiDown(): Promise<boolean> {
-  if (await probeApi()) return false;
-  _mode = 'unavailable';
-  return true;
+async function markUnavailableIfApiDown(): Promise<void> {
+  if (!(await probeApi())) _mode = 'unavailable';
 }
 
 function randomHex32(): string {
