@@ -2,8 +2,10 @@
 name = "kd-core"
 version = "0.1.0"
 edition = "2024"
-license = "Proprietary"
-authors = ["Vissarion Zounarakis <ariszoun@gmail.com>"]
+license-file = "../../LICENSE-VERIFYING.md"
+authors = ["Vissarion Zounarakis <aris@zounarakis.com>"]
+repository.workspace = true
+publish.workspace = true
 description = "TrueRolls core math: logits -> softmax -> minimal-α guarded mix (KL & EV caps) + helpers"
 
 [features]

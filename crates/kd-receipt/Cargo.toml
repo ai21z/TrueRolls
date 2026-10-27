@@ -2,8 +2,10 @@
 name = "kd-receipt"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file = "../../LICENSE-VERIFYING.md"
 authors.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "Shared offline ReceiptV2 verifier (Ed25519 + JCS + RNG replay + math recompute) over kd-core - one engine for CLI and browser"
 
 [dependencies]

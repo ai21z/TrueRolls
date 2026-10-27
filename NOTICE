@@ -1,3 +1,8 @@
-This repository and its contents are proprietary and confidential.
-Unauthorized use or disclosure is prohibited.
+This is a publicly visible, source-available proprietary repository. Public visibility does not make
+the repository open source and does not grant rights beyond the applicable license files.
 Copyright (c) 2025 Vissarion Zounarakis. All rights reserved.
+
+`LICENSE-VERIFYING.md` grants narrow rights to use, copy, modify, and distribute an explicitly
+defined verifier dependency closure solely for TrueRolls receipt verification and verification
+integration. Minting, server operation, signing, brand use, and all unlisted materials remain rights
+reserved under `LICENSE`.

@@ -2,9 +2,11 @@
 name = "kd-core-wasm"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file = "LICENSE"
 authors.workspace = true
-description = "wasm-bindgen bindings exposing kd-core pure math to JavaScript (no math duplication)"
+repository.workspace = true
+publish.workspace = true
+description = "wasm-bindgen bindings for TrueRolls deterministic math and receipt verification"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

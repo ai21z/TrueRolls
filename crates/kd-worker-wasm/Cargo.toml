@@ -2,8 +2,10 @@
 name = "kd-worker-wasm"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 authors.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "wasm-bindgen bindings for the TrueRolls Worker: roll + sign over kd-core + the shared kd-receipt signer (server-side only)"
 
 [lib]

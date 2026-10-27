@@ -12,9 +12,11 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-license = "Proprietary"
+license-file = "LICENSE"
 version = "0.1.0"
-authors = ["Vissarion Zounarakis <ariszoun@gmail.com>"]
+authors = ["Vissarion Zounarakis <aris@zounarakis.com>"]
+repository = "https://github.com/ai21z/truerolls"
+publish = false
 
 [workspace.dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
