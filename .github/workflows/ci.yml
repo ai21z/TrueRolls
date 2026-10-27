@@ -84,8 +84,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.22.2
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
 
       - name: Enable pinned pnpm
         run: corepack enable
@@ -185,7 +183,7 @@ jobs:
       - name: Install native build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake nasm pkg-config libssl-dev curl
+          sudo apt-get install -y cmake nasm pkg-config libssl-dev curl jq
 
       - name: Start controlled local infrastructure
         run: |
@@ -215,12 +213,13 @@ jobs:
 
       - name: Launch kd-api
         run: |
+          set -euo pipefail
           mkdir -p outputs
           target/debug/kd-api > outputs/kd-api-controlled.log 2> outputs/kd-api-controlled.log.err &
           echo "$!" > outputs/kd-api-controlled.pid
           for attempt in {1..60}; do
             echo "waiting for kd-api health (attempt $attempt)"
-            if curl -fsS "$API_BASE_URL/healthz"; then
+            if curl -fsS "$API_BASE_URL/healthz" | jq -e '.status == "ok" and .db == true and .redis == true and .s3 == true' > /dev/null; then
               exit 0
             fi
             sleep 2
@@ -314,8 +313,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.22.2
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
 
       - name: Enable pinned pnpm
         run: corepack enable
@@ -332,7 +329,7 @@ jobs:
       - name: Install native build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake nasm pkg-config libssl-dev curl
+          sudo apt-get install -y cmake nasm pkg-config libssl-dev curl jq
 
       - name: Start local infrastructure for external-network tests
         run: |
@@ -362,12 +359,13 @@ jobs:
 
       - name: Launch kd-api
         run: |
+          set -euo pipefail
           mkdir -p outputs
           target/debug/kd-api > outputs/kd-api-public-drand.log 2> outputs/kd-api-public-drand.log.err &
           echo "$!" > outputs/kd-api-public-drand.pid
           for attempt in {1..60}; do
             echo "waiting for kd-api health (attempt $attempt)"
-            if curl -fsS "$API_BASE_URL/healthz"; then
+            if curl -fsS "$API_BASE_URL/healthz" | jq -e '.status == "ok" and .db == true and .redis == true and .s3 == true' > /dev/null; then
               exit 0
             fi
             sleep 2

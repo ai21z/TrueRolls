@@ -30,6 +30,10 @@ It enforces the ordering that previously caused friction:
 
 Signing uses the **public test key** (`kid test-kid-1`) - never production.
 
+The MinIO compatibility fixture now builds from checksum-pinned upstream source because the old
+prebuilt image is unavailable. The first startup therefore takes longer; see
+[the fixture notes](../infra/minio-test/README.md). It is for local and CI use, not production.
+
 ### Build-tooling note (NASM / cmake)
 
 This repo's `aws-lc-sys` dependency needs **NASM** and **cmake** for a clean

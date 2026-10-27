@@ -29,7 +29,9 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+    image: truerolls-minio:test-fixture
+    build: ./minio-test
+    pull_policy: build
     container_name: kd-minio
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
