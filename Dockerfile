@@ -51,7 +51,9 @@ ENV API_HOST=0.0.0.0 \
     API_PORT=8080
 EXPOSE 8080
 
+# Liveness only: /livez does no dependency I/O, so this probe cannot load Postgres, Redis or S3.
+# Dependency readiness stays on /healthz for operators and deployment smoke checks.
 HEALTHCHECK --interval=3s --timeout=2s --start-period=5s --retries=20 \
-    CMD curl -fsS http://127.0.0.1:8080/healthz | grep -q '"status":"ok"' || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/livez | grep -q '"status":"ok"' || exit 1
 
 ENTRYPOINT ["kd-api"]

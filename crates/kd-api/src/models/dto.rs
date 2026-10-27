@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Serialize)]
+pub struct Live {
+    pub status: &'static str,
+}
+
+#[derive(Serialize)]
 pub struct Health {
     pub status: &'static str,
     pub db: bool,

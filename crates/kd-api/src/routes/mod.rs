@@ -77,6 +77,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     );
 
     Router::new()
+        .route("/livez", get(health::livez))
         .route("/healthz", get(health::healthz))
         .route("/v1/drand/health", get(drand::drand_healthz))
         .route(
