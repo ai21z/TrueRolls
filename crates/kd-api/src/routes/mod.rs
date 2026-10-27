@@ -37,28 +37,44 @@ pub fn router(state: Arc<AppState>) -> Router {
     //
     // On 429 the layer sets `x-ratelimit-after` (seconds), tower_governor's header, not
     // `Retry-After`.
-    let governor_conf = Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(state.cfg.roll_rl_period_secs)
-            .burst_size(state.cfg.roll_rl_burst)
-            .methods(vec![Method::POST])
-            .key_extractor(TrustedProxyKeyExtractor(state.cfg.trusted_proxy))
-            .finish()
-            .expect("rate-limit config: period and burst are non-zero (Config clamps both >= 1)"),
+    // Build a per-IP rate limiter AND spawn its idle-bucket evictor together, so a
+    // limiter can never be added without the reaper that keeps its map bounded.
+    // A macro (not a fn) sidesteps naming tower_governor's opaque layer type. Runs
+    // on the ambient Tokio runtime (router() is called from async main).
+    macro_rules! governor {
+        ($method:expr, $burst:expr) => {{
+            let conf = Arc::new(
+                GovernorConfigBuilder::default()
+                    .per_second(state.cfg.roll_rl_period_secs)
+                    .burst_size($burst)
+                    .methods(vec![$method])
+                    .key_extractor(TrustedProxyKeyExtractor(state.cfg.trusted_proxy))
+                    .finish()
+                    .expect(
+                        "rate-limit config: period and burst are non-zero (Config clamps both >= 1)",
+                    ),
+            );
+            let limiter = conf.limiter().clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+                loop {
+                    tick.tick().await;
+                    limiter.retain_recent();
+                }
+            });
+            GovernorLayer { config: conf }
+        }};
+    }
+
+    let roll_governor = governor!(Method::POST, state.cfg.roll_rl_burst);
+    let verify_post_governor = governor!(
+        Method::POST,
+        state.cfg.roll_rl_burst.saturating_mul(2).max(1)
     );
-    // Evict idle IP buckets periodically so the limiter map stays bounded. Runs on the
-    // ambient Tokio runtime (router() is called from the async main).
-    let limiter = governor_conf.limiter().clone();
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
-        loop {
-            tick.tick().await;
-            limiter.retain_recent();
-        }
-    });
-    let roll_governor = GovernorLayer {
-        config: governor_conf,
-    };
+    let read_governor = governor!(
+        Method::GET,
+        state.cfg.roll_rl_burst.saturating_mul(4).max(1)
+    );
 
     Router::new()
         .route("/healthz", get(health::healthz))
@@ -74,10 +90,25 @@ pub fn router(state: Arc<AppState>) -> Router {
             .get(roll::get_roll_by_idem)
             .layer(roll_governor), // limits POST only (methods=[POST]), GET passes through
         )
-        .route("/v1/roll/:id", get(roll::get_roll_by_id))
-        .route("/v1/roll/:id/transcript", get(roll::get_transcript_by_id))
-        .route("/v1/verify", post(verify::post_verify))
-        .route("/v1/verify/:id", get(verify::get_verify_by_id))
+        .route(
+            "/v1/roll/:id",
+            get(roll::get_roll_by_id).layer::<_, std::convert::Infallible>(read_governor.clone()),
+        )
+        .route(
+            "/v1/roll/:id/transcript",
+            get(roll::get_transcript_by_id)
+                .layer::<_, std::convert::Infallible>(read_governor.clone()),
+        )
+        .route(
+            "/v1/verify",
+            post(verify::post_verify)
+                .layer::<_, std::convert::Infallible>(verify_post_governor)
+                .layer(DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            "/v1/verify/:id",
+            get(verify::get_verify_by_id).layer::<_, std::convert::Infallible>(read_governor),
+        )
         .route(
             "/.well-known/truerolls-keys.json",
             get(well_known::get_keys),
@@ -452,6 +483,45 @@ mod tests {
         )
     }
 
+    fn protected_verify_read_app(burst: u32, body_limit: usize) -> Router {
+        let verify_conf = Arc::new(
+            GovernorConfigBuilder::default()
+                .per_second(60)
+                .burst_size(burst)
+                .methods(vec![Method::POST])
+                .key_extractor(TrustedProxyKeyExtractor(TrustedProxy::Peer))
+                .finish()
+                .unwrap(),
+        );
+        let read_conf = Arc::new(
+            GovernorConfigBuilder::default()
+                .per_second(60)
+                .burst_size(burst)
+                .methods(vec![Method::GET])
+                .key_extractor(TrustedProxyKeyExtractor(TrustedProxy::Peer))
+                .finish()
+                .unwrap(),
+        );
+        Router::new()
+            .route(
+                "/v1/verify",
+                post(|body: String| async move { (StatusCode::OK, body) })
+                    .layer::<_, std::convert::Infallible>(GovernorLayer {
+                        config: verify_conf,
+                    })
+                    .layer(axum::extract::DefaultBodyLimit::max(body_limit)),
+            )
+            .route(
+                "/v1/verify/:id",
+                axum::routing::get(|| async { StatusCode::OK })
+                    .layer::<_, std::convert::Infallible>(GovernorLayer { config: read_conf }),
+            )
+            .route(
+                "/.well-known/truerolls-keys.json",
+                axum::routing::get(|| async { StatusCode::OK }),
+            )
+    }
+
     #[tokio::test]
     async fn protective_stack_sheds_when_global_inflight_is_full() {
         let entered = Arc::new(AtomicUsize::new(0));
@@ -569,5 +639,82 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn verify_post_has_light_rate_limit() {
+        let app = protected_verify_read_app(1, 1024);
+        assert_eq!(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/verify")
+                        .extension(ConnectInfo(SocketAddr::new(
+                            "6.6.6.6".parse().unwrap(),
+                            12345
+                        )))
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/verify")
+                    .extension(ConnectInfo(SocketAddr::new(
+                        "6.6.6.6".parse().unwrap(),
+                        12345
+                    )))
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_post_body_limit_returns_413() {
+        let app = protected_verify_read_app(10, 4);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/verify")
+                    .extension(ConnectInfo(SocketAddr::new(
+                        "7.7.7.7".parse().unwrap(),
+                        12345,
+                    )))
+                    .body(Body::from("too large"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn well_known_stays_unthrottled() {
+        let app = protected_verify_read_app(1, 4);
+        for _ in 0..3 {
+            let response = app
+                .clone()
+                .oneshot(request_with_peer(
+                    Method::GET,
+                    "/.well-known/truerolls-keys.json",
+                    "8.8.8.8",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
     }
 }

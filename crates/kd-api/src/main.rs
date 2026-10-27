@@ -50,8 +50,8 @@ async fn main() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // ConnectInfo carries the peer IP, the SmartIpKeyExtractor rate limiter (KD-036) uses
-    // it as the fallback when no X-Forwarded-For / X-Real-IP header is present (local/dev).
+    // ConnectInfo carries the peer IP used by TrustedProxyKeyExtractor in peer mode.
+    // Forwarded headers are considered only in an explicitly configured trusted-proxy mode.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

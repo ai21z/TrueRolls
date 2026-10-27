@@ -252,17 +252,18 @@ pub async fn post_roll(
         };
         return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
     };
+    let mut idem_guard =
+        IdempotencyLockGuard::new(state.redis.clone(), idem_lock, key_hash.clone());
 
     let post_acquire_row = match db::select_idempotency_record_by_key(&state.pg, &idem_key).await {
         Ok(row) => row,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "post_acquire_select_failed")
-                .await;
+            release_lock_best_effort(&mut idem_guard, "post_acquire_select_failed").await;
             return Err(internal(err));
         }
     };
     if let Some(row) = post_acquire_row {
-        release_lock_best_effort(&state, &idem_lock, &key_hash, "post_acquire_dedup").await;
+        release_lock_best_effort(&mut idem_guard, "post_acquire_dedup").await;
         return idempotency_record_response(row, &payload_sha, &key_hash, started);
     }
 
@@ -270,14 +271,14 @@ pub async fn post_roll(
     let server_latest = match state.drand.fetch_latest_verified().await {
         Ok(pulse) => pulse,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_latest_failed").await;
+            release_lock_best_effort(&mut idem_guard, "drand_latest_failed").await;
             return Err(internal(format!("drand latest fetch failed: {err}")));
         }
     };
     let wall_clock_frontier_round = match quicknet_wall_clock_frontier_round() {
         Ok(round) => round,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_frontier_failed").await;
+            release_lock_best_effort(&mut idem_guard, "drand_frontier_failed").await;
             return Err(internal(format!("drand wall-clock frontier failed: {err}")));
         }
     };
@@ -289,7 +290,7 @@ pub async fn post_roll(
     ) {
         Ok(pulse) => pulse,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_request_invalid").await;
+            release_lock_best_effort(&mut idem_guard, "drand_request_invalid").await;
             return Err(bad_request(err));
         }
     };
@@ -305,7 +306,7 @@ pub async fn post_roll(
     let now_unix = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "system_time_failed").await;
+            release_lock_best_effort(&mut idem_guard, "system_time_failed").await;
             return Err(internal(err));
         }
     };
@@ -319,7 +320,7 @@ pub async fn post_roll(
     {
         Ok(reservation) => reservation,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "mint_cap_error").await;
+            release_lock_best_effort(&mut idem_guard, "mint_cap_error").await;
             return Err(internal(err));
         }
     };
@@ -341,7 +342,7 @@ pub async fn post_roll(
                 cap = state.cfg.roll_global_cap,
                 retry_after_secs
             );
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "mint_cap_rejected").await;
+            release_lock_best_effort(&mut idem_guard, "mint_cap_rejected").await;
             return Ok(mint_cap_response(retry_after_secs));
         }
     }
@@ -353,7 +354,7 @@ pub async fn post_roll(
     {
         Ok(pulse) => pulse,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_target_failed").await;
+            release_lock_best_effort(&mut idem_guard, "drand_target_failed").await;
             return Err(internal(format!("drand target fetch failed: {err}")));
         }
     };
@@ -368,7 +369,7 @@ pub async fn post_roll(
     let drbg_key = match kd_drand::derive_roll_seed(&seed_input) {
         Ok(seed) => seed,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "drand_seed_failed").await;
+            release_lock_best_effort(&mut idem_guard, "drand_seed_failed").await;
             return Err(internal(format!("drand seed derivation failed: {err}")));
         }
     };
@@ -379,7 +380,7 @@ pub async fn post_roll(
     let result = match roll_result {
         Ok(result) => result,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "roll_math_failed").await;
+            release_lock_best_effort(&mut idem_guard, "roll_math_failed").await;
             return Err(internal(err));
         }
     };
@@ -438,8 +439,14 @@ pub async fn post_roll(
         });
     }
 
-    // Map to DB/API types while we're still in this short scope (before awaits)
-    let face: i32 = result.face.try_into().expect("face fits i32 (<= 100)");
+    // Map to DB/API types while we're still in this short scope.
+    let face: i32 = match result.face.try_into() {
+        Ok(face) => face,
+        Err(err) => {
+            release_lock_best_effort(&mut idem_guard, "face_conversion_failed").await;
+            return Err(internal(format!("roll face conversion failed: {err}")));
+        }
+    };
     let ev = result.ev;
     let alpha = result.alpha;
     let kl = result.kl;
@@ -483,16 +490,14 @@ pub async fn post_roll(
         let body_for_signing = match serde_json::to_value(&receipt) {
             Ok(value) => value,
             Err(err) => {
-                release_lock_best_effort(&state, &idem_lock, &key_hash, "receipt_json_failed")
-                    .await;
+                release_lock_best_effort(&mut idem_guard, "receipt_json_failed").await;
                 return Err(internal(err));
             }
         };
         let (sig_block, receipt_hash) = match signer.sign_receipt(&body_for_signing) {
             Ok(parts) => parts,
             Err(err) => {
-                release_lock_best_effort(&state, &idem_lock, &key_hash, "receipt_sign_failed")
-                    .await;
+                release_lock_best_effort(&mut idem_guard, "receipt_sign_failed").await;
                 return Err(internal(err));
             }
         };
@@ -502,7 +507,7 @@ pub async fn post_roll(
     let receipt_json = match serde_json::to_value(&receipt) {
         Ok(value) => value,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "receipt_json_failed").await;
+            release_lock_best_effort(&mut idem_guard, "receipt_json_failed").await;
             return Err(internal(err));
         }
     };
@@ -511,13 +516,13 @@ pub async fn post_roll(
     let bytes = match serde_json::to_vec(&transcript_json) {
         Ok(bytes) => bytes,
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "transcript_json_failed").await;
+            release_lock_best_effort(&mut idem_guard, "transcript_json_failed").await;
             return Err(internal(err));
         }
     };
     if let Err(err) = s3::put_transcript(&state.s3, &state.s3_bucket, &s3_key, bytes.clone()).await
     {
-        release_lock_best_effort(&state, &idem_lock, &key_hash, "s3_put_failed").await;
+        release_lock_best_effort(&mut idem_guard, "s3_put_failed").await;
         return Err(internal(err));
     }
     info!(event = "s3.transcript.put", %public_id, bytes = bytes.len(), %s3_key);
@@ -559,7 +564,7 @@ pub async fn post_roll(
             );
         }
         Ok(None) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "db_conflict").await;
+            release_lock_best_effort(&mut idem_guard, "db_conflict").await;
             // The row already exists under this idem key (a concurrent winner), so
             // the transcript we just uploaded under our own public_id is orphaned.
             delete_transcript_best_effort(&state, &s3_key, public_id, "db_conflict").await;
@@ -584,7 +589,7 @@ pub async fn post_roll(
             return Ok((StatusCode::ACCEPTED, Json(processing)).into_response());
         }
         Err(err) => {
-            release_lock_best_effort(&state, &idem_lock, &key_hash, "db_insert_failed").await;
+            release_lock_best_effort(&mut idem_guard, "db_insert_failed").await;
             // Deliberately NO transcript cleanup here: a commit whose ack was lost
             // returns Err while the row IS durably committed, and that row references
             // this object. A rare orphan (storage leak) beats deleting a committed
@@ -598,6 +603,7 @@ pub async fn post_roll(
         deduplicated: false,
     };
 
+    idem_guard.disarm_success();
     info!(
         event = "roll.done",
         status = 201u16,
@@ -608,6 +614,101 @@ pub async fn post_roll(
 }
 
 // -------------------- helpers ----------------------
+
+struct IdempotencyLockGuard {
+    redis: deadpool_redis::Pool,
+    lock: Option<idempotency::IdempotencyLock>,
+    key_hash: String,
+}
+
+impl IdempotencyLockGuard {
+    fn new(
+        redis: deadpool_redis::Pool,
+        lock: idempotency::IdempotencyLock,
+        key_hash: String,
+    ) -> Self {
+        Self {
+            redis,
+            lock: Some(lock),
+            key_hash,
+        }
+    }
+
+    fn disarm_success(&mut self) {
+        self.lock = None;
+    }
+
+    #[cfg(test)]
+    fn is_armed(&self) -> bool {
+        self.lock.is_some()
+    }
+
+    async fn release_now(&mut self, reason: &'static str) {
+        let Some(lock) = self.lock.as_ref() else {
+            return;
+        };
+        match idempotency::release_lock(&self.redis, lock).await {
+            Ok(true) => {
+                info!(event = "idem.lock_released", key_hash = %self.key_hash, reason);
+                self.lock = None;
+            }
+            Ok(false) => {
+                warn!(
+                    event = "idem.lock_release_failed",
+                    key_hash = %self.key_hash,
+                    reason,
+                    detail = "missing_or_owned_by_another_request"
+                );
+                self.lock = None;
+            }
+            Err(err) => {
+                warn!(
+                    event = "idem.lock_release_failed",
+                    key_hash = %self.key_hash,
+                    reason,
+                    error = %err
+                );
+            }
+        }
+    }
+}
+
+impl Drop for IdempotencyLockGuard {
+    fn drop(&mut self) {
+        let Some(lock) = self.lock.take() else {
+            return;
+        };
+        let redis = self.redis.clone();
+        let key_hash = self.key_hash.clone();
+        tokio::spawn(async move {
+            match idempotency::release_lock(&redis, &lock).await {
+                Ok(true) => {
+                    info!(
+                        event = "idem.lock_released",
+                        key_hash = %key_hash,
+                        reason = "handler_cancelled_or_dropped"
+                    );
+                }
+                Ok(false) => {
+                    warn!(
+                        event = "idem.lock_release_failed",
+                        key_hash = %key_hash,
+                        reason = "handler_cancelled_or_dropped",
+                        detail = "missing_or_owned_by_another_request"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        event = "idem.lock_release_failed",
+                        key_hash = %key_hash,
+                        reason = "handler_cancelled_or_dropped",
+                        error = %err
+                    );
+                }
+            }
+        });
+    }
+}
 
 /// 429 Too Many Requests for a global-mint-cap rejection, with a `Retry-After` (seconds) pointing
 /// at the next window. Built inline (not via `AppError`) so it can carry the header, matching how
@@ -722,33 +823,8 @@ async fn delete_transcript_best_effort(
     }
 }
 
-async fn release_lock_best_effort(
-    state: &AppState,
-    lock: &idempotency::IdempotencyLock,
-    key_hash: &str,
-    reason: &'static str,
-) {
-    match idempotency::release_lock(&state.redis, lock).await {
-        Ok(true) => {
-            info!(event = "idem.lock_released", key_hash = %key_hash, reason);
-        }
-        Ok(false) => {
-            warn!(
-                event = "idem.lock_release_failed",
-                key_hash = %key_hash,
-                reason,
-                detail = "missing_or_owned_by_another_request"
-            );
-        }
-        Err(err) => {
-            warn!(
-                event = "idem.lock_release_failed",
-                key_hash = %key_hash,
-                reason,
-                error = %err
-            );
-        }
-    }
+async fn release_lock_best_effort(guard: &mut IdempotencyLockGuard, reason: &'static str) {
+    guard.release_now(reason).await;
 }
 
 fn sha256_bytes(data: &[u8]) -> Vec<u8> {
@@ -826,5 +902,53 @@ mod tests {
             }
             other => panic!("expected conflict for unreplayable idempotency row, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn idempotency_lock_guard_disarms_on_success() {
+        let redis = deadpool_redis::Config::from_url("redis://127.0.0.1/")
+            .create_pool(Some(deadpool_redis::Runtime::Tokio1))
+            .expect("pool config should build without connecting");
+        let lock = idempotency::IdempotencyLock {
+            key: "idem:test".to_string(),
+            token: "owner-token".to_string(),
+        };
+        let mut guard = IdempotencyLockGuard::new(redis, lock, "keyhash".to_string());
+
+        assert!(guard.is_armed());
+        guard.disarm_success();
+        assert!(!guard.is_armed());
+    }
+
+    #[tokio::test]
+    async fn idempotency_lock_guard_releases_owned_lock_when_dropped() -> Result<(), anyhow::Error>
+    {
+        let Ok(url) = std::env::var("KD_REDIS_TEST_URL") else {
+            return Ok(());
+        };
+        let redis = deadpool_redis::Config::from_url(url)
+            .create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
+        let key = format!("test:idem:guard-drop:{}", Uuid::new_v4());
+        let lock = idempotency::acquire_lock(&redis, &key, 30)
+            .await?
+            .expect("initial owner should acquire the key");
+
+        {
+            let _guard = IdempotencyLockGuard::new(redis.clone(), lock, "keyhash".to_string());
+        }
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        let replacement = loop {
+            if let Some(lock) = idempotency::acquire_lock(&redis, &key, 30).await? {
+                break lock;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!("armed guard drop did not release its owned lock within 2 seconds");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        };
+
+        assert!(idempotency::release_lock(&redis, &replacement).await?);
+        Ok(())
     }
 }

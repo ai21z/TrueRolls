@@ -68,7 +68,30 @@ fn drand_roll_body_from_pulse(
 }
 
 async fn fetch_latest_quicknet_pulse() -> Result<kd_drand::DrandPulse, String> {
-    fetch_quicknet_path("public/latest").await
+    const RELAYS: [&str; 3] = [
+        "https://api.drand.sh",
+        "https://api2.drand.sh",
+        "https://api3.drand.sh",
+    ];
+    let attempts = futures::future::join_all(
+        RELAYS
+            .iter()
+            .map(|relay| fetch_quicknet_path_from_relay(relay, "public/latest")),
+    )
+    .await;
+
+    let mut pulses = Vec::new();
+    let mut errors = Vec::new();
+    for (relay, attempt) in RELAYS.iter().zip(attempts) {
+        match attempt {
+            Ok(pulse) => pulses.push(pulse),
+            Err(err) => errors.push(format!("{relay}: {err}")),
+        }
+    }
+    pulses
+        .into_iter()
+        .max_by_key(|pulse| pulse.round)
+        .ok_or_else(|| format!("all quicknet relays failed: {}", errors.join("; ")))
 }
 
 async fn fetch_quicknet_round(round: u64) -> Result<kd_drand::DrandPulse, String> {
@@ -76,8 +99,16 @@ async fn fetch_quicknet_round(round: u64) -> Result<kd_drand::DrandPulse, String
 }
 
 async fn fetch_quicknet_path(path: &str) -> Result<kd_drand::DrandPulse, String> {
+    fetch_quicknet_path_from_relay("https://api.drand.sh", path).await
+}
+
+async fn fetch_quicknet_path_from_relay(
+    relay: &str,
+    path: &str,
+) -> Result<kd_drand::DrandPulse, String> {
     let url = format!(
-        "https://api.drand.sh/{}/{}",
+        "{}/{}/{}",
+        relay.trim_end_matches('/'),
         kd_drand::QUICKNET_CHAIN_HASH,
         path
     );
@@ -114,7 +145,7 @@ pub async fn wait_until_ready(timeout: Duration) -> Result<(), String> {
                 if start.elapsed() >= timeout {
                     return Err(format!(
                         "API not reachable at {} within {:?}. \
-Start it in another terminal: `cargo run -p kd-api`.",
+Start it in another terminal: `cargo run --locked -p kd-api`.",
                         url, timeout
                     ));
                 }

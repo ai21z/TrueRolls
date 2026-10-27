@@ -201,10 +201,8 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(5)
             .max(1);
-        let computed_roll_timeout_ms = drand_target_wait_ms
-            + (drand_relays.len() as u64) * 2 * drand_timeout_ms
-            + 2 * drand_timeout_ms
-            + 2_000;
+        let computed_roll_timeout_ms =
+            default_roll_timeout_ms(drand_target_wait_ms, drand_relays.len(), drand_timeout_ms);
         let roll_timeout_ms = env::var("KD_ROLL_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -370,6 +368,22 @@ impl Config {
     }
 }
 
+fn default_roll_timeout_ms(
+    drand_target_wait_ms: u64,
+    relay_count: usize,
+    drand_timeout_ms: u64,
+) -> u64 {
+    // One verified pulse fetch may request both /info and /public/<round> from
+    // every relay. Budget one complete pass for the initial frontier fetch and
+    // one for the target-wait iteration that crosses its own deadline.
+    let relay_pass_ms = (relay_count as u64)
+        .saturating_mul(2)
+        .saturating_mul(drand_timeout_ms);
+    drand_target_wait_ms
+        .saturating_add(relay_pass_ms.saturating_mul(2))
+        .saturating_add(2_000)
+}
+
 fn parse_signing_keys(
     legacy_secret: Option<&str>,
     legacy_kid: Option<&str>,
@@ -504,7 +518,7 @@ mod tests {
             allow_peer_ip_in_prod: true,
             roll_max_inflight: 32,
             db_max_connections: 5,
-            roll_timeout_ms: 34_000,
+            roll_timeout_ms: 44_000,
             roll_global_cap: 0,
             roll_global_cap_window_secs: 3_600,
             allow_uncapped_roll_in_prod: true,
@@ -794,5 +808,20 @@ mod tests {
         c.roll_global_cap = 0;
         c.allow_uncapped_roll_in_prod = false;
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn default_roll_timeout_covers_two_worst_case_relay_passes() {
+        assert_eq!(default_roll_timeout_ms(12_000, 3, 2_500), 44_000);
+        assert_eq!(default_roll_timeout_ms(12_000, 4, 2_500), 54_000);
+        assert_eq!(default_roll_timeout_ms(15_000, 3, 3_000), 53_000);
+    }
+
+    #[test]
+    fn default_roll_timeout_saturates_instead_of_overflowing() {
+        assert_eq!(
+            default_roll_timeout_ms(u64::MAX, usize::MAX, u64::MAX),
+            u64::MAX
+        );
     }
 }

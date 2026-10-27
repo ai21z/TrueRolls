@@ -1,6 +1,7 @@
 // AppError -> IntoResponse + helpers
 
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -38,7 +39,14 @@ impl IntoResponse for AppError {
         match self {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
-            AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response(),
+            AppError::Internal(msg) => {
+                tracing::error!(event = "app.internal_error", error = %msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "internal" })),
+                )
+                    .into_response()
+            }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg).into_response(),
             AppError::UnprocessableEntity(msg) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, msg).into_response()
@@ -62,4 +70,24 @@ pub fn not_found<T: ToString>(msg: T) -> AppError {
 }
 pub fn unprocessable<T: ToString>(msg: T) -> AppError {
     AppError::UnprocessableEntity(msg.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn internal_response_hides_detail() {
+        let response =
+            AppError::Internal("secret redis://topology detail".to_string()).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let text = String::from_utf8(body.to_vec()).expect("utf8 body");
+        assert!(text.contains("internal"));
+        assert!(!text.contains("secret"));
+        assert!(!text.contains("redis"));
+    }
 }
