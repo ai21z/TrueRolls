@@ -96,7 +96,8 @@ pub struct Config {
     pub signing_kid: Option<String>,
     /// Explicit key set. One active key signs. Retired keys verify only. Revoked keys fail verification.
     pub signing_keys: Vec<SigningKeyConfig>,
-    /// Public base URL (for building transcript_url etc.)
+    /// `KD_PUBLIC_BASE_URL`. Currently not read by any route: `transcript_url` is API-relative
+    /// and the issuer origin is set by DNS/proxy routing. Kept for configuration compatibility.
     pub public_base_url: String,
     /// Deployment profile (KD_ENV). `Prod` activates the SIG-2 signer guard.
     pub env_profile: EnvProfile,
@@ -104,6 +105,14 @@ pub struct Config {
     pub roll_rl_period_secs: u64,
     /// Rate-limit for `POST /v1/roll`: max burst (`KD_ROLL_RL_BURST`).
     pub roll_rl_burst: u32,
+    /// Rate-limit for `POST /v1/verify`: replenish period (`KD_VERIFY_RL_PERIOD_SECS`).
+    pub verify_rl_period_secs: u64,
+    /// Rate-limit for `POST /v1/verify`: max burst (`KD_VERIFY_RL_BURST`).
+    pub verify_rl_burst: u32,
+    /// Rate-limit for GET roll/transcript/verify reads: replenish period (`KD_READ_RL_PERIOD_SECS`).
+    pub read_rl_period_secs: u64,
+    /// Rate-limit for GET roll/transcript/verify reads: max burst (`KD_READ_RL_BURST`).
+    pub read_rl_burst: u32,
     /// Comma-separated drand relay base URLs.
     pub drand_relays: Vec<String>,
     /// HTTP timeout per drand relay request.
@@ -169,6 +178,12 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(60)
             .max(1);
+        // Verify and read limits are independent of the mint limit, so tightening
+        // KD_ROLL_RL_* for a public demo does not also throttle receipt browsing.
+        let verify_rl_period_secs = env_u64_at_least("KD_VERIFY_RL_PERIOD_SECS", 1, 1);
+        let verify_rl_burst = env_u32_at_least("KD_VERIFY_RL_BURST", 120, 1);
+        let read_rl_period_secs = env_u64_at_least("KD_READ_RL_PERIOD_SECS", 1, 1);
+        let read_rl_burst = env_u32_at_least("KD_READ_RL_BURST", 240, 1);
         let drand_relays = env::var("DRAND_RELAYS")
             .unwrap_or_else(|_| {
                 "https://api.drand.sh,https://api2.drand.sh,https://api3.drand.sh".to_string()
@@ -238,6 +253,10 @@ impl Config {
             env_profile,
             roll_rl_period_secs,
             roll_rl_burst,
+            verify_rl_period_secs,
+            verify_rl_burst,
+            read_rl_period_secs,
+            read_rl_burst,
             drand_relays,
             drand_timeout_ms,
             drand_client_max_lag_rounds,
@@ -270,11 +289,31 @@ impl Config {
                     "KD_ROLL_GLOBAL_CAP is unset/0 in prod: the unauthenticated POST /v1/roll endpoint would mint signed receipts without a global ceiling. Set KD_ROLL_GLOBAL_CAP=<max mints per window>. To intentionally run uncapped, set KD_ALLOW_UNCAPPED_ROLL=1.",
                 ));
             }
+            let per_ip_bound = self.per_ip_roll_admission_bound();
+            if self.roll_global_cap > 0 && per_ip_bound >= self.roll_global_cap {
+                return Err(internal(format!(
+                    "per-IP roll limit admits up to {per_ip_bound} attempts per {}s window (KD_ROLL_RL_BURST {} + ceil(window / KD_ROLL_RL_PERIOD_SECS {})), which reaches KD_ROLL_GLOBAL_CAP ({}) in prod: one client could exhaust the whole mint window. Lower the burst, lengthen the period, or raise the cap.",
+                    self.roll_global_cap_window_secs,
+                    self.roll_rl_burst,
+                    self.roll_rl_period_secs,
+                    self.roll_global_cap
+                )));
+            }
         }
         if self.drand_relays.is_empty() {
             return Err(bad_request("DRAND_RELAYS must contain at least one relay"));
         }
         Ok(())
+    }
+
+    /// Conservative upper bound on `POST /v1/roll` attempts one client IP can have admitted
+    /// by this process within one global-cap window: the full burst plus one replenished
+    /// token per period, rounded up. A configuration sanity bound, not a per-IP quota: the
+    /// limiter is process-local, resets on restart, and multiplies across instances.
+    pub fn per_ip_roll_admission_bound(&self) -> u64 {
+        let period = self.roll_rl_period_secs.max(1);
+        u64::from(self.roll_rl_burst)
+            .saturating_add(self.roll_global_cap_window_secs.div_ceil(period))
     }
 
     fn validate_signing_keys(&self) -> Result<(), AppError> {
@@ -435,6 +474,22 @@ fn validate_public_key(public_key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+fn env_u64_at_least(name: &str, default: u64, min: u64) -> u64 {
+    env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+        .max(min)
+}
+
+fn env_u32_at_least(name: &str, default: u32, min: u32) -> u32 {
+    env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+        .max(min)
+}
+
 fn env_truthy(name: &str) -> bool {
     matches!(
         env::var(name)
@@ -510,6 +565,10 @@ mod tests {
             env_profile: profile,
             roll_rl_period_secs: 1,
             roll_rl_burst: 60,
+            verify_rl_period_secs: 1,
+            verify_rl_burst: 120,
+            read_rl_period_secs: 1,
+            read_rl_burst: 240,
             drand_relays: vec!["https://api.drand.sh".to_string()],
             drand_timeout_ms: 2500,
             drand_client_max_lag_rounds: 2,
@@ -523,6 +582,69 @@ mod tests {
             roll_global_cap_window_secs: 3_600,
             allow_uncapped_roll_in_prod: true,
         }
+    }
+
+    fn prod_capped(burst: u32, period_secs: u64, window_secs: u64, cap: u64) -> Config {
+        let mut cfg = cfg_with(EnvProfile::Prod, Some(FRESH_SEED_HEX), Some("prod-kid-1"));
+        cfg.allow_uncapped_roll_in_prod = false;
+        cfg.roll_rl_burst = burst;
+        cfg.roll_rl_period_secs = period_secs;
+        cfg.roll_global_cap_window_secs = window_secs;
+        cfg.roll_global_cap = cap;
+        cfg
+    }
+
+    #[test]
+    fn per_ip_admission_bound_counts_burst_plus_rounded_up_replenishment() {
+        // 5 + 3600 / 10 = 365.
+        assert_eq!(
+            prod_capped(5, 10, 3_600, 1).per_ip_roll_admission_bound(),
+            365
+        );
+        // 5 + ceil(3600 / 7 = 514.29) = 5 + 515.
+        assert_eq!(
+            prod_capped(5, 7, 3_600, 1).per_ip_roll_admission_bound(),
+            520
+        );
+        // A period longer than the window still admits the burst plus one token.
+        assert_eq!(
+            prod_capped(5, 7_200, 3_600, 1).per_ip_roll_admission_bound(),
+            6
+        );
+        // Defaults: 60 + 3600 / 1.
+        assert_eq!(
+            prod_capped(60, 1, 3_600, 1).per_ip_roll_admission_bound(),
+            3_660
+        );
+        // Saturates instead of overflowing.
+        assert_eq!(
+            prod_capped(u32::MAX, 1, u64::MAX, 1).per_ip_roll_admission_bound(),
+            u64::MAX
+        );
+    }
+
+    #[test]
+    fn prod_rejects_per_ip_limits_that_can_exhaust_global_cap() {
+        // Bound 365: a cap at or below it is refused, one above it is accepted.
+        let err = prod_capped(5, 10, 3_600, 365)
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("KD_ROLL_GLOBAL_CAP"), "got: {err}");
+        prod_capped(5, 10, 3_600, 100).validate().unwrap_err();
+        prod_capped(5, 10, 3_600, 366)
+            .validate()
+            .expect("cap above the per-IP bound is accepted");
+
+        // The old burst-only check passed these defaults; the window-aware bound (3660) does not.
+        prod_capped(60, 1, 3_600, 1_000).validate().unwrap_err();
+
+        // Dev keeps the permissive local path.
+        let mut dev = cfg_with(EnvProfile::Dev, None, None);
+        dev.roll_global_cap = 10;
+        dev.roll_rl_burst = 60;
+        dev.validate()
+            .expect("dev does not run the prod per-IP bound check");
     }
 
     #[test]

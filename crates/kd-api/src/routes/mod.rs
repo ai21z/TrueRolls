@@ -42,10 +42,10 @@ pub fn router(state: Arc<AppState>) -> Router {
     // A macro (not a fn) sidesteps naming tower_governor's opaque layer type. Runs
     // on the ambient Tokio runtime (router() is called from async main).
     macro_rules! governor {
-        ($method:expr, $burst:expr) => {{
+        ($method:expr, $period_secs:expr, $burst:expr) => {{
             let conf = Arc::new(
                 GovernorConfigBuilder::default()
-                    .per_second(state.cfg.roll_rl_period_secs)
+                    .per_second($period_secs)
                     .burst_size($burst)
                     .methods(vec![$method])
                     .key_extractor(TrustedProxyKeyExtractor(state.cfg.trusted_proxy))
@@ -66,14 +66,20 @@ pub fn router(state: Arc<AppState>) -> Router {
         }};
     }
 
-    let roll_governor = governor!(Method::POST, state.cfg.roll_rl_burst);
+    let roll_governor = governor!(
+        Method::POST,
+        state.cfg.roll_rl_period_secs,
+        state.cfg.roll_rl_burst
+    );
     let verify_post_governor = governor!(
         Method::POST,
-        state.cfg.roll_rl_burst.saturating_mul(2).max(1)
+        state.cfg.verify_rl_period_secs,
+        state.cfg.verify_rl_burst
     );
     let read_governor = governor!(
         Method::GET,
-        state.cfg.roll_rl_burst.saturating_mul(4).max(1)
+        state.cfg.read_rl_period_secs,
+        state.cfg.read_rl_burst
     );
 
     Router::new()
