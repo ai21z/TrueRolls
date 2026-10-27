@@ -155,8 +155,10 @@ jobs:
       - name: cargo-audit (vulnerabilities and unsound fail; two documented exceptions)
         run: cargo audit --deny unsound --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0253
 
-      - name: pnpm production audit
-        run: corepack pnpm -C services/loom-demo audit --prod --audit-level high
+      # No --audit-level: pnpm's default (low) fails on every severity, matching cargo-audit. An
+      # exception is a per-CVE --ignore here plus a written entry in the policy.
+      - name: pnpm production audit (every severity fails)
+        run: corepack pnpm -C services/loom-demo audit --prod
 
   integration-controlled:
     name: "[C] Local-stack health and verify integration"

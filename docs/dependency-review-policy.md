@@ -19,8 +19,9 @@ Cargo's tracked resolver policy keeps manual updates on versions compatible with
 toolchain. An update that requires a newer compiler is a separate toolchain decision, not an implicit
 dependency refresh.
 
-High or critical findings block the candidate unless fixed or explicitly accepted by the owner with
-a written security rationale. Registry or advisory-database outages are recorded as external
+Any vulnerability finding in shipped code, at any severity, blocks the candidate unless it is fixed or
+explicitly accepted by the owner with a written security rationale in this document and a matching
+per-advisory exception in CI. Registry or advisory-database outages are recorded as external
 blockers, never converted to PASS.
 
 ## Pinned Commands
@@ -29,7 +30,7 @@ blockers, never converted to PASS.
 cargo update --dry-run
 cargo tree --locked --workspace --all-features
 cargo audit --json
-corepack pnpm audit --prod --audit-level high --json
+corepack pnpm -C services/loom-demo audit --prod --json
 corepack pnpm -C services/loom-demo install --frozen-lockfile
 ```
 
@@ -77,12 +78,18 @@ The `[X] Supply-chain advisories` job runs nightly and on every push:
 
 ```bash
 cargo audit --deny unsound --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0253
-corepack pnpm -C services/loom-demo audit --prod --audit-level high
+corepack pnpm -C services/loom-demo audit --prod
 ```
 
-Any new vulnerability or unsoundness advisory fails the job. Yanked lockfile-only crates are reported
-but do not fail it. An advisory-database or registry outage fails the job and is recorded as an
-external blocker, never converted to PASS.
+Any new vulnerability or unsoundness advisory fails the job, at any severity: cargo-audit has no
+severity floor, and pnpm audit runs at its default level (`low`). Yanked lockfile-only crates are
+reported but do not fail it. An advisory-database or registry outage fails the job and is recorded
+as an external blocker, never converted to PASS.
+
+The pnpm gate covers production dependencies only (`--prod`), the code shipped to browsers. Build
+and test tooling in `devDependencies` is reviewed under this policy but not gated in CI. A pnpm
+exception is a per-CVE `--ignore` on that command plus a written entry here; an advisory without a
+CVE is resolved with a version override instead (as with `fflate` in `pnpm-workspace.yaml`).
 
 ## Current UI Dependency Notice
 
