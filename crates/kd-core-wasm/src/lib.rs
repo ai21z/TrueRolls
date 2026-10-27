@@ -144,22 +144,16 @@ fn verify_receipt_json_impl(receipt_json: &str, public_key_b64: &str) -> String 
 }
 
 fn verify_receipt_json_with_key_set_impl(receipt_json: &str, key_set_json: &str) -> String {
-    #[derive(Deserialize)]
-    struct KeysResponse {
-        keys: Vec<kd_receipt::PublicKeyEntry>,
-    }
-
-    let keys: KeysResponse = match serde_json::from_str(key_set_json) {
-        Ok(keys) => keys,
+    // Lenient per-entry parse: one malformed key set entry must not turn every
+    // receipt verification into ERROR. A skipped entry's kid resolves as unknown
+    // (INVALID, fail closed).
+    let (keys, _warnings) = match kd_receipt::parse_public_key_set(key_set_json) {
+        Ok(parsed) => parsed,
         Err(e) => {
-            return serde_json::json!({
-                "verdict": "ERROR",
-                "error": format!("failed to parse key set: {e}")
-            })
-            .to_string();
+            return serde_json::json!({ "verdict": "ERROR", "error": e }).to_string();
         }
     };
-    match kd_receipt::verify_receipt_str_with_key_set(receipt_json, &keys.keys) {
+    match kd_receipt::verify_receipt_str_with_key_set(receipt_json, &keys) {
         Ok(report) => report.to_result_json().to_string(),
         Err(e) => serde_json::json!({ "verdict": "ERROR", "error": e.to_string() }).to_string(),
     }

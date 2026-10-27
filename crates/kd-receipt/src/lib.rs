@@ -43,8 +43,9 @@ use std::fmt;
 mod sign;
 pub use sign::{
     KeyStatus, PUBLISHED_TEST_PUBLIC_KEY_2_B64, PUBLISHED_TEST_PUBLIC_KEY_B64,
-    PUBLISHED_TEST_SEED_2_HEX, PUBLISHED_TEST_SEED_HEX, PublicKeyEntry, ReceiptSignature,
-    ReceiptSigner, TEST_KIDS, reject_test_public_key_in_prod, reject_test_signer_in_prod,
+    PUBLISHED_TEST_SEED_2_HEX, PUBLISHED_TEST_SEED_HEX, PublicKeyEntry, PublicKeySet,
+    ReceiptSignature, ReceiptSigner, TEST_KIDS, reject_test_public_key_in_prod,
+    reject_test_signer_in_prod,
 };
 
 /// Legacy receipt schema version.
@@ -296,6 +297,30 @@ pub fn verify_receipt_with_key_set(
     verify_receipt_inner(receipt_value, VerificationKeys::KeySet(key_set))
 }
 
+/// Parse a `/.well-known/truerolls-keys.json` document leniently. A single
+/// malformed entry is dropped (its error collected as a warning) instead of
+/// failing the whole set, so one bad entry cannot black-hole verification of
+/// every other receipt sitewide. A dropped entry makes its kid resolve as
+/// unknown -> INVALID (fail closed), never valid. The envelope itself
+/// (`{ "keys": [...] }`) must still be well-formed.
+pub fn parse_public_key_set(json: &str) -> Result<(Vec<PublicKeyEntry>, Vec<String>), String> {
+    #[derive(serde::Deserialize)]
+    struct RawSet {
+        keys: Vec<Value>,
+    }
+    let raw: RawSet =
+        serde_json::from_str(json).map_err(|e| format!("failed to parse key set envelope: {e}"))?;
+    let mut entries = Vec::with_capacity(raw.keys.len());
+    let mut warnings = Vec::new();
+    for (i, value) in raw.keys.into_iter().enumerate() {
+        match serde_json::from_value::<PublicKeyEntry>(value) {
+            Ok(entry) => entries.push(entry),
+            Err(e) => warnings.push(format!("key set entry {i} skipped (unparseable): {e}")),
+        }
+    }
+    Ok((entries, warnings))
+}
+
 enum VerificationKeys<'a> {
     Direct(&'a str),
     KeySet(&'a [PublicKeyEntry]),
@@ -323,6 +348,13 @@ impl<'a> VerificationKeys<'a> {
                     KeyStatus::Active | KeyStatus::Retired => Some(key.public_key.as_str()),
                     KeyStatus::Revoked => {
                         errors.push(format!("signing key '{}' is revoked", sig.kid));
+                        None
+                    }
+                    KeyStatus::Unknown => {
+                        errors.push(format!(
+                            "signing key '{}' has a missing or unrecognized status; refusing to verify",
+                            sig.kid
+                        ));
                         None
                     }
                 }
@@ -1117,6 +1149,38 @@ mod tests {
     }
 
     #[test]
+    fn key_set_verifier_fails_closed_on_missing_status() {
+        // A revoked key that loses its `status` field (older serializer, hand-edited
+        // static /.well-known, tooling that strips optional fields) must NOT silently
+        // re-activate: a status-less entry deserializes to KeyStatus::Unknown and
+        // refuses to verify, distinct from a known Revoked entry.
+        let signer =
+            ReceiptSigner::from_hex_seed(PUBLISHED_TEST_SEED_2_HEX, "test-kid-2".to_string())
+                .unwrap();
+        let receipt = resign_receipt_with(signed_drand_receipt(), &signer);
+        let entry = signer.public_key_entry();
+        let mut without_status =
+            serde_json::to_value(&entry).expect("entry serializes to an object");
+        without_status.as_object_mut().unwrap().remove("status");
+        let parsed: PublicKeyEntry =
+            serde_json::from_value(without_status).expect("status is optional at parse time");
+        assert_eq!(parsed.status, KeyStatus::Unknown);
+
+        let report = verify_receipt_with_key_set(&receipt, &[parsed])
+            .expect("status-less receipt is structural");
+        assert!(!report.is_valid());
+        assert!(!report.valid_signature);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("missing or unrecognized status")),
+            "expected fail-closed status reason, got {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
     fn key_set_verifier_rejects_unknown_kid_without_fallback() {
         let receipt = signed_drand_receipt();
         let signer =
@@ -1136,6 +1200,29 @@ mod tests {
                 .iter()
                 .any(|e| e.contains("unknown signing kid")),
             "expected explicit unknown-kid reason, got {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn key_set_verifier_rejects_duplicate_matching_kid() {
+        let receipt = signed_drand_receipt();
+        let signer =
+            ReceiptSigner::from_hex_seed(PUBLISHED_TEST_SEED_HEX, "test-kid-1".to_string())
+                .unwrap();
+        let key = signer.public_key_entry();
+
+        let report = verify_receipt_with_key_set(&receipt, &[key.clone(), key])
+            .expect("duplicate-kid receipt is structurally verifiable");
+
+        assert!(!report.is_valid());
+        assert!(!report.valid_signature);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("duplicate signing kid")),
+            "expected explicit duplicate-kid reason, got {:?}",
             report.errors
         );
     }

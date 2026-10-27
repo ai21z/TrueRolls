@@ -130,14 +130,20 @@ pub struct ReceiptSignature {
     pub canon: String,         // "JCS/RFC8785"
 }
 
-/// One entry returned by /.well-known/truerolls-keys.json
+/// Lifecycle status of a key in /.well-known/truerolls-keys.json.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyStatus {
-    #[default]
     Active,
     Retired,
     Revoked,
+    /// Missing or unrecognized status. Fails closed: a key entry that drops or
+    /// garbles its `status` field is treated as untrusted and never verifies, so
+    /// a revoked key can never silently re-activate by losing its status. This is
+    /// the serde default (absent field) and the `other` catch-all (bad value).
+    #[default]
+    #[serde(other)]
+    Unknown,
 }
 
 /// One entry returned by /.well-known/truerolls-keys.json
@@ -148,6 +154,15 @@ pub struct PublicKeyEntry {
     pub public_key: String, // base64-encoded 32-byte Ed25519 verifying key
     #[serde(default)]
     pub status: KeyStatus,
+}
+
+/// The `/.well-known/truerolls-keys.json` document (the published key set). This
+/// is the single owner of the on-the-wire envelope shape shared by the signer
+/// (kd-api) and every verifier frontend (kd-cli, kd-core-wasm), so the contract
+/// cannot drift per-consumer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicKeySet {
+    pub keys: Vec<PublicKeyEntry>,
 }
 
 impl ReceiptSigner {

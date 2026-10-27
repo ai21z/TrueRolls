@@ -104,6 +104,11 @@ fn roll_and_sign_impl(
     });
 
     // 4. Sign with the shared signer (same JCS canonicalization the verifier checks).
+    // Refuse the world-known PUBLIC test seeds in any real (non-test) build: a
+    // Worker wired to one would mint attacker-forgeable receipts. The crate's own
+    // tests (cfg(test)) still exercise the sign path with the published test seed.
+    #[cfg(not(test))]
+    kd_receipt::reject_test_signer_in_prod(Some(secret_hex), Some(kid))?;
     let signer = kd_receipt::ReceiptSigner::from_hex_seed(secret_hex, kid.to_string())?;
     let (sig, receipt_hash) = signer.sign_receipt(&body)?;
 

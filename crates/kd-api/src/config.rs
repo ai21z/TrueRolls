@@ -65,7 +65,7 @@ impl TrustedProxy {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct SigningKeyConfig {
     pub kid: String,
     #[serde(default)]
@@ -76,7 +76,7 @@ pub struct SigningKeyConfig {
     pub public_key: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[allow(dead_code)]
 pub struct Config {
     pub host: IpAddr,
@@ -351,6 +351,13 @@ impl Config {
                         )));
                     }
                 }
+                KeyStatus::Unknown => {
+                    // Fail closed: a signing key entry that omits `status` or gives an
+                    // unrecognized value must not silently become inactive or active.
+                    return Err(bad_request(format!(
+                        "signing key '{kid}' has a missing or unrecognized status; set status to active, retired, or revoked"
+                    )));
+                }
             }
         }
 
@@ -596,6 +603,23 @@ mod tests {
         });
 
         assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    #[test]
+    fn signing_key_config_rejects_case_insensitive_duplicate_kids() {
+        let mut c = cfg_with(EnvProfile::Dev, Some(FRESH_SEED_HEX), Some("issuer-active"));
+        c.signing_keys.push(SigningKeyConfig {
+            kid: "ISSUER-ACTIVE".to_string(),
+            status: KeyStatus::Retired,
+            secret_hex: None,
+            public_key: Some(PUBLISHED_TEST_PUBLIC_KEY_B64.to_string()),
+        });
+
+        let err = c
+            .validate()
+            .expect_err("case-insensitive duplicate kid must fail")
+            .to_string();
+        assert!(err.contains("duplicate signing kid"), "got: {err}");
     }
 
     #[test]

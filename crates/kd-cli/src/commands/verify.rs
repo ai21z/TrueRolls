@@ -886,13 +886,15 @@ fn fetch_public_keys(server: &str) -> Result<Vec<PublicKeyEntry>> {
         bail!("server returned {} for public key request", resp.status());
     }
 
-    #[derive(serde::Deserialize)]
-    struct KeysResponse {
-        keys: Vec<PublicKeyEntry>,
+    // Lenient shared parse (kd_receipt owns the envelope): one bad entry is
+    // skipped, not fatal, matching the browser verifier.
+    let text = resp.text().context("invalid key-set response")?;
+    let (keys, warnings) =
+        kd_receipt::parse_public_key_set(&text).map_err(|e| anyhow::anyhow!(e))?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
     }
-
-    let body: KeysResponse = resp.json().context("invalid key-set response")?;
-    Ok(body.keys)
+    Ok(keys)
 }
 
 // ---------------------------------------------------------------------------
