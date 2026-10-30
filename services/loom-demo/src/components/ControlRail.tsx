@@ -93,30 +93,37 @@ export function ControlRail({ die, kappa, mock, unavailable = false, onDieChange
                 onDoubleClick={() => onKappaChange(0)}
                 title="Double-click to reset to neutral"
               />
-              <div className={css.ticks}>
-                {KAPPA_TICKS.map((t) => {
-                  const active = Math.abs(kappa - t) < 0.02;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      tabIndex={-1}
-                      className={[css.tick, t === 0 ? css.tickZero : '', active ? css.tickActive : ''].join(' ')}
-                      style={{ left: `calc(${((t + 1) / 2) * 100}% + ${(0.5 - (t + 1) / 2) * 16}px)` }}
-                      onClick={() => onKappaChange(t)}
-                      aria-label={`Set karma to ${t > 0 ? '+' : ''}${t}`}
-                      title={t === 0 ? 'Neutral' : `κ ${t > 0 ? '+' : ''}${t}`}
-                    />
-                  );
-                })}
-              </div>
-              <div className={css.tickLabels} aria-hidden="true">
-                <span>−1</span>
-                <span>0</span>
-                <span>+1</span>
+              {/* Tick marks are drawn under the track and never take a pointer, so a
+                  drag that starts near one still moves the slider. */}
+              <div className={css.ticks} aria-hidden="true">
+                {KAPPA_TICKS.map((t) => (
+                  <span
+                    key={t}
+                    className={[
+                      css.tick,
+                      t === 0 ? css.tickZero : '',
+                      Math.abs(kappa - t) < 0.02 ? css.tickActive : '',
+                    ].join(' ')}
+                    style={{ left: `calc(${((t + 1) / 2) * 100}% + ${(0.5 - (t + 1) / 2) * 16}px)` }}
+                  />
+                ))}
               </div>
             </div>
             <span className={css.kappaValue} aria-hidden="true">{kappa.toFixed(2)}</span>
+          </div>
+          <div className={css.presets} role="group" aria-label="Karma presets">
+            {KAPPA_TICKS.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`${css.preset} ${Math.abs(kappa - t) < 0.02 ? css.presetActive : ''}`}
+                aria-pressed={Math.abs(kappa - t) < 0.02}
+                aria-label={t === 0 ? 'Set karma to 0, uniform' : `Set karma to ${t > 0 ? '+' : ''}${t}`}
+                onClick={() => onKappaChange(t)}
+              >
+                {t === 0 ? '0' : `${t > 0 ? '+' : '−'}${Math.abs(t)}`}
+              </button>
+            ))}
           </div>
           <span className={css.kappaHint}>{hint}</span>
         </div>
@@ -130,9 +137,6 @@ export function ControlRail({ die, kappa, mock, unavailable = false, onDieChange
         </InkFrame>
       </div>
 
-      <div className={css.shortcutHint}>
-        Press <kbd className={css.kbd}>Space</kbd> to roll
-      </div>
     </aside>
   );
 }

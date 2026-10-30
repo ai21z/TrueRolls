@@ -1,4 +1,4 @@
-import { motion, useReducedMotion, useTransform } from 'framer-motion';
+import { m, useReducedMotion, useTransform } from 'framer-motion';
 import { usePageScrollProgress } from './useScrollMotion';
 import css from './ScrollAtmosphere.module.css';
 
@@ -20,13 +20,13 @@ export function ScrollAtmosphere() {
   return (
     <>
       <div className={css.atmosphere} aria-hidden="true">
-        <motion.div
+        <m.div
           className={css.glow}
           style={reduce ? undefined : { y: glowY, opacity: glowOpacity, filter: glowFilter }}
         />
         <div className={css.grain} />
       </div>
-      <motion.div className={css.progress} style={{ scaleX: progress }} aria-hidden="true" />
+      <m.div className={css.progress} style={{ scaleX: progress }} aria-hidden="true" />
     </>
   );
 }

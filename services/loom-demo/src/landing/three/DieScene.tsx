@@ -165,8 +165,14 @@ function damp(current: number, target: number, lambda: number, dt: number): numb
 /* A calm, slightly-off-axis resting orientation for `settled`. */
 const SETTLED_EULER = new THREE.Euler(-0.35, 0.62, 0.12);
 
-export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
+export function DieScene({ phase, kappa, face, showNumbers, reducedMotion }: DieSceneProps) {
   const { invalidate } = useThree();
+
+  // With frameloop 'demand' (reduced motion) nothing redraws on its own, so every
+  // semantic change (phase, face, stance, die type) must request its new frame.
+  useEffect(() => {
+    invalidate();
+  }, [phase, face, kappa, showNumbers, reducedMotion, invalidate]);
 
   /* ── Memoized geometry / materials (created once, auto-disposed by R3F) ── */
   const dieGeometry = useMemo(() => new THREE.IcosahedronGeometry(1, 0), []);
@@ -350,7 +356,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
     // Restore die visibility (the animated path may have hidden it mid-shatter
     // before the user toggled reduced-motion on).
     if (dieMesh.current) dieMesh.current.visible = true;
-    if (numbersGroup.current) numbersGroup.current.visible = true;
+    if (numbersGroup.current) numbersGroup.current.visible = showNumbers;
     if (dieEdges.current) dieEdges.current.visible = true;
     // Seal present for sealed + tampered (cracked but visible).
     const sealOn = phase === 'sealed' || phase === 'tampered';
@@ -437,8 +443,13 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
     if (tampered) scaleTarget = 1 - s.shatter * 1; // collapse as it shatters
     s.dieScale = damp(s.dieScale, scaleTarget, 8, dt);
 
-    // Seal form-in.
-    s.seal = damp(s.seal, wantsSeal ? 1 : 0, 6, dt);
+    // Seal form-in. The verified seal forms only once the die has landed on the
+    // receipt's face, so the seal never reads as preceding the settled result.
+    const landed =
+      s.tumble < 0.05 &&
+      !!dieGroup.current &&
+      dieGroup.current.quaternion.angleTo(landTarget.current) < 0.08;
+    s.seal = damp(s.seal, wantsSeal && (landed || tampered) ? 1 : 0, 6, dt);
 
     // Accent → danger blend.
     s.sealRed = damp(s.sealRed, tampered ? 1 : 0, 8, dt);
@@ -473,7 +484,7 @@ export function DieScene({ phase, kappa, face, reducedMotion }: DieSceneProps) {
       // Hide the die once it has fully shattered. Reveal as it re-forms.
       const dieVisible = !(tampered && s.shatter > 0.6);
       if (dieMesh.current) dieMesh.current.visible = dieVisible;
-      if (numbersGroup.current) numbersGroup.current.visible = dieVisible;
+      if (numbersGroup.current) numbersGroup.current.visible = dieVisible && showNumbers;
       if (dieEdges.current) dieEdges.current.visible = dieVisible;
       g.scale.setScalar(Math.max(0.0001, s.dieScale));
     }

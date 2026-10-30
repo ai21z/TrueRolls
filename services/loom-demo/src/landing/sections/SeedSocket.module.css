@@ -53,7 +53,7 @@
 
 .infoEye {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--kd-accent);
@@ -76,7 +76,7 @@
 .infoHint {
   margin-top: 4px;
   font-family: var(--kd-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--kd-text-muted);
   opacity: 0.7;

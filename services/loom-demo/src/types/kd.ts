@@ -127,13 +127,19 @@ export interface VerifyCheckRow {
   ok: boolean;
 }
 
-/** The forged artifact for a tampered die: the edited receipt body + the verifier's
- * real failing response. Stored ON the entry it broke (and persisted with it), so a
- * tampered die stays broken across re-rolls and reloads, a tampered receipt is
- * permanently invalid. */
-export interface EntryTamper {
+/**
+ * A demonstration copy of an issued receipt with one signed value edited. It is a
+ * separate, transient artifact: it never replaces, re-signs or relabels the original
+ * entry, and it is not persisted. `result` is the API verifier's real response for
+ * exactly `body`, or null while that check is running or after it failed.
+ */
+export interface EditedCopy {
+  localId: number;
   body: Record<string, unknown>;
-  result: ReceiptVerifyResponse;
+  requestId: number;
+  status: 'verifying' | 'checked' | 'error';
+  result: ReceiptVerifyResponse | null;
+  error: string | null;
 }
 
 export interface TranscriptEntry extends RollResponse {
@@ -141,7 +147,4 @@ export interface TranscriptEntry extends RollResponse {
   verifyStatus: VerifyStatus;
   verifyDetail?: string;
   verifyChecks?: VerifyCheckRow[];
-  /** Present iff this die was broken by a tamper (see EntryTamper). Cleared by
-   * reverting the edit. A fresh roll is a new entry and is never auto-broken. */
-  tampered?: EntryTamper;
 }

@@ -1,4 +1,5 @@
-import type { ReceiptVerifyResponse, TranscriptEntry } from '../types/kd';
+import { useState } from 'react';
+import type { EditedCopy, TranscriptEntry } from '../types/kd';
 import { TranscriptRow } from './TranscriptRow';
 import css from './TranscriptList.module.css';
 
@@ -6,12 +7,22 @@ interface Props {
   rolls: TranscriptEntry[];
   onVerify: (localId: number) => void;
   onClear: () => void;
-  onBreak?: (localId: number, body: Record<string, unknown>, result: ReceiptVerifyResponse) => void;
-  onUnbreak?: (localId: number) => void;
+  editedCopy: EditedCopy | null;
+  onVerifyEditedCopy?: (localId: number, body: Record<string, unknown>) => void;
+  onDiscardEditedCopy?: () => void;
   mock: boolean;
 }
 
-export function TranscriptList({ rolls, onVerify, onClear, onBreak, onUnbreak, mock }: Props) {
+export function TranscriptList({
+  rolls,
+  onVerify,
+  onClear,
+  editedCopy,
+  onVerifyEditedCopy,
+  onDiscardEditedCopy,
+  mock,
+}: Props) {
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const uncheckedCount = rolls.filter((r) => r.verifyStatus === 'not_checked').length;
 
   const verifyAll = () => {
@@ -29,22 +40,45 @@ export function TranscriptList({ rolls, onVerify, onClear, onBreak, onUnbreak, m
         <div className={css.headerActions}>
           {uncheckedCount > 0 && (
             <button className={css.verifyAllBtn} onClick={verifyAll}>
-              Verify all ({uncheckedCount})
+              Check all ({uncheckedCount})
             </button>
           )}
-          {rolls.length > 0 && (
+          {rolls.length > 0 && !confirmingClear && (
             <button
               className={css.clearBtn}
-              onClick={onClear}
-              aria-label="Clear all transcripts"
-              title="Clear all transcripts"
+              onClick={() => setConfirmingClear(true)}
+              title="Clear this tab's local history"
             >
-              Clear
+              Clear local history
             </button>
           )}
           <span className={css.count}>{rolls.length}</span>
         </div>
       </div>
+
+      {confirmingClear && rolls.length > 0 && (
+        <div className={css.confirm} role="group" aria-label="Confirm clearing local history">
+          <p className={css.confirmText}>
+            Remove {rolls.length === 1 ? 'this receipt' : `these ${rolls.length} receipts`} from this
+            tab's list? Receipts the API stored and files you downloaded are not affected, but this
+            page cannot bring the list back.
+          </p>
+          <div className={css.confirmActions}>
+            <button
+              className={css.confirmDanger}
+              onClick={() => {
+                setConfirmingClear(false);
+                onClear();
+              }}
+            >
+              Clear local history
+            </button>
+            <button className={css.confirmCancel} onClick={() => setConfirmingClear(false)} autoFocus>
+              Keep the list
+            </button>
+          </div>
+        </div>
+      )}
 
       {rolls.length === 0 ? (
         <div className={css.empty}>
@@ -58,8 +92,9 @@ export function TranscriptList({ rolls, onVerify, onClear, onBreak, onUnbreak, m
               key={entry.localId}
               entry={entry}
               onVerify={onVerify}
-              onBreak={onBreak}
-              onUnbreak={onUnbreak}
+              editedCopy={editedCopy}
+              onVerifyEditedCopy={onVerifyEditedCopy}
+              onDiscardEditedCopy={onDiscardEditedCopy}
               mock={mock}
             />
           ))}

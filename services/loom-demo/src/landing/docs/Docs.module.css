@@ -52,7 +52,7 @@
   border-radius: var(--kd-radius);
   color: var(--kd-text-secondary);
   font-family: var(--kd-font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   letter-spacing: 0.02em;
   transition: color var(--kd-duration), border-color var(--kd-duration), background var(--kd-duration);
 }
@@ -75,7 +75,7 @@
 
 .barLabel {
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.06em;
   text-transform: lowercase;
   color: var(--kd-text-muted);
@@ -103,7 +103,7 @@
 
 .tocTitle {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--kd-text-muted);
@@ -124,7 +124,7 @@
   padding: 6px 12px;
   margin-left: -1px;
   border-left: 1px solid transparent;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.4;
   color: var(--kd-text-muted);
   transition: color var(--kd-duration), border-color var(--kd-duration);
@@ -163,7 +163,7 @@
   align-items: center;
   gap: 10px;
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--kd-accent);
@@ -224,7 +224,7 @@
 }
 
 .note {
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--kd-text-muted);
   margin: 18px 0 0;
@@ -290,7 +290,7 @@
 /* ── Worked example ── */
 .exampleLabel {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--kd-text-muted);
@@ -304,7 +304,7 @@
   border: 1px solid var(--kd-border);
   border-radius: var(--kd-radius);
   font-family: var(--kd-font-mono);
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--kd-text);
   white-space: pre-wrap;
   word-break: break-word;
@@ -336,7 +336,7 @@
   padding: 11px 16px;
   border-bottom: 1px solid var(--kd-border);
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--kd-text-muted);
 }
 
@@ -344,7 +344,7 @@
   margin: 0;
   padding: 16px;
   font-family: var(--kd-font-mono);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--kd-text-secondary);
   white-space: pre-wrap;
@@ -382,7 +382,7 @@
   border-radius: var(--kd-radius-sm);
   background: var(--kd-ember-dim);
   color: var(--kd-ember);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -397,7 +397,7 @@
   border-radius: var(--kd-radius-sm);
   background: var(--kd-fail-dim);
   color: var(--kd-fail);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -538,7 +538,7 @@
   border-radius: var(--kd-radius-pill);
   background: var(--kd-accent-dim);
   font-family: var(--kd-font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   letter-spacing: 0.03em;
   color: var(--kd-accent);
 }
@@ -567,7 +567,7 @@
 }
 
 .footerNote {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--kd-text-muted);
 }
 
@@ -583,14 +583,15 @@
     flex-direction: row;
     align-items: center;
     gap: 8px;
-    overflow-x: auto;
     padding-bottom: 4px;
   }
   .tocTitle {
     display: none;
   }
+  /* Wrap the section chips instead of a sideways-scrolling strip. */
   .tocList {
     flex-direction: row;
+    flex-wrap: wrap;
     border-left: none;
     gap: 6px;
   }
@@ -602,7 +603,7 @@
     border-radius: var(--kd-radius-pill);
     padding: 6px 12px;
     white-space: nowrap;
-    font-size: 12.5px;
+    font-size: 13px;
   }
   .tocLinkActive {
     border-color: var(--kd-border-accent);

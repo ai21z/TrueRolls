@@ -54,22 +54,6 @@ export function receiptVerifierAccepts(
   );
 }
 
-/**
- * The values a tampered receipt body claims, what every broken-die surface shows
- * (the forged face/κ), so the seed, the credential, the transcript row and the
- * receipt modal all display the same altered artifact instead of the pristine roll.
- */
-export function tamperedView(
-  body: Record<string, unknown>,
-  fallback: { face: number; kappa: number; die: string },
-): { face: number; kappa: number; die: string } {
-  return {
-    face: typeof body.face === 'number' ? body.face : fallback.face,
-    kappa: typeof body.kappa === 'number' ? body.kappa : fallback.kappa,
-    die: typeof body.die === 'string' ? body.die : fallback.die,
-  };
-}
-
 export type OfflineVerifyCommandOptions =
   | { kind: 'server'; server: string }
   | { kind: 'public-key'; publicKey: string };

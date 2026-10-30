@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { getTruerollsKeys, type TruerollsKey } from '../../api/client';
-import { DEMO_TEST_KEY, resolveReceiptKey, type KeySource } from '../../api/keys';
+import { useMemo, useRef, useState } from 'react';
+import { DEMO_TEST_KEY } from '../../api/keys';
+import { presentableReport, useReceiptVerification } from '../../hooks/useReceiptVerification';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
@@ -10,18 +10,12 @@ import { KappaBaseline } from './KappaBaseline';
 import { asRecord, hasBeacon, isLegacyReceipt, proofScope, readField, shorten } from './receiptFields';
 import { PRIMARY_DRAND_RECEIPT } from '../../generated/receiptFixtures';
 import {
+  invalidSummary,
   keyTrustExplanation,
   verificationState as deriveVerificationState,
   verificationStateLabel,
-  type VerificationPhase,
 } from '../../api/trustPresentation';
-import {
-  initKdCoreWasm,
-  isKdCoreWasmReady,
-  verifyReceiptWasm,
-  verifyReceiptWasmWithKeySet,
-  type WasmVerifyReport,
-} from '../../api/wasmEngine';
+import type { WasmVerifyReport } from '../../api/wasmEngine';
 import css from './BehindARoll.module.css';
 
 /**
@@ -185,7 +179,7 @@ const STATE_WORD: Record<StratumStatus, string> = {
   pass: 'sealed',
   fail: 'severed',
   absent: 'absent',
-  pending: 'pending',
+  pending: 'not run',
 };
 const STATE_CLASS: Record<StratumStatus, string> = {
   pass: 'sealed',
@@ -219,17 +213,16 @@ function scrollBehavior(): ScrollBehavior {
 }
 
 export function BehindARoll() {
-  const [receiptText, setReceiptText] = useState<string>(SAMPLE_DRAND_RECEIPT);
-  const [publicKey, setPublicKey] = useState<string>(DEMO_TEST_KEY);
-  const [keyEdited, setKeyEdited] = useState<boolean>(false);
-  const [keySource, setKeySource] = useState<KeySource>('demo');
-  const [keyKid, setKeyKid] = useState<string | null>('test-kid-1');
-  // See Verify.tsx: only the bundled sample (loaded or edited in place) resolves
-  // the PUBLIC demo key; an arbitrary pasted/uploaded receipt is fail-closed.
-  const [sampleContext, setSampleContext] = useState(true);
-  const [report, setReport] = useState<WasmVerifyReport | null>(null);
-  const [verificationPhase, setVerificationPhase] = useState<VerificationPhase>('loading');
-  const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
+  const v = useReceiptVerification({
+    initial: { text: SAMPLE_DRAND_RECEIPT, origin: 'sample', label: 'Bundled drand sample' },
+    verifyInitial: true,
+    // Editing the textarea here IS the tamper action (there are no separate tamper
+    // buttons), so an edited sample keeps its labelled demo-key context and shows
+    // its signature breaking. Only load-sample and upload change the origin.
+    editsKeepSampleOrigin: true,
+  });
+  const receiptText = v.artifact.text;
+  const report = presentableReport(v.bound);
   const [active, setActive] = useState<number>(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const bandRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -251,99 +244,23 @@ export function BehindARoll() {
     window.setTimeout(() => bandRefs.current[active]?.focus({ preventScroll: true }), 0);
   };
 
-  const runWithResolved = (text: string, resolved: ReturnType<typeof resolveReceiptKey>) => {
-    // Reflect the resolved key provenance immediately, BEFORE the engine-readiness
-    // early return, so the badge and key input can never desync from the last
-    // resolution (e.g. a slow first wasm load leaving stale mount defaults).
-    setKeySource(resolved.source);
-    setKeyKid(resolved.kid);
+  const verify = () => {
     setActive(0);
-    setVerificationPhase('verifying');
-    if (!isKdCoreWasmReady()) {
-      setReport({ verdict: 'ERROR', error: 'verifier engine still loading, try again in a moment' });
-      setVerificationPhase('complete');
-      return;
-    }
-    const nextReport =
-      resolved.kind === 'manual'
-        ? verifyReceiptWasm(text, resolved.publicKey)
-        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson);
-    setReport(nextReport);
-    setVerificationPhase('complete');
-  };
-
-  const verify = (
-    text: string,
-    edited: boolean = keyEdited,
-    allowDemoFallback: boolean = sampleContext,
-  ) => {
-    // A key the user typed wins as-is, otherwise resolve well-known/demo by kid.
-    // `edited` is threaded explicitly so loadSample/onFile can force a re-resolve
-    // without waiting on the async keyEdited state update.
-    const resolved = resolveReceiptKey(text, wellKnownKeys, edited ? publicKey : null, {
-      allowDemoFallback,
-    });
-    setPublicKey(resolved.publicKey);
-    runWithResolved(text, resolved);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await initKdCoreWasm();
-      } catch {
-        /* surfaced as an ERROR verdict by runWith if the engine is truly down */
-      }
-      let keys: TruerollsKey[] = [];
-      try {
-        keys = (await getTruerollsKeys()).keys;
-      } catch {
-        /* no live API, the bundled demo key verifies the sample offline */
-      }
-      if (cancelled) return;
-      setWellKnownKeys(keys);
-      const resolved = resolveReceiptKey(SAMPLE_DRAND_RECEIPT, keys, null, {
-        allowDemoFallback: true,
-      });
-      setPublicKey(resolved.publicKey);
-      runWithResolved(SAMPLE_DRAND_RECEIPT, resolved);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const onReceiptChange = (text: string) => {
-    setReceiptText(text);
-    setReport(null);
-    setVerificationPhase('not_checked');
-    // Editing the textarea here IS the tamper action (there are no separate
-    // tamper buttons), so a loaded sample stays in sample-context and shows its
-    // signature breaking via the demo key. Only load-sample / upload change it.
+    v.verify();
   };
 
   const loadSample = () => {
-    setReceiptText(SAMPLE_DRAND_RECEIPT);
-    setKeyEdited(false);
-    setSampleContext(true);
-    verify(SAMPLE_DRAND_RECEIPT, false, true);
+    setActive(0);
+    v.loadArtifact(
+      { text: SAMPLE_DRAND_RECEIPT, origin: 'sample', label: 'Bundled drand sample' },
+      { verify: true, keepManualKey: false },
+    );
   };
 
-  const onFile = async (file: File | undefined) => {
+  const onFile = (file: File | undefined) => {
     if (!file) return;
-    let text: string;
-    try {
-      text = await file.text();
-    } catch {
-      setReport({ verdict: 'ERROR', error: 'could not read file' });
-      setVerificationPhase('complete');
-      return;
-    }
-    setReceiptText(text);
-    setKeyEdited(false);
-    setSampleContext(false);
-    verify(text, false, false);
+    setActive(0);
+    void v.loadFile(file);
   };
 
   const step = (delta: number) => {
@@ -351,13 +268,20 @@ export function BehindARoll() {
     setActive((a) => (a + delta + strata.length) % strata.length);
   };
 
+  const keyPending = !v.manual && v.discovery.status === 'loading';
+  const keySource = v.manual ? 'manual' : v.resolved.source;
+  const publicKey = v.manualKey ?? (keyPending ? '' : v.resolved.publicKey);
+  const keyKid = v.bound?.resolved.kid ?? v.resolved.kid;
   const presentationState = deriveVerificationState({
-    phase: verificationPhase,
+    phase: v.phase,
     report,
-    keySource,
+    keySource: v.bound?.resolved.source ?? v.resolved.source,
   });
   const isValid = presentationState === 'valid';
-  const noTrustRoot = presentationState === 'unverifiable' && keySource === 'unresolved';
+  const noTrustRoot =
+    presentationState === 'unverifiable' &&
+    v.bound?.resolved.source === 'unresolved' &&
+    !v.bound.inputProblem;
   const verdictWord = verificationStateLabel(presentationState);
   const verdictClass =
     presentationState === 'valid'
@@ -375,7 +299,8 @@ export function BehindARoll() {
   // Artifact vs key provenance are distinct: the bundled sample is the committed
   // golden text. A manually typed demo key can still verify other receipts, so
   // the badge must not call those a "bundled sample".
-  const isSample = receiptText === SAMPLE_DRAND_RECEIPT;
+  const isSample = v.artifact.origin === 'sample' && receiptText === SAMPLE_DRAND_RECEIPT;
+  const isEditedSample = v.artifact.origin === 'sample' && receiptText !== SAMPLE_DRAND_RECEIPT;
   const isDemoKey = publicKey === DEMO_TEST_KEY;
   const dieVal = parsed?.die;
   const kappaRaw = parsed?.kappa;
@@ -461,16 +386,21 @@ export function BehindARoll() {
                 accept="application/json,.json"
                 className={css.fileInput}
                 aria-label="Upload receipt JSON file"
-                onChange={(e) => onFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  onFile(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
               />
             </div>
           </div>
 
-          {(isSample || isDemoKey) && (
+          {(isSample || isEditedSample || isDemoKey) && (
             <p className={css.testKeyBadge} role="note">
               {isSample
                 ? '● bundled sample · public test key, demo only, not production evidence'
-                : '● public test key, not production evidence (the key in use is the demo key)'}
+                : isEditedSample
+                  ? '● edited copy of the bundled sample · public test key, demo only'
+                  : '● public test key, not production evidence (the key in use is the demo key)'}
             </p>
           )}
 
@@ -478,9 +408,19 @@ export function BehindARoll() {
             className={css.textarea}
             value={receiptText}
             spellCheck={false}
-            onChange={(e) => onReceiptChange(e.target.value)}
+            onChange={(e) => v.editText(e.target.value)}
             aria-label="Receipt JSON"
           />
+          {v.fileError && (
+            <p className={css.inlineError} role="alert">
+              {v.fileError}
+            </p>
+          )}
+          {v.fileNotice && (
+            <p className={css.inlineNotice} role="status">
+              {v.fileNotice}
+            </p>
+          )}
 
           <label className={css.keyLabel} htmlFor="pubkey">
             Ed25519 public key (base64)
@@ -493,23 +433,39 @@ export function BehindARoll() {
             className={css.keyInput}
             value={publicKey}
             spellCheck={false}
-            onChange={(e) => {
-              setPublicKey(e.target.value);
-              setKeyEdited(true);
-              setKeySource('manual');
-              setKeyKid(null);
-              setReport(null);
-              setVerificationPhase('not_checked');
-            }}
+            placeholder={keyPending ? 'Looking up the issuer key…' : 'Resolved from the issuer key set, or paste a key'}
+            onChange={(e) => v.setManualKey(e.target.value)}
           />
-          <p className={css.keyTrustNote}>{keyTrustExplanation(keySource)}</p>
+          <p className={css.keyTrustNote}>
+            {keyPending
+              ? 'Looking up the issuer key set. You can paste a key instead.'
+              : v.discovery.status === 'unavailable' && keySource === 'unresolved'
+                ? v.discovery.reason
+                : keyTrustExplanation(keySource)}
+            {v.manual && (
+              <>
+                {' '}
+                <button type="button" className={css.linkBtn} onClick={v.clearManualKey}>
+                  Use the issuer key instead
+                </button>
+              </>
+            )}
+            {v.discovery.status === 'unavailable' && !v.manual && (
+              <>
+                {' '}
+                <button type="button" className={css.linkBtn} onClick={v.retryKeyDiscovery}>
+                  Retry key lookup
+                </button>
+              </>
+            )}
+          </p>
 
           <div className={css.runRow}>
             <InkButton
               seed={7}
               frameClassName={css.inkAccent}
               className={css.primaryBtn}
-              onClick={() => verify(receiptText)}
+              onClick={verify}
             >
               Re-examine in your browser
             </InkButton>
@@ -524,7 +480,7 @@ export function BehindARoll() {
               className={css.localBadge}
               title="Local receipt verification. Issuer key discovery may use /.well-known."
             >
-              ● recomputed locally
+              Runs locally
             </span>
           </div>
 
@@ -544,14 +500,18 @@ export function BehindARoll() {
                   : presentationState === 'not_checked'
                     ? 'Receipt or key changed. Re-examine to compute a verdict.'
                     : noTrustRoot
-                      ? `No published key matched kid ${keyKid}. Supply the issuer key set or paste the issuer's public key before the signature can be checked.`
+                      ? v.discovery.status === 'unavailable'
+                        ? `${v.discovery.reason} The signature was not checked. Retry the lookup, or paste the issuer's public key.`
+                        : `No published key matches kid ${keyKid ?? '(none)'}. The signature was not checked. Paste the issuer's public key to check it.`
                       : presentationState === 'unverifiable'
                         ? report?.error ?? 'The verifier could not compute a meaningful verdict.'
                         : isValid
-                  ? isLegacy
-                    ? 'Signed and replayable. Legacy receipt, no drand provenance.'
-                    : 'Signed, drand-seeded, and bit-for-bit replayable.'
-                          : 'One or more strata did not hold.'}
+                          ? isLegacy
+                            ? 'Signed and replayable. Legacy receipt, no drand provenance.'
+                            : 'Signed, drand-seeded, and bit-for-bit replayable.'
+                          : report
+                            ? invalidSummary(report, parsed ?? {})
+                            : 'One or more strata did not hold.'}
             </span>
           </div>
 
@@ -567,6 +527,8 @@ export function BehindARoll() {
                   }}
                   type="button"
                   className={`${css.band} ${focused ? css.focus : ''} ${stateClass}`}
+                  data-stratum-key={s.key}
+                  data-stratum-state={s.status}
                   aria-expanded={focused}
                   aria-controls={`stratum-detail-${s.key}`}
                   onClick={() => setActive(i)}
@@ -608,6 +570,12 @@ export function BehindARoll() {
               {strata.length > 0 ? `${active + 1} / ${strata.length}` : '0 / 0'} · click a stratum
             </span>
           </div>
+
+          {v.bound?.engineFailed && (
+            <button type="button" className={css.linkBtn} onClick={v.retryEngine}>
+              Retry loading the engine
+            </button>
+          )}
 
           {report?.errors && report.errors.length > 0 && (
             <ul className={css.errorList}>

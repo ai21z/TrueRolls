@@ -26,17 +26,27 @@ export function InkFrame({ seed = 1, inline = false, className, children, ...res
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
+    const apply = (width: number, height: number) => {
       setD((prev) => {
-        const w = Math.round(r.width);
-        const h = Math.round(r.height);
+        const w = Math.round(width);
+        const h = Math.round(height);
         return prev.w === w && prev.h === h ? prev : { w, h };
       });
     };
-    measure(); // immediate, so the border paints on first layout
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
+    if (typeof ResizeObserver === 'undefined') {
+      const r = el.getBoundingClientRect();
+      apply(r.width, r.height);
+      return;
+    }
+    // The observer's first report arrives after the browser's own layout, so the
+    // page's first paint never waits on a forced layout and a second render per
+    // frame; the ink follows a frame later. Border-box size ignores transforms.
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      const box = entry?.borderBoxSize?.[0];
+      if (box) apply(box.inlineSize, box.blockSize);
+      else apply(el.offsetWidth, el.offsetHeight);
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);

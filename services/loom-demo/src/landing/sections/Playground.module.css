@@ -19,7 +19,7 @@
   align-items: center;
   gap: 10px;
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--kd-accent);
@@ -43,7 +43,9 @@
 .frame {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr) 340px;
-  height: min(72vh, 720px);
+  /* Grows past this when the stage needs more, so no stage content is squeezed
+     or hidden in an inner scroll. The transcripts never set the height. */
+  min-height: min(72vh, 720px);
   border: 1px solid var(--kd-border);
   border-radius: var(--kd-radius-lg);
   overflow: hidden;
@@ -54,6 +56,6 @@
 @media (max-width: 1024px) {
   .frame {
     grid-template-columns: 1fr;
-    height: auto;
+    min-height: 0;
   }
 }

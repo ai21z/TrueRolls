@@ -1,95 +1,98 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { useKarmaState } from '../../hooks/useKarmaState';
 import type { HeroPhase } from '../three/HeroCanvas';
-import type { Die, ReceiptVerifyResponse } from '../../types/kd';
+import type { Die, VerifyCheckRow } from '../../types/kd';
 import {
   buildReceiptBody,
   hasDrandProof as receiptHasDrandProof,
   receiptVerifierAccepts,
-  tamperedView,
 } from '../../api/receipt';
-import { heroReceiptPill, isMockArtifact } from '../../api/trustPresentation';
-import { postVerifyReceipt } from '../../api/client';
+import {
+  heroReceiptPill,
+  invalidSummary,
+  isMockArtifact,
+  statusPillForArtifact,
+} from '../../api/trustPresentation';
 import { FACES } from '../../constants/caps';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import css from './HeroCredential.module.css';
 
-const ROW_LABELS: ReadonlyArray<[keyof Pick<ReceiptVerifyResponse, 'valid_signature' | 'valid_drand' | 'valid_sampling' | 'face_ok' | 'metrics_ok'>, string]> = [
-  ['valid_signature', 'Signature'],
-  ['valid_drand', 'Drand proof'],
-  ['valid_sampling', 'Seed replay'],
-  ['face_ok', 'Face recompute'],
-  ['metrics_ok', 'Metrics'],
+// Hero rows, keyed by the shared check-row ids the roll's API check records.
+const ROW_LABELS: ReadonlyArray<[string, string]> = [
+  ['signature', 'Signature'],
+  ['drand', 'Drand proof'],
+  ['rng', 'Seed replay'],
+  ['face', 'Face recompute'],
+  ['metrics', 'Metrics'],
 ];
+
+export const HERO_RECEIPT_ID = 'hero-receipt';
 
 interface Props {
   state: ReturnType<typeof useKarmaState>;
   onPhase: (p: HeroPhase) => void;
 }
 
+function CheckRows({ rows, drand }: { rows: VerifyCheckRow[] | null; drand: boolean }) {
+  return (
+    <div className={css.checks}>
+      {ROW_LABELS.filter(([key]) => key !== 'drand' || drand).map(([key, label]) => {
+        const ok = rows?.find((r) => r.id === key)?.ok ?? null;
+        const word = ok == null ? 'not run' : ok ? 'pass' : 'fail';
+        const cls = ok == null ? css.pending : ok ? css.ok : css.fail;
+        return (
+          <div
+            key={key}
+            className={`${css.checkRow} ${cls}`}
+            data-check-id={key}
+            data-check-state={word}
+          >
+            <span className={css.pip} aria-hidden="true" />
+            <span>{label}</span>
+            <span className={css.checkWord}>{word}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function HeroCredential({ state, onPhase }: Props) {
   const entry = state.rolls.length > 0 ? state.rolls[0] : null;
-  const [verify, setVerify] = useState<ReceiptVerifyResponse | null>(null);
-  const [busy, setBusy] = useState(false);
-  const lastId = useRef<number | null>(null);
-
-  // The break lives on the entry itself, so a tamper here OR in the playground reads
-  // the same forged body + failing result, and it persists across re-rolls/reloads.
-  const tamperState = entry?.tampered ?? null;
-  const tamper = tamperState?.result ?? null;
-
   const mockArtifact = isMockArtifact(entry);
   const signed = !!entry?.sig && !mockArtifact && !state.mock;
   const hasDrandProof = entry ? receiptHasDrandProof(entry) : false;
+  const localId = entry?.localId ?? null;
+  const status = entry?.verifyStatus ?? null;
+  const editedCopy =
+    state.editedCopy && entry && state.editedCopy.localId === entry.localId ? state.editedCopy : null;
+  const { verify } = state;
+  // One automatic check per roll per mount, even under StrictMode effect replay.
+  const autoChecked = useRef<number | null>(null);
 
-  // New roll → reset, signal 'settled', then auto-verify the clean receipt.
+  // The latest roll's original receipt is checked once with the API through the
+  // shared per-roll status, so the hero, its transcript row and its modal always
+  // agree. After a reload that status is 'not_checked' again and re-runs.
   useEffect(() => {
-    if (!entry) {
-      lastId.current = null;
-      setVerify(null);
-      onPhase('idle');
-      return;
-    }
-    if (entry.localId === lastId.current) return;
-    lastId.current = entry.localId;
-    setVerify(null);
-    onPhase('settled');
-    if (state.mock || mockArtifact || !entry.sig) return;
+    if (localId === null || !signed || status !== 'not_checked') return;
+    if (autoChecked.current === localId) return;
+    autoChecked.current = localId;
+    void verify(localId);
+  }, [localId, signed, status, verify]);
 
-    let cancelled = false;
-    postVerifyReceipt(buildReceiptBody(entry))
-      .then((res) => {
-        if (cancelled) return;
-        setVerify(res);
-        const allOk = receiptVerifierAccepts(entry, res);
-        onPhase(allOk ? 'sealed' : 'settled');
-      })
-      .catch(() => {
-        /* leave unverified. Phase stays settled */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [entry, hasDrandProof, mockArtifact, state.mock, onPhase]);
+  // The seal follows the reported result, never a timer.
+  useEffect(() => {
+    if (localId === null) onPhase('idle');
+    else onPhase(status === 'verified_server' ? 'sealed' : 'settled');
+  }, [localId, status, onPhase]);
 
-  const doTamper = useCallback(async () => {
+  const makeEditedCopy = useCallback(() => {
     if (!entry?.sig) return;
-    setBusy(true);
-    try {
-      const body = buildReceiptBody(entry) as Record<string, unknown>;
-      const faces = FACES[entry.die as Die] ?? 20;
-      body.face = (entry.face % faces) + 1; // alter a signed result value
-      const res = await postVerifyReceipt(body);
-      // Lift the break into shared state with the tampered body, the hero die, the
-      // playground seed, the transcript row and the receipt modal all read it, so
-      // the broken die is the SAME forged, failing artifact across the page.
-      state.markTampered(entry.localId, body, res);
-    } catch {
-      /* network error, leave state */
-    } finally {
-      setBusy(false);
-    }
+    const body = buildReceiptBody(entry) as Record<string, unknown>;
+    const faces = FACES[entry.die as Die] ?? 20;
+    body.face = (entry.face % faces) + 1; // alter a signed result value; signature unchanged
+    void state.verifyEditedCopy(entry.localId, body);
   }, [entry, state]);
 
   if (!entry) {
@@ -100,61 +103,96 @@ export function HeroCredential({ state, onPhase }: Props) {
     );
   }
 
-  const shown = tamper ?? verify;
-  const tampered = !!tamper;
-  const verifiedOk = verify ? receiptVerifierAccepts(entry, verify) : false;
-  // When broken, show the forged values the tampered receipt actually carries.
-  const view = tamperState
-    ? tamperedView(tamperState.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
-    : { face: entry.face, kappa: entry.kappa, die: entry.die };
-  const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
-
-  let pill: { label: string; tone: string };
-  const trustPill = heroReceiptPill({ entry, verify, tampered, verifiedOk });
-  if (trustPill.tone === 'fail') pill = { label: trustPill.label, tone: css.toneFail };
-  else if (trustPill.tone === 'ok') pill = { label: trustPill.label, tone: css.toneOk };
-  else if (trustPill.tone === 'pending') pill = { label: trustPill.label, tone: css.toneNeutral };
-  else pill = { label: trustPill.label, tone: css.toneNeutral };
+  const kappaText = `${entry.kappa >= 0 ? '+' : ''}${entry.kappa.toFixed(2)}`;
+  const trustPill =
+    entry.verifyStatus === 'not_checked'
+      ? heroReceiptPill({ entry, verify: null, tampered: false, verifiedOk: false })
+      : statusPillForArtifact(entry.verifyStatus, mockArtifact);
+  const rows = Array.isArray(entry.verifyChecks) ? entry.verifyChecks : null;
+  const pillTone =
+    trustPill.tone === 'fail' ? css.toneFail : trustPill.tone === 'ok' ? css.toneOk : css.toneNeutral;
+  const copyFace = typeof editedCopy?.body.face === 'number' ? editedCopy.body.face : null;
+  const copyAccepted =
+    editedCopy?.result != null ? receiptVerifierAccepts(editedCopy.body, editedCopy.result) : null;
 
   return (
-    <InkFrame seed={65} className={`${css.card} ${tampered ? css.cardFail : ''}`}>
+    <InkFrame seed={65} className={css.card} id={HERO_RECEIPT_ID} tabIndex={-1} aria-label="Latest receipt">
       <div className={css.head}>
         <span className={css.brand}>Receipt</span>
-        <span className={`${css.pill} ${pill.tone}`} data-trust-label={pill.label}>
-          {pill.label}
+        <span className={`${css.pill} ${pillTone}`} data-trust-label={trustPill.label}>
+          {trustPill.label}
         </span>
       </div>
 
       <div className={css.result}>
-        <span className={css.face}>{view.face}</span>
-        <span className={css.meta}>{view.die} · κ {kappaText}</span>
+        <span className={css.face}>{entry.face}</span>
+        <span className={css.meta}>{entry.die} · κ {kappaText}</span>
       </div>
 
-      <div className={css.checks}>
-        {ROW_LABELS.filter(([key]) => key !== 'valid_drand' || hasDrandProof).map(([key, label]) => {
-          const ok = shown ? shown[key] : null;
-          const cls = ok == null ? css.pending : ok ? css.ok : css.fail;
-          return (
-            <div key={key} className={`${css.checkRow} ${cls}`}>
-              <span className={css.pip} aria-hidden="true" />
-              <span>{label}</span>
-              <span className={css.srOnly}>{ok == null ? 'not run' : ok ? 'pass' : 'fail'}</span>
-            </div>
-          );
-        })}
-      </div>
+      <CheckRows rows={rows} drand={hasDrandProof} />
+      <p className={css.origin}>
+        {!signed
+          ? 'No signature to check.'
+          : entry.verifyStatus === 'error'
+            ? 'The API check did not answer. The receipt is unchanged; check it on the Verify page.'
+            : entry.verifyStatus === 'pending' || entry.verifyStatus === 'not_checked'
+              ? 'Checking with the TrueRolls API…'
+              : 'Checked by the TrueRolls API. Verify it yourself in the browser from the receipt.'}
+      </p>
 
-      <InkButton
-        inline={false}
-        seed={66}
-        frameClassName={css.tamperBtnWrap}
-        className={css.tamperBtn}
-        onClick={doTamper}
-        disabled={!signed || busy || tampered}
-        title={signed ? 'Alter the signed face and re-verify' : 'Start the API for real signing'}
-      >
-        {busy ? 'Re-verifying…' : tampered ? 'Signature broke' : 'Tamper & re-verify'}
-      </InkButton>
+      {editedCopy ? (
+        <section className={css.copy} aria-label="Edited copy" data-edited-copy={editedCopy.status}>
+          <div className={css.copyHead}>
+            <span className={css.copyTitle}>
+              Edited copy · face {entry.face} → {copyFace ?? '?'}
+            </span>
+            <span
+              className={`${css.pill} ${copyAccepted === false ? css.toneFail : css.toneNeutral}`}
+              data-copy-label={
+                editedCopy.status === 'verifying'
+                  ? 'checking'
+                  : copyAccepted === false
+                    ? 'invalid'
+                    : copyAccepted
+                      ? 'valid'
+                      : 'unchecked'
+              }
+            >
+              {editedCopy.status === 'verifying'
+                ? 'Checking…'
+                : copyAccepted === false
+                  ? 'INVALID'
+                  : copyAccepted
+                    ? 'VALID'
+                    : 'Not checked'}
+            </span>
+          </div>
+          <p className={css.copyNote} role="status" aria-live="polite">
+            {editedCopy.status === 'verifying'
+              ? 'Checking the edited copy with the API.'
+              : editedCopy.status === 'error'
+                ? editedCopy.error
+                : editedCopy.result && copyAccepted === false
+                  ? `${invalidSummary({ verdict: 'INVALID', ...editedCopy.result }, editedCopy.body)} The original receipt above is unchanged.`
+                  : ''}
+          </p>
+          <button type="button" className={css.copyDiscard} onClick={state.discardEditedCopy}>
+            Discard edited copy
+          </button>
+        </section>
+      ) : (
+        <InkButton
+          inline={false}
+          seed={66}
+          frameClassName={css.tamperBtnWrap}
+          className={css.tamperBtn}
+          onClick={makeEditedCopy}
+          disabled={!signed}
+          title={signed ? 'Edit a copy of the signed face and check that copy' : 'Start the API for real signing'}
+        >
+          Edit a copy &amp; re-verify
+        </InkButton>
+      )}
     </InkFrame>
   );
 }

@@ -31,6 +31,12 @@ export interface HeroCanvasProps {
    * the camera. Null/undefined or out of range → a generic resting pose.
    */
   face?: number | null;
+  /**
+   * The die type of the shown roll. The 3D object is a d20, so for any other
+   * die its numbers are hidden: it must never present a d6 or d100 result as a
+   * d20 face. The HTML next to it carries the real die and result.
+   */
+  die?: string | null;
   /** Host sizing comes from CSS, the canvas fills its container. */
   className?: string;
 }
@@ -42,6 +48,8 @@ export interface DieSceneProps {
   kappa: number;
   /** The rolled face (1..20). The die settles showing it toward the camera. */
   face?: number | null;
+  /** False when the roll is not a d20: the numbered faces are hidden. */
+  showNumbers: boolean;
   /**
    * When true, render a single static composed frame (settled die + seal,
    * no float/tumble/shatter loops) for `prefers-reduced-motion`.

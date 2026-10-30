@@ -1,31 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import { getApiBaseForCli, getTruerollsKeys, type TruerollsKey } from '../../api/client';
-import { DEMO_TEST_KEY, resolveReceiptKey, type KeySource } from '../../api/keys';
+import { getApiBaseForCli } from '../../api/client';
+import { DEMO_TEST_KEY } from '../../api/keys';
 import { DRAND_RECEIPT_VERSION, offlineVerifyCommand } from '../../api/receipt';
+import { consumeReceiptHandoff, peekReceiptHandoff, type HandoffRead } from '../../api/receiptHandoff';
 import {
   drandSummaryForReceipt,
+  invalidSummary,
   keyTrustExplanation,
   verificationState as deriveVerificationState,
   verificationStateLabel,
-  type VerificationPhase,
 } from '../../api/trustPresentation';
 import {
   LEGACY_RECEIPT,
   PRIMARY_DRAND_RECEIPT,
   TAMPERED_DRAND_RECEIPT,
 } from '../../generated/receiptFixtures';
+import {
+  presentableReport,
+  useReceiptVerification,
+  type ReceiptArtifact,
+} from '../../hooks/useReceiptVerification';
 import { RollSigil } from '../../components/RollSigil';
 import { InkFrame } from '../system/InkFrame';
 import { InkButton } from '../system/InkButton';
 import { SiteSignature } from '../system/SiteSignature';
-import {
-  initKdCoreWasm,
-  isKdCoreWasmReady,
-  kdCoreWasmEngineLabel,
-  verifyReceiptWasm,
-  verifyReceiptWasmWithKeySet,
-  type WasmVerifyReport,
-} from '../../api/wasmEngine';
+import { kdCoreWasmEngineLabel } from '../../api/wasmEngine';
 import css from './Verify.module.css';
 
 /**
@@ -34,7 +33,11 @@ import css from './Verify.module.css';
  * published /.well-known key set; the receipt itself is not uploaded by this path.
  */
 
-const SAMPLE_RECEIPT = PRIMARY_DRAND_RECEIPT;
+const SAMPLES = {
+  drand: { text: PRIMARY_DRAND_RECEIPT, label: 'Bundled drand sample' },
+  legacy: { text: LEGACY_RECEIPT, label: 'Bundled legacy control' },
+  tampered: { text: TAMPERED_DRAND_RECEIPT, label: 'Bundled invalid-drand control' },
+} as const;
 
 function receiptHasDrandProof(text: string): boolean {
   try {
@@ -48,6 +51,17 @@ function receiptHasDrandProof(text: string): boolean {
   }
 }
 
+function parsedOrEmpty(text: string): { v?: unknown; proof?: unknown } {
+  try {
+    const value = JSON.parse(text) as unknown;
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as { v?: unknown; proof?: unknown })
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 interface CheckRowProps {
   checkId: string;
   ok: boolean | undefined;
@@ -57,218 +71,136 @@ interface CheckRowProps {
 
 function CheckRow({ checkId, ok, label, detail }: CheckRowProps) {
   // Honest tri-state. A check the engine did not report (undefined) is shown as
-  // an empty cell / "not run", never as a pass OR a fail. State is carried by the
-  // carved cell's fill plus the real checkState word, never a check or cross badge.
+  // an empty cell / "not run", never as a pass OR a fail. The state word is real
+  // visible text, so it reaches assistive tech and does not depend on colour.
   const state = ok === undefined ? 'not run' : ok ? 'pass' : 'fail';
   const stateClass = ok === undefined ? css.checkUnknown : ok ? css.checkPass : css.checkFail;
   return (
-    <div className={`${css.checkRow} ${stateClass}`} data-check-id={checkId}>
+    <div className={`${css.checkRow} ${stateClass}`} data-check-id={checkId} data-check-state={state}>
       <span className={css.checkMark} aria-hidden="true" />
       <span className={css.checkLabel}>{label}</span>
       <span className={css.checkDetail}>{detail}</span>
-      {/* Real (non-hidden) text so the pass/fail state reaches assistive tech. */}
       <span className={css.checkState}>{state}</span>
     </div>
   );
 }
 
+/** What the page starts with: a receipt handed off from this tab's playground, or nothing. */
+function initialFromHandoff(read: HandoffRead): ReceiptArtifact {
+  if (read.status === 'ok') {
+    return {
+      text: read.handoff.receiptJson,
+      origin: 'handoff',
+      label:
+        read.handoff.kind === 'edited-copy'
+          ? `Edited copy of roll ${read.handoff.rollId?.slice(0, 8) ?? ''}, not the original`
+          : `Your receipt, roll ${read.handoff.rollId?.slice(0, 8) ?? ''}`,
+    };
+  }
+  return { text: '', origin: 'user', label: null };
+}
+
 export function Verify() {
-  const [receiptText, setReceiptText] = useState<string>(SAMPLE_RECEIPT);
-  const [publicKey, setPublicKey] = useState<string>(DEMO_TEST_KEY);
-  const [keySource, setKeySource] = useState<KeySource>('demo');
-  const [keyKid, setKeyKid] = useState<string | null>('test-kid-1');
-  const [keyStatus, setKeyStatus] = useState<string | null>('active');
-  const [wellKnownKeys, setWellKnownKeys] = useState<TruerollsKey[]>([]);
-  const [report, setReport] = useState<WasmVerifyReport | null>(null);
-  const [verificationPhase, setVerificationPhase] = useState<VerificationPhase>('loading');
-  const [tampered, setTampered] = useState(false);
+  const [handoffRead] = useState<HandoffRead>(() => peekReceiptHandoff());
+  const [initial] = useState<ReceiptArtifact>(() => initialFromHandoff(handoffRead));
+  const v = useReceiptVerification({
+    initial,
+    verifyInitial: handoffRead.status === 'ok',
+    editsKeepSampleOrigin: false,
+  });
   const [copied, setCopied] = useState<string | null>(null);
-  // True while the on-screen receipt derives from our bundled sample (loaded or
-  // tampered). Only in that context do we resolve the PUBLIC demo key for a
-  // test-kid-1 receipt, so the sample and its tampered variants can show the
-  // signature passing/failing. An arbitrary pasted/uploaded receipt is fail-closed.
-  const [sampleContext, setSampleContext] = useState(true);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // True only after the user edited a bundled sample in place (Flip face, Bump κ).
+  const [sampleEdited, setSampleEdited] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const runWithResolved = (text: string, resolved: ReturnType<typeof resolveReceiptKey>) => {
-    setVerificationPhase('verifying');
-    if (!isKdCoreWasmReady()) {
-      setReport({ verdict: 'ERROR', error: 'verifier engine still loading, try again in a moment' });
-      setVerificationPhase('complete');
-      return;
-    }
-    const nextReport =
-      resolved.kind === 'manual'
-        ? verifyReceiptWasm(text, resolved.publicKey)
-        : verifyReceiptWasmWithKeySet(text, resolved.keySetJson);
-    setReport(nextReport);
-    setVerificationPhase('complete');
-  };
-
-  // Resolve the key for `text` against the fetched /.well-known keys, reflect the choice in
-  // the key badge, then verify.
-  const verify = (text: string) => {
-    const r = resolveReceiptKey(text, wellKnownKeys, keySource === 'manual' ? publicKey : null, {
-      allowDemoFallback: sampleContext,
-    });
-    setPublicKey(r.publicKey);
-    setKeySource(r.source);
-    setKeyKid(r.kid);
-    setKeyStatus(r.status ?? null);
-    runWithResolved(text, r);
-  };
-
-  // On mount: ensure the wasm engine is up, adopt the site's published key
-  // (well-known) or fall back to the demo test key, then verify the sample so
-  // the page proves itself on first paint. Awaiting initKdCoreWasm() here (it is
-  // idempotent and retries a failed init) avoids a false "engine loading" state
-  // on direct navigation or a slow first load.
+  // Consume exactly the hand-off this mount read. A newer one is left in place.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await initKdCoreWasm();
-      } catch {
-        /* surfaced as an ERROR verdict by runWith if the engine is truly down */
-      }
-      let keys: TruerollsKey[] = [];
-      try {
-        keys = (await getTruerollsKeys()).keys;
-      } catch {
-        /* no live API, the bundled demo key verifies the sample offline */
-      }
-      if (cancelled) return;
-      setWellKnownKeys(keys);
-      // Resolve against the just-fetched keys (state isn't committed yet). The sample
-      // falls back to the bundled demo key if production does not publish test-kid-1.
-      const r = resolveReceiptKey(SAMPLE_RECEIPT, keys, null, { allowDemoFallback: true });
-      setPublicKey(r.publicKey);
-      setKeySource(r.source);
-      setKeyKid(r.kid);
-      setKeyStatus(r.status ?? null);
-      runWithResolved(SAMPLE_RECEIPT, r);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (handoffRead.status === 'ok') consumeReceiptHandoff(handoffRead.handoff.token);
+    else if (handoffRead.status !== 'none') consumeReceiptHandoff(handoffRead.token);
+  }, [handoffRead]);
 
-  const onVerifyClick = () => verify(receiptText);
+  const receiptText = v.artifact.text;
+  const isSampleOrigin = v.artifact.origin === 'sample';
+
+  const loadSample = (key: keyof typeof SAMPLES) => {
+    const sample = SAMPLES[key];
+    setActionError(null);
+    setSampleEdited(false);
+    v.loadArtifact(
+      { text: sample.text, origin: 'sample', label: sample.label },
+      { verify: true, keepManualKey: false },
+    );
+  };
 
   const onReceiptChange = (text: string) => {
-    setReceiptText(text);
-    setReport(null);
-    setVerificationPhase('not_checked');
-    setTampered(false);
-    // Hand-edited text is no longer the bundled sample: fail closed, no demo key.
-    setSampleContext(false);
+    setActionError(null);
+    setSampleEdited(false);
+    v.editText(text);
   };
 
-  const onKeyChange = (key: string) => {
-    setPublicKey(key);
-    setKeySource('manual');
-    setKeyKid(null);
-    setKeyStatus(null);
-    setReport(null);
-    setVerificationPhase('not_checked');
-  };
-
-  const loadFixture = (text: string, fixtureTampered: boolean) => {
-    setReceiptText(text);
-    setTampered(fixtureTampered);
-    setSampleContext(true);
-    const r = resolveReceiptKey(text, wellKnownKeys, null, { allowDemoFallback: true });
-    setPublicKey(r.publicKey);
-    setKeySource(r.source);
-    setKeyKid(r.kid);
-    setKeyStatus(r.status ?? null);
-    runWithResolved(text, r);
-  };
-
-  const loadSample = () => loadFixture(SAMPLE_RECEIPT, false);
-  const loadLegacyControl = () => loadFixture(LEGACY_RECEIPT, false);
-  const loadTamperedControl = () => loadFixture(TAMPERED_DRAND_RECEIPT, true);
-
-  const onFile = async (file: File | undefined) => {
+  const onFile = (file: File | undefined) => {
     if (!file) return;
-    let text: string;
-    try {
-      text = await file.text();
-    } catch {
-      setReport({ verdict: 'ERROR', error: 'could not read file' });
-      setVerificationPhase('complete');
-      return;
-    }
-    setReceiptText(text);
-    setTampered(false);
-    setSampleContext(false);
-    // Re-resolve against the uploaded receipt's own kid, ignoring any prior
-    // manual key so a genuinely issuer-signed upload is not checked against a
-    // stale pasted key (which would report a false INVALID).
-    const r = resolveReceiptKey(text, wellKnownKeys, null, { allowDemoFallback: false });
-    setPublicKey(r.publicKey);
-    setKeySource(r.source);
-    setKeyKid(r.kid);
-    setKeyStatus(r.status ?? null);
-    runWithResolved(text, r);
+    setActionError(null);
+    setSampleEdited(false);
+    void v.loadFile(file);
   };
 
   const copy = (text: string, label: string) => {
+    setCopyError(null);
+    if (!navigator.clipboard) {
+      setCopyError('Copy is blocked in this browser. Select the text and copy it manually.');
+      return;
+    }
     navigator.clipboard
-      ?.writeText(text)
+      .writeText(text)
       .then(() => {
         setCopied(label);
-        setTimeout(() => setCopied(null), 1500);
+        setTimeout(() => setCopied((c) => (c === label ? null : c)), 1500);
       })
       .catch(() => {
-        /* clipboard blocked, no-op */
+        setCopyError('Copy failed. Select the text and copy it manually.');
       });
   };
 
-  // Edit one field of the receipt JSON in place, re-verify, and watch it break.
-  // Surfaces a clear ERROR for input that can't be tampered (non-JSON, non-object,
-  // or a missing field) instead of silently doing nothing.
+  // Edit one field of the receipt JSON in place and verify the edited bytes.
+  // Input that cannot be edited this way gets an explicit reason, not silence.
   const tamper = (mutate: (r: Record<string, unknown>) => void) => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(receiptText);
-    } catch {
-      setReport({ verdict: 'ERROR', error: 'receipt is not valid JSON, cannot tamper' });
-      setVerificationPhase('complete');
+    setActionError(null);
+    if (!v.diagnosis.ok) {
+      setActionError(`Cannot edit a field: ${v.diagnosis.message}`);
       return;
     }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      setReport({ verdict: 'ERROR', error: 'receipt must be a JSON object, cannot tamper' });
-      setVerificationPhase('complete');
-      return;
-    }
-    const obj = parsed as Record<string, unknown>;
+    const obj = JSON.parse(receiptText) as Record<string, unknown>;
     try {
       mutate(obj);
     } catch (e) {
-      setReport({
-        verdict: 'ERROR',
-        error: e instanceof Error ? e.message : 'cannot tamper this receipt',
-      });
-      setVerificationPhase('complete');
+      setActionError(e instanceof Error ? e.message : 'Cannot edit this receipt.');
       return;
     }
     const next = JSON.stringify(obj, null, 2);
-    setReceiptText(next);
-    setTampered(true);
-    verify(next);
+    setSampleEdited(isSampleOrigin);
+    v.loadArtifact(
+      {
+        text: next,
+        origin: isSampleOrigin ? 'sample' : 'user',
+        label: v.artifact.label ? `${v.artifact.label}, edited` : 'Edited receipt',
+      },
+      { verify: true, keepManualKey: true },
+    );
   };
 
   const tamperFace = () =>
     tamper((r) => {
-      if (typeof r.face !== 'number') throw new Error('receipt has no numeric face to flip');
+      if (typeof r.face !== 'number') throw new Error('This receipt has no numeric face to flip.');
       const sides = typeof r.die === 'string' ? (parseInt(r.die.replace(/\D/g, ''), 10) || 20) : 20;
       r.face = (r.face % sides) + 1;
     });
 
   const tamperKappa = () =>
     tamper((r) => {
-      if (typeof r.kappa !== 'number') throw new Error('receipt has no numeric κ to bump');
+      if (typeof r.kappa !== 'number') throw new Error('This receipt has no numeric κ to bump.');
       r.kappa = r.kappa === -0.9 ? 0.9 : -0.9;
     });
 
@@ -278,35 +210,49 @@ export function Verify() {
       r[field] = value;
     });
 
+  const bound = v.bound;
+  const report = presentableReport(bound);
+  const keySource = v.resolved.source;
   const presentationState = deriveVerificationState({
-    phase: verificationPhase,
+    phase: v.phase,
     report,
-    keySource,
+    keySource: bound?.resolved.source ?? keySource,
   });
   const isValid = presentationState === 'valid';
   const hasDrandProof = receiptHasDrandProof(receiptText);
-  const noTrustRoot = presentationState === 'unverifiable' && keySource === 'unresolved';
-  let parsedReceiptForSummary: { v?: unknown; proof?: unknown } = {};
-  try {
-    parsedReceiptForSummary = JSON.parse(receiptText) as { v?: unknown; proof?: unknown };
-  } catch {
-    parsedReceiptForSummary = {};
-  }
+  const parsedReceipt = parsedOrEmpty(receiptText);
+  const discoveryUnavailable = v.discovery.status === 'unavailable';
+  const keyPending = !v.manual && v.discovery.status === 'loading';
+  const shownKey = v.manualKey ?? (keyPending ? '' : v.resolved.publicKey);
+  const isPublicTestKey = !keyPending && shownKey === DEMO_TEST_KEY;
   const cliCommand = offlineVerifyCommand(
     receiptText,
     keySource === 'well-known' || keySource === 'unresolved'
       ? { kind: 'server', server: getApiBaseForCli() }
-      : { kind: 'public-key', publicKey },
+      : { kind: 'public-key', publicKey: shownKey },
   );
 
-  const keyBadgeText =
-    keySource === 'well-known'
-      ? `from /.well-known${keyKid ? ` · ${keyKid}` : ''}${keyStatus ? ` · ${keyStatus}` : ''}`
-      : keySource === 'demo'
-        ? 'public demo key (not issuer-backed)'
-        : keySource === 'unresolved'
-          ? `no published key for ${keyKid ?? 'this kid'}`
-          : 'manual';
+  const keyBadgeText = v.manual
+    ? 'manual key'
+    : keyPending
+      ? 'looking up the issuer key…'
+      : keySource === 'well-known'
+        ? `issuer key · ${v.resolved.kid ?? ''}${v.resolved.status ? ` · ${v.resolved.status}` : ''}`
+        : keySource === 'demo'
+          ? 'public test key · samples only'
+          : discoveryUnavailable
+            ? 'issuer key set unavailable'
+            : `no published key for ${v.resolved.kid ?? 'this receipt'}`;
+
+  let unverifiableText = 'The verifier could not compute a meaningful verdict.';
+  if (bound?.inputProblem) unverifiableText = bound.inputProblem.message;
+  else if (bound?.engineFailed) unverifiableText = bound.report.error ?? unverifiableText;
+  else if (bound && bound.resolved.source === 'unresolved') {
+    unverifiableText =
+      v.discovery.status === 'unavailable'
+        ? `${v.discovery.reason} The signature was not checked. Retry the lookup, or paste the issuer's public key.`
+        : `No published key matches kid ${bound.resolved.kid ?? '(none)'}. The signature was not checked. Paste the issuer's public key to check it.`;
+  } else if (report?.error) unverifiableText = report.error;
 
   return (
     <main className={css.page}>
@@ -343,21 +289,20 @@ export function Verify() {
         </p>
       </section>
 
+      {(handoffRead.status === 'expired' || handoffRead.status === 'malformed') && (
+        <p className={css.handoffNotice} role="note">
+          {handoffRead.status === 'expired'
+            ? 'The receipt sent from the playground expired before this page opened. Copy or download it from the playground and paste it here.'
+            : 'The receipt sent from the playground could not be read. Copy or download it from the playground and paste it here.'}
+        </p>
+      )}
+
       <div className={css.grid}>
         {/* ── Input ── */}
         <InkFrame seed={21} className={css.panel}>
           <div className={css.panelHead}>
             <span className={css.panelTitle}>Receipt</span>
             <div className={css.panelActions}>
-              <InkButton seed={5} className={css.ghostBtn} onClick={loadSample}>
-                Current drand sample
-              </InkButton>
-              <InkButton seed={12} className={css.ghostBtn} onClick={loadLegacyControl}>
-                Legacy control
-              </InkButton>
-              <InkButton seed={13} className={css.ghostBtn} onClick={loadTamperedControl}>
-                Tampered control
-              </InkButton>
               <InkButton seed={6} className={css.ghostBtn} onClick={() => fileRef.current?.click()}>
                 Upload .json
               </InkButton>
@@ -367,41 +312,98 @@ export function Verify() {
                 accept="application/json,.json"
                 className={css.fileInput}
                 aria-label="Upload receipt JSON file"
-                onChange={(e) => onFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  onFile(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
               />
             </div>
           </div>
+
+          <div className={css.sampleRow} role="group" aria-label="Bundled samples">
+            <span className={css.sampleHint}>Samples, signed with the public test key:</span>
+            <InkButton seed={5} className={css.ghostBtn} onClick={() => loadSample('drand')}>
+              Current drand sample
+            </InkButton>
+            <InkButton seed={12} className={css.ghostBtn} onClick={() => loadSample('legacy')}>
+              Legacy control
+            </InkButton>
+            <InkButton seed={13} className={css.ghostBtn} onClick={() => loadSample('tampered')}>
+              Tampered control
+            </InkButton>
+          </div>
+
+          <p className={css.artifactLabel} data-artifact-origin={v.artifact.origin}>
+            {v.artifact.label ?? (receiptText.trim() === '' ? 'Nothing loaded yet.' : 'Pasted receipt')}
+          </p>
 
           <textarea
             className={css.textarea}
             value={receiptText}
             spellCheck={false}
+            placeholder="Paste a TrueRolls receipt (JSON) here."
             onChange={(e) => onReceiptChange(e.target.value)}
             aria-label="Receipt JSON"
           />
+          {v.fileError && (
+            <p className={css.inlineError} role="alert">
+              {v.fileError}
+            </p>
+          )}
+          {v.fileNotice && (
+            <p className={css.inlineNotice} role="status">
+              {v.fileNotice}
+            </p>
+          )}
 
           <label className={css.keyLabel} htmlFor="pubkey">
             Ed25519 public key (base64)
-            <span className={css.keyBadge} data-key-source={keySource}>{keyBadgeText}</span>
-            {keySource === 'manual' && (
-              <span className={css.keyBypassBadge}>manual key, status bypassed</span>
+            <span className={css.keyBadge} data-key-source={v.manual ? 'manual' : keyPending ? 'pending' : keySource}>
+              {keyBadgeText}
+            </span>
+            {isPublicTestKey && !v.manual && keySource === 'well-known' && (
+              <span className={css.keyBadge} data-key-test="public">public test key</span>
             )}
+            {v.manual && <span className={css.keyBypassBadge}>manual key, status bypassed</span>}
           </label>
           <input
             id="pubkey"
             className={css.keyInput}
-            value={publicKey}
+            value={shownKey}
             spellCheck={false}
-            onChange={(e) => onKeyChange(e.target.value)}
+            placeholder={keyPending ? 'Looking up the issuer key…' : 'Resolved from the issuer key set, or paste a key'}
+            onChange={(e) => v.setManualKey(e.target.value)}
           />
-          <p className={css.keyTrustNote}>{keyTrustExplanation(keySource)}</p>
+          <p className={css.keyTrustNote}>
+            {keyPending
+              ? 'Looking up the issuer key set. You can paste a key instead.'
+              : v.discovery.status === 'unavailable' && !v.manual && keySource === 'unresolved'
+                ? v.discovery.reason
+                : keyTrustExplanation(v.manual ? 'manual' : keySource)}
+            {v.manual && (
+              <>
+                {' '}
+                <button type="button" className={css.linkBtn} onClick={v.clearManualKey}>
+                  Use the issuer key instead
+                </button>
+              </>
+            )}
+            {discoveryUnavailable && !v.manual && (
+              <>
+                {' '}
+                <button type="button" className={css.linkBtn} onClick={v.retryKeyDiscovery}>
+                  Retry key lookup
+                </button>
+              </>
+            )}
+          </p>
 
           <div className={css.runRow}>
-            <InkButton seed={7} frameClassName={css.inkAccent} className={css.primaryBtn} onClick={onVerifyClick}>
+            <InkButton seed={7} frameClassName={css.inkAccent} className={css.primaryBtn} onClick={v.verify}>
               Verify in your browser
             </InkButton>
             <div className={css.tamperGroup}>
-              <span className={css.tamperHint}>Tamper:</span>
+              <span className={css.tamperHint}>Edit a signed value:</span>
               <InkButton seed={8} frameClassName={css.inkFail} className={css.tamperBtn} onClick={tamperFace}>
                 Flip face
               </InkButton>
@@ -410,6 +412,11 @@ export function Verify() {
               </InkButton>
             </div>
           </div>
+          {actionError && (
+            <p className={css.inlineError} role="alert">
+              {actionError}
+            </p>
+          )}
 
           <div className={css.copyRow}>
             <InkButton seed={10} className={css.ghostBtn} onClick={() => copy(receiptText, 'receipt')}>
@@ -424,21 +431,25 @@ export function Verify() {
             </InkButton>
             <span className={css.copyHint}>verify the same receipt offline with kd-cli</span>
           </div>
+          <p className={css.srOnly} role="status" aria-live="polite">
+            {copyError ?? (copied ? 'Copied to the clipboard.' : '')}
+          </p>
+          {copyError && <p className={css.inlineError}>{copyError}</p>}
         </InkFrame>
 
         {/* ── Result ── */}
         <InkFrame seed={37} className={css.panel}>
           <div className={css.panelHead}>
-            <span className={css.panelTitle}>Verdict</span>
+            <h2 className={css.panelTitle}>Verdict</h2>
             <span
               className={css.localBadge}
               title={
-                isKdCoreWasmReady()
+                v.engine === 'ready'
                   ? `${kdCoreWasmEngineLabel()}. Issuer key discovery may use /.well-known.`
                   : 'Issuer key discovery may use /.well-known.'
               }
             >
-              ● verified locally
+              {v.engine === 'failed' ? 'Engine failed to load' : 'Runs locally'}
             </span>
           </div>
 
@@ -451,35 +462,43 @@ export function Verify() {
             data-verification-state={presentationState}
           >
             {presentationState === 'not_checked' ? (
-              <div className={css.empty}>Verify a receipt to see the result.</div>
+              <div className={css.empty}>
+                {receiptText.trim() === ''
+                  ? 'NOT CHECKED. Paste or upload a receipt, or load a sample.'
+                  : 'NOT CHECKED. Verify this receipt to see the result.'}
+              </div>
             ) : presentationState === 'loading' || presentationState === 'verifying' ? (
               <div className={`${css.verdict} ${css.verdictError}`}>
                 <span className={css.verdictWord}>{verificationStateLabel(presentationState)}</span>
                 <span className={css.verdictSub}>
                   {presentationState === 'loading'
-                    ? 'Loading the verifier engine and issuer key information.'
+                    ? v.engine !== 'ready'
+                      ? 'Loading the verifier engine.'
+                      : 'Looking up the issuer key set.'
                     : 'Recomputing the receipt checks locally.'}
                 </span>
               </div>
             ) : presentationState === 'unverifiable' ? (
               <div className={`${css.verdict} ${css.verdictError}`}>
                 <span className={css.verdictWord}>UNVERIFIABLE</span>
-                <span className={css.verdictSub}>
-                  {noTrustRoot
-                    ? `No published key matched kid ${keyKid}. Supply the issuer key set or paste the issuer's public key before the signature can be checked.`
-                    : report?.error ?? 'The verifier could not compute a meaningful verdict.'}
-                </span>
+                <span className={css.verdictSub}>{unverifiableText}</span>
+                {bound?.engineFailed && (
+                  <button type="button" className={css.linkBtn} onClick={v.retryEngine}>
+                    Retry loading the engine
+                  </button>
+                )}
               </div>
             ) : report ? (
               <>
                 <div className={`${css.verdict} ${isValid ? css.verdictValid : css.verdictInvalid}`}>
                   <span className={css.verdictWord}>{isValid ? 'VALID' : 'INVALID'}</span>
                   <span className={css.verdictSub}>
-                    {presentationState === 'valid'
-                      ? drandSummaryForReceipt(parsedReceiptForSummary)
-                      : tampered
-                          ? 'Edited. The receipt no longer matches its signature.'
-                          : 'One or more checks failed.'}
+                    {isValid
+                      ? drandSummaryForReceipt(parsedReceipt)
+                      : invalidSummary(report, parsedReceipt)}
+                    {!isValid && sampleEdited && isSampleOrigin
+                      ? ' This is an edited sample; the original sample is unchanged.'
+                      : ''}
                   </span>
                 </div>
 

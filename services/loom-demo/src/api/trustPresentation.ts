@@ -57,6 +57,71 @@ export function verificationStateLabel(state: VerificationState): string {
   }
 }
 
+export type CheckName = 'signature' | 'drand' | 'sampling' | 'face' | 'metrics';
+
+interface CheckReportLike {
+  verdict: 'VALID' | 'INVALID' | 'ERROR';
+  valid_signature?: boolean;
+  valid_drand?: boolean;
+  valid_sampling?: boolean;
+  face_ok?: boolean;
+  metrics_ok?: boolean;
+  errors?: string[];
+}
+
+const CHECK_TITLES: Record<CheckName, string> = {
+  signature: 'Signature',
+  drand: 'Drand',
+  sampling: 'Seed replay',
+  face: 'Face',
+  metrics: 'Metrics',
+};
+
+/** The checks a report says failed, in verifier order. The drand check only
+ * counts for a drand-versioned receipt; the shared verifier leaves it true for
+ * other versions, and a stray proof.drand on a legacy receipt is never judged. */
+export function failingChecks(
+  report: CheckReportLike,
+  receipt: { v?: unknown; proof?: unknown },
+): CheckName[] {
+  const out: CheckName[] = [];
+  if (report.valid_signature === false) out.push('signature');
+  if (receiptHasVersionedDrandProof(receipt) && report.valid_drand === false) out.push('drand');
+  if (report.valid_sampling === false) out.push('sampling');
+  if (report.face_ok === false) out.push('face');
+  if (report.metrics_ok === false) out.push('metrics');
+  return out;
+}
+
+/** One sentence explaining an INVALID verdict from the checks that actually
+ * failed, never from how the receipt was produced. */
+export function invalidSummary(
+  report: CheckReportLike,
+  receipt: { v?: unknown; proof?: unknown },
+): string {
+  const failed = failingChecks(report, receipt);
+  const errors = report.errors ?? [];
+  const named = failed.map((c) => CHECK_TITLES[c]).join(', ');
+  if (errors.some((e) => e.includes('revoked'))) {
+    return 'The signing key is revoked by the issuer, so this receipt is not accepted.';
+  }
+  if (failed.length === 0) {
+    return 'The verifier rejected this receipt. See the reasons below.';
+  }
+  if (failed[0] === 'signature') {
+    return failed.length === 1
+      ? 'The signature does not match these bytes. A signed value changed, or another key signed it.'
+      : `Failed: ${named}. The signature does not match these bytes, so no other check can rescue it.`;
+  }
+  const lead =
+    failed[0] === 'drand'
+      ? 'The signature holds, but the drand beacon proof does not verify.'
+      : failed[0] === 'sampling'
+        ? 'The signature holds, but the seed replay does not reproduce the signed draw.'
+        : 'The signature holds, but the recomputed outcome does not match the receipt.';
+  return failed.length === 1 ? lead : `${lead} Failed: ${named}.`;
+}
+
 export function keyTrustExplanation(source: KeySource): string {
   switch (source) {
     case 'well-known':

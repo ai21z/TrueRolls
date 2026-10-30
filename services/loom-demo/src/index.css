@@ -14,7 +14,7 @@ html, body, #root {
 body {
   min-height: 100vh;
   font-family: var(--kd-font-body);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 400;
   line-height: 1.6;
   color: var(--kd-text);
@@ -76,6 +76,28 @@ button {
   font-size: inherit;
   /* no UA border by default. Class borders still win, InkFrame draws the rest */
   border: 0;
+}
+
+/* ── Skip link: hidden until focused ── */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 10px 14px;
+  background: var(--kd-surface-raised);
+  color: var(--kd-text);
+  border: 1px solid var(--kd-border-accent);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus-visible {
+  transform: none;
+}
+
+/* A view whose code is loading or failed: holds the page height. */
+.view-loading {
+  min-height: 100vh;
 }
 
 /* ── Reduced motion: honor the OS preference globally ── */

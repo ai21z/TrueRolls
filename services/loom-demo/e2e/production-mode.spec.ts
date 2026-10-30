@@ -42,11 +42,13 @@ test('unreachable API shows unavailable state and never simulates a receipt', as
   await expect(page.getByText('API unavailable', { exact: true })).toBeVisible();
   await expect(page.getByText('Demo mode, receipts are simulated.')).toHaveCount(0);
 
+  // The outcome is announced once, at the control that started the roll.
   await page.getByRole('button', { name: 'Roll a die', exact: true }).click();
   await expect(
     page
-      .getByLabel('Playground', { exact: true })
+      .getByRole('region', { name: 'TrueRolls' })
       .getByText('The TrueRolls API is unavailable right now. No roll request was sent.'),
   ).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(1);
   await expect(page.locator('[data-trust-label]')).toHaveCount(0);
 });

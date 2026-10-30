@@ -57,7 +57,13 @@ test('mock roll stays Demo, starts uniform, and clear cannot reuse trust state',
   await expect(page.locator('[data-trust-label="Signed"]')).toHaveCount(0);
   await expect(page.locator('[data-trust-label="Verified"]')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Clear all transcripts' }).click();
+  // Clearing asks first; keeping the list leaves it untouched.
+  await page.getByRole('button', { name: 'Clear local history' }).click();
+  const confirm = page.getByRole('group', { name: 'Confirm clearing local history' });
+  await confirm.getByRole('button', { name: 'Keep the list' }).click();
+  await expect(page.locator('[data-trust-label="Demo"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear local history' }).click();
+  await confirm.getByRole('button', { name: 'Clear local history' }).click();
   await expect(page.locator('[data-trust-label]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Roll a die', exact: true }).click();
   await expect(page.locator('[data-trust-label="Demo"]')).toBeVisible();
@@ -71,6 +77,10 @@ test('primary, legacy, tampered, unknown-kid, and manual-key states are explicit
   });
   await page.goto('/#verify');
   const result = page.locator('[data-verification-state]');
+  // Verify opens empty; the bundled sample is loaded explicitly and labelled.
+  await expect(result).toHaveAttribute('data-verification-state', 'not_checked');
+  await page.getByRole('button', { name: 'Current drand sample' }).click();
+  await expect(page.locator('[data-artifact-origin="sample"]')).toBeVisible();
   await expect(result).toHaveAttribute('data-verification-state', 'valid');
   await expect(page.locator('[data-check-id="drand"]')).toBeVisible();
   await expect(page.getByText('For truerolls-drand-1, VALID proves', { exact: false })).toBeVisible();
@@ -90,6 +100,11 @@ test('primary, legacy, tampered, unknown-kid, and manual-key states are explicit
   await page.getByRole('button', { name: 'Tampered control' }).click();
   await expect(result).toHaveAttribute('data-verification-state', 'invalid');
   await expect(page.locator('[data-check-id="drand"]')).toBeVisible();
+  // The invalid-drand control keeps a valid outer signature; its summary must say so.
+  await expect(page.locator('[data-check-id="signature"]')).toHaveAttribute('data-check-state', 'pass');
+  await expect(page.locator('[data-check-id="drand"]')).toHaveAttribute('data-check-state', 'fail');
+  await expect(result).toContainText('The signature holds, but the drand beacon proof does not verify.');
+  await expect(result).not.toContainText('no longer matches its signature');
 
   await page.getByRole('button', { name: 'Current drand sample' }).click();
   const receiptInput = page.getByRole('textbox', { name: 'Receipt JSON' });
@@ -150,9 +165,11 @@ test('Behind a Roll never flashes INVALID before verification completes', async 
   await expect(result).toHaveAttribute('data-verification-state', 'invalid');
 });
 
-test('pages have no serious accessibility findings or horizontal overflow', async ({ page }) => {
-  for (const route of ['/', '/#verify', '/#behind-a-roll']) {
+// One test per page, so each page has its own time budget and a failure names it.
+for (const route of ['/', '/#verify', '/#behind-a-roll']) {
+  test(`${route} has no serious accessibility findings or horizontal overflow`, async ({ page }) => {
     await page.goto(route);
+    if (route === '/#verify') await page.getByRole('button', { name: 'Current drand sample' }).click();
     if (route !== '/') {
       await expect(page.locator('[data-verification-state]')).toHaveAttribute(
         'data-verification-state',
@@ -166,13 +183,18 @@ test('pages have no serious accessibility findings or horizontal overflow', asyn
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
 
-    const scan = await new AxeBuilder({ page }).analyze();
+    // Legacy mode runs axe in this page instead of opening a blank page per scan
+    // to aggregate frame results. These pages have no frames, so the outcome is
+    // the same, and a new page costs seconds when many browsers run in parallel.
+    // A frame would need the standard mode again.
+    expect(await page.locator('iframe, frame').count()).toBe(0);
+    const scan = await new AxeBuilder({ page }).setLegacyMode(true).analyze();
     const serious = scan.violations.filter(
       (violation) => violation.impact === 'critical' || violation.impact === 'serious',
     );
     expect(serious).toEqual([]);
-  }
-});
+  });
+}
 
 test('keyboard focus is visible and reduced motion suppresses ceremony autoplay', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });

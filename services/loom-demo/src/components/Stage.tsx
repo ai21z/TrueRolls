@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo, useId } from 'react';
 import type { Die, TranscriptEntry } from '../types/kd';
 import { KL_CAPS, EV_CAP_SIGMA } from '../constants/caps';
-import { computeGuardedDistributionWasm } from '../api/wasmEngine';
+import type { RollProgress } from '../api/client';
+import type { RollErrorView } from '../hooks/useKarmaState';
+import { computeGuardedDistributionWasm, type KdCoreWasmStatus } from '../api/wasmEngine';
+import { RollErrorNotice, RollProgressLine } from './RollProgressLine';
 import { InkFrame } from '../landing/system/InkFrame';
 import { InkButton } from '../landing/system/InkButton';
 import { makeAura } from '../landing/system/seed';
@@ -68,28 +71,46 @@ function buildBars(probs: number[], rolledFace: number | null): BarData[] {
 interface Props {
   latestRoll: TranscriptEntry | null;
   isRolling: boolean;
-  rollStatus: string | null;
+  /** Phases of a roll started here; null when the roll was started elsewhere. */
+  rollProgress: RollProgress | null;
+  showProgress: boolean;
+  /** What the roll status says while a roll from either button is pending. */
+  phaseAnnouncement: string | null;
+  /** The roll whose face the status announces: the one the latest request returned. */
+  announcedRoll: TranscriptEntry | null;
   onRoll: () => void;
-  rollError: string | null;
+  /** A failure of a roll started here (announced once, at its origin). */
+  rollError: RollErrorView | null;
   /** Dismiss the current roll error (it no longer auto-clears after 3s). */
-  onDismissError?: () => void;
+  onDismissError: () => void;
   die: Die;
   kappa: number;
-  /** The latest die has been broken by a tamper anywhere on the page. */
-  broken: boolean;
-  /** The forged face the tampered receipt carries, shown in place of the roll when broken. */
-  brokenFace: number | null;
+  engine: KdCoreWasmStatus;
+  onRetryEngine: () => void;
 }
 
-export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, onDismissError, die, kappa, broken, brokenFace }: Props) {
+export function Stage({
+  latestRoll,
+  isRolling,
+  rollProgress,
+  showProgress,
+  phaseAnnouncement,
+  announcedRoll,
+  onRoll,
+  rollError,
+  onDismissError,
+  die,
+  kappa,
+  engine,
+  onRetryEngine,
+}: Props) {
   const [animKey, setAnimKey] = useState(0);
   const uid = useId().replace(/[:]/g, '');
   const voidId = `seed-void-${uid}`;
   const emberId = `seed-ember-${uid}`;
 
   const latestLocalId = latestRoll?.localId;
-  // The face shown in the socket: the roll, or the forged value when broken.
-  const faceShown = broken && brokenFace != null ? brokenFace : latestRoll?.face;
+  const faceShown = latestRoll?.face;
 
   useEffect(() => {
     if (latestLocalId != null) setAnimKey((k) => k + 1);
@@ -100,21 +121,21 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, on
   // Bars always live-track the current slider for visual feedback.
   // The preview shows the GUARDED distribution from kd-core (wasm), the
   // same caps-applied probabilities the server samples from, not the raw
-  // softmax, which would overstate the tilt once guards engage.
+  // softmax, which would overstate the tilt once guards engage. It recomputes
+  // when the engine becomes ready, so bars appear without touching a control.
   const probs = useMemo(() => {
+    if (engine !== 'ready') return [];
     try {
       return computeGuardedDistributionWasm(die, kappa).probs;
     } catch (err) {
-      // Engine not initialized (init failure), render no bars rather than
-      // falling back to duplicated TS math.
+      // kd-core rejected the input: render no bars rather than falling back to
+      // duplicated TS math.
       console.error('[kd] distribution preview unavailable:', err);
       return [];
     }
-  }, [die, kappa]);
+  }, [die, kappa, engine]);
 
   // Only highlight the rolled face when the current slider matches the roll's params.
-  // When broken, highlight the forged face the tampered receipt claims, so the bar
-  // and the socket agree.
   const rollMatchesSlider = latestRoll
     && latestRoll.die === die
     && Math.abs(latestRoll.kappa - kappa) < 0.02;
@@ -132,16 +153,10 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, on
     <section className={css.stage}>
       <div className={css.faceWrap}>
         <svg
-          className={`${css.seed} ${isRolling ? css.seedRolling : ''} ${broken ? css.seedBroken : ''}`}
+          className={`${css.seed} ${isRolling ? css.seedRolling : ''}`}
           viewBox="0 0 260 248"
           role="img"
-          aria-label={
-            broken && latestRoll
-              ? `Tampered: ${latestRoll.die} shows ${faceShown}. The receipt no longer matches its signature.`
-              : latestRoll
-                ? `Result ${latestRoll.face} on ${latestRoll.die}`
-                : 'No roll yet'
-          }
+          aria-label={latestRoll ? `Result ${latestRoll.face} on ${latestRoll.die}` : 'No roll yet'}
           xmlns="http://www.w3.org/2000/svg"
         >
           <defs>
@@ -151,13 +166,13 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, on
               <stop offset="100%" stopColor="#100c08" />
             </radialGradient>
             <radialGradient id={emberId} cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor={broken ? '#d65a5f' : '#e6a064'} stopOpacity={latestRoll ? 0.85 : 0.16} />
-              <stop offset="48%" stopColor={broken ? '#b5474d' : '#b87242'} stopOpacity={latestRoll ? 0.28 : 0.05} />
-              <stop offset="100%" stopColor={broken ? '#b5474d' : '#b87242'} stopOpacity="0" />
+              <stop offset="0%" stopColor="#e6a064" stopOpacity={latestRoll ? 0.85 : 0.16} />
+              <stop offset="48%" stopColor="#b87242" stopOpacity={latestRoll ? 0.28 : 0.05} />
+              <stop offset="100%" stopColor="#b87242" stopOpacity="0" />
             </radialGradient>
           </defs>
 
-          <text className={css.seedEyebrow} x="18" y="22">{broken ? 'Tampered' : 'Result'}</text>
+          <text className={css.seedEyebrow} x="18" y="22">Result</text>
 
           {/* concentric engraved aura */}
           <g aria-hidden="true">
@@ -171,18 +186,10 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, on
           <circle className={css.seedRim} cx={SK.cx} cy={SK.cy} r={SK.r} />
           <circle cx={SK.cx} cy={SK.cy} r={SK.r - 9} fill={`url(#${emberId})`} />
 
-          {/* broken: a blood-red scar cracks the socket */}
-          {broken && (
-            <path
-              className={css.seedScar}
-              d={`M${SK.cx - 30},${SK.cy - 24} L${SK.cx - 6},${SK.cy + 4} L${SK.cx - 18},${SK.cy + 12} L${SK.cx + 14},${SK.cy + 34}`}
-            />
-          )}
-
           {latestRoll ? (
             <text
               key={animKey}
-              className={`${css.seedFace} ${css.seedFaceNew} ${broken ? css.seedFaceBroken : ''}`}
+              className={`${css.seedFace} ${css.seedFaceNew}`}
               x={SK.cx}
               y={SK.cy}
               textAnchor="middle"
@@ -204,15 +211,31 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, on
         </svg>
       </div>
 
-      {/* Visually-hidden live status: announces each roll to screen readers. */}
-      {latestRoll && (
-        <div className={css.srOnly} role="status" aria-live="polite">
-          {`Rolled ${latestRoll.face} on ${latestRoll.die}. Alpha ${formatSmall(latestRoll.alpha, 4)}, ` +
-            `KL ${formatSmall(latestRoll.kl, 5)}, expected value ${latestRoll.ev.toFixed(3)}.`}
-        </div>
-      )}
+      {/* Visually-hidden roll status for rolls from either button. Mounted before the
+          first roll, so screen readers announce that roll's face too. */}
+      <div className={css.srOnly} role="status" aria-live="polite" data-roll-status>
+        {phaseAnnouncement ??
+          (announcedRoll
+            ? `Rolled ${announcedRoll.face} on ${announcedRoll.die}. Alpha ${formatSmall(announcedRoll.alpha, 4)}, ` +
+              `KL ${formatSmall(announcedRoll.kl, 5)}, expected value ${announcedRoll.ev.toFixed(3)}.`
+            : '')}
+      </div>
 
       {/* Distribution preview bars */}
+      {engine !== 'ready' && (
+        <p className={css.engineNote} role="status">
+          {engine === 'failed' ? (
+            <>
+              The distribution engine failed to load, so no preview is shown.{' '}
+              <button type="button" className={css.engineRetry} onClick={onRetryEngine}>
+                Retry
+              </button>
+            </>
+          ) : (
+            'Loading the distribution engine…'
+          )}
+        </p>
+      )}
       <div className={css.distBars} aria-label="Probability distribution preview">
         {bars.map((bar, i) => (
           <div
@@ -266,24 +289,16 @@ export function Stage({ latestRoll, isRolling, rollStatus, onRoll, rollError, on
         onClick={onRoll}
         disabled={isRolling}
       >
-        {isRolling ? (rollStatus ?? 'Rolling…') : 'Roll'}
+        {isRolling ? 'Rolling…' : 'Roll'}
       </InkButton>
 
-      {rollError && (
-        <div className={css.rollError} role="alert" aria-live="assertive">
-          <span>{rollError}</span>
-          {onDismissError && (
-            <button
-              type="button"
-              className={css.rollErrorDismiss}
-              onClick={onDismissError}
-              aria-label="Dismiss error"
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
+      <div className={css.rollSlot}>
+        {showProgress ? (
+          <RollProgressLine progress={rollProgress} />
+        ) : rollError ? (
+          <RollErrorNotice error={rollError} onDismiss={onDismissError} />
+        ) : null}
+      </div>
     </section>
   );
 }

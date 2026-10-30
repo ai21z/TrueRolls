@@ -1,29 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow } from '../types/kd';
+import type { Die, EditedCopy, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow } from '../types/kd';
 import { KL_CAPS, FACES } from '../constants/caps';
-import { getApiBaseForCli, postVerifyReceipt } from '../api/client';
+import { getApiBaseForCli } from '../api/client';
 import { DEMO_TEST_KEY, DEMO_TEST_KID } from '../api/keys';
 import {
   buildReceiptBody,
   hasDrandProof as receiptHasDrandProof,
   offlineVerifyCommand,
   receiptVerifierAccepts,
-  tamperedView,
 } from '../api/receipt';
-import { isMockArtifact, statusPillForArtifact } from '../api/trustPresentation';
+import { downloadJson, receiptFilename } from '../api/download';
+import { stashReceiptForVerify } from '../api/receiptHandoff';
+import { invalidSummary, isMockArtifact, statusPillForArtifact } from '../api/trustPresentation';
 import css from './TranscriptReceipt.module.css';
 
 interface Props {
   entry: TranscriptEntry;
   onClose: () => void;
-  onBreak?: (localId: number, body: Record<string, unknown>, result: ReceiptVerifyResponse) => void;
-  onUnbreak?: (localId: number) => void;
+  editedCopy: EditedCopy | null;
+  onVerifyEditedCopy?: (localId: number, body: Record<string, unknown>) => void;
+  onDiscardEditedCopy?: () => void;
   mock: boolean;
 }
 
 const PUBKEY_PLACEHOLDER = '<public-key-from-/.well-known/truerolls-keys.json>';
-
-type PillTone = 'ok' | 'fail' | 'pending' | 'neutral';
 
 /** Check rows derived 1:1 from a ReceiptVerifyResponse, never fabricated. */
 function receiptCheckRows(
@@ -43,63 +43,53 @@ function receiptCheckRows(
   return rows;
 }
 
-function tamperSummary(
-  res: ReceiptVerifyResponse,
-  receipt: { v?: unknown; proof?: unknown },
-): string {
-  const hasDrandProof = receiptHasDrandProof(receipt);
-  const allOk = receiptVerifierAccepts(receipt, res);
-  if (allOk) {
-    return hasDrandProof
-      ? 'VALID: signed, the drand seed provenance verifies, and the outcome replays from that seed. It does not yet prove an unfavourable completed roll could not have been withheld. Strict witnessed fairness is the v2 protocol.'
-      : 'VALID proves the signed receipt replays deterministically. This legacy receipt has no drand proof.';
-  }
-  if (!res.valid_signature) {
-    return 'Ed25519 signature verification failed. The receipt was modified after signing.';
-  }
-  return 'Deterministic replay mismatch. The recomputed values do not match the receipt fields.';
-}
-
-function Pip({ ok }: { ok: boolean }) {
+function CheckList({ rows }: { rows: VerifyCheckRow[] }) {
   return (
-    <span className={`${css.pip} ${ok ? css.pipOk : css.pipFail}`} aria-hidden="true">
-      {ok ? '✓' : '✕'}
-    </span>
+    <div className={css.checkList}>
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className={`${css.checkRow} ${row.ok ? css.checkOk : css.checkFail}`}
+          data-check-id={row.id}
+          data-check-state={row.ok ? 'pass' : 'fail'}
+        >
+          <span className={`${css.pip} ${row.ok ? css.pipOk : css.pipFail}`} aria-hidden="true" />
+          <span className={css.checkLabel}>{row.label}</span>
+          <span className={css.checkWord}>{row.ok ? 'pass' : 'fail'}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
-export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: Props) {
+export function TranscriptReceipt({
+  entry,
+  onClose,
+  editedCopy,
+  onVerifyEditedCopy,
+  onDiscardEditedCopy,
+  mock,
+}: Props) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const credentialRef = useRef<HTMLDivElement>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-
-  // A broken die reads broken here too: forged values, failed checks, and a
-  // copy/verify that uses the tampered body, never the pristine receipt. The break
-  // lives on the entry, so it persists across re-rolls and reloads.
-  const tampered = entry.tampered ?? null;
-  const broken = !!tampered;
-  const view = tampered
-    ? tamperedView(tampered.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
-    : { face: entry.face, kappa: entry.kappa, die: entry.die };
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'fail' } | null>(null);
 
   // Tamper demo is only shown for signed receipts from the live API. Mock
   // receipts have no signature and nothing real to verify against.
   const isReceiptVersion = entry.v === 'truerolls-1' || entry.v === 'truerolls-drand-1';
   const mockArtifact = isMockArtifact(entry);
   const isSignedLive = isReceiptVersion && !!entry.sig && !mockArtifact && !mock;
-  const entryReceiptBody = buildReceiptBody(entry);
-  const activeReceiptBody = broken && tampered ? tampered.body : entryReceiptBody;
-  const hasDrandProof = receiptHasDrandProof(activeReceiptBody);
+  const originalBody = buildReceiptBody(entry);
+  const hasDrandProof = receiptHasDrandProof(originalBody);
+  const ownCopy = editedCopy && editedCopy.localId === entry.localId ? editedCopy : null;
 
-  // ── Tamper editor state. Seeded from the tampered body when already broken,
-  // so re-verifying continues from the current broken artifact. ──
-  const [tamperJson, setTamperJson] = useState<string>(() =>
-    JSON.stringify(tampered?.body ?? buildReceiptBody(entry), null, 2),
+  // The edited copy's editor text. Seeded from an existing copy of this receipt,
+  // else from the original body. The original itself is never edited.
+  const [copyJson, setCopyJson] = useState<string>(() =>
+    JSON.stringify(ownCopy?.body ?? originalBody, null, 2),
   );
   const [editorOpen, setEditorOpen] = useState(false);
-  const [tamperResult, setTamperResult] = useState<ReceiptVerifyResponse | null>(null);
-  const [tamperError, setTamperError] = useState<string | null>(null);
-  const [tamperBusy, setTamperBusy] = useState(false);
+  const [copyInputError, setCopyInputError] = useState<string | null>(null);
 
   const sigKid = entry.sig?.kid ?? null;
 
@@ -141,58 +131,77 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
     if (e.target === overlayRef.current) onClose();
   };
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard?.writeText(text).then(() => {
-      setCopiedField(label);
-      setTimeout(() => setCopiedField(null), 1500);
-    }).catch(() => {});
+  const say = (text: string, tone: 'ok' | 'fail' = 'ok') => {
+    setNotice({ text, tone });
+    if (tone === 'ok') setTimeout(() => setNotice((n) => (n?.text === text ? null : n)), 2500);
   };
 
-  const mutateTamperJson = (mutator: (obj: Record<string, unknown>) => void) => {
+  const copyToClipboard = (text: string, what: string) => {
+    if (!navigator.clipboard) {
+      say(`Copy is blocked in this browser. Download the file instead.`, 'fail');
+      return;
+    }
+    navigator.clipboard
+      .writeText(text)
+      .then(() => say(`${what} copied.`))
+      .catch(() => say(`Copy failed. Download the file instead.`, 'fail'));
+  };
+
+  const download = (text: string, filename: string, what: string) => {
+    if (downloadJson(filename, text)) say(`${what} saved as ${filename}.`);
+    else say('The browser blocked the download. Copy the receipt instead.', 'fail');
+  };
+
+  const sendToVerify = (text: string, kind: 'original' | 'edited-copy') => {
+    if (!stashReceiptForVerify(text, { rollId: entry.id, kind })) {
+      say('This browser blocked the hand-off. Copy or download the receipt, then paste it on the Verify page.', 'fail');
+      return;
+    }
+    onClose();
+    window.location.hash = '#verify';
+  };
+
+  const parseCopy = (): Record<string, unknown> | null => {
     try {
-      const obj = JSON.parse(tamperJson) as Record<string, unknown>;
-      mutator(obj);
-      setTamperJson(JSON.stringify(obj, null, 2));
-      setTamperError(null);
+      const value = JSON.parse(copyJson) as unknown;
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error();
+      setCopyInputError(null);
+      return value as Record<string, unknown>;
     } catch {
-      setTamperError('Tampered JSON is not valid JSON. Fix it before applying a mutation.');
+      setCopyInputError('The edited copy is not a JSON object. Fix it before changing or checking it.');
+      return null;
     }
   };
 
+  const mutateCopy = (mutator: (obj: Record<string, unknown>) => void) => {
+    const obj = parseCopy();
+    if (!obj) return;
+    mutator(obj);
+    setCopyJson(JSON.stringify(obj, null, 2));
+  };
+
   const flipFace = () =>
-    mutateTamperJson((obj) => {
+    mutateCopy((obj) => {
       const faces = FACES[entry.die as Die] ?? 20;
       const face = typeof obj.face === 'number' ? obj.face : entry.face;
       obj.face = (face % faces) + 1;
     });
 
   const bumpKappa = () =>
-    mutateTamperJson((obj) => {
+    mutateCopy((obj) => {
       const kappa = typeof obj.kappa === 'number' ? obj.kappa : entry.kappa;
       obj.kappa = kappa > 0.9 ? kappa - 0.1 : Math.min(1, kappa + 0.1);
     });
 
-  const reverifyTampered = async () => {
-    setTamperBusy(true);
-    setTamperResult(null);
-    setTamperError(null);
-    try {
-      const parsed = JSON.parse(tamperJson) as Record<string, unknown>;
-      const res = await postVerifyReceipt(parsed);
-      setTamperResult(res);
-      // Lift the result into shared state so the hero die, the seed, this row and
-      // modal all agree. A failing edit breaks the die everywhere. Reverting it back
-      // to a passing receipt restores the valid die. The stored receipt is untouched.
-      const allOk = receiptVerifierAccepts(parsed, res);
-      if (allOk) onUnbreak?.(entry.localId);
-      else onBreak?.(entry.localId, parsed, res);
-    } catch (err) {
-      setTamperError(
-        err instanceof Error ? err.message : 'Receipt verification request failed',
-      );
-    } finally {
-      setTamperBusy(false);
-    }
+  const checkCopy = () => {
+    const obj = parseCopy();
+    if (obj) onVerifyEditedCopy?.(entry.localId, obj);
+  };
+
+  const discardCopy = () => {
+    onDiscardEditedCopy?.();
+    setCopyJson(JSON.stringify(originalBody, null, 2));
+    setCopyInputError(null);
   };
 
   const ts = entry.created_at
@@ -206,28 +215,18 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
     : '-';
 
   const klCap = KL_CAPS[entry.die as Die] ?? KL_CAPS.d20;
-  // When broken, the verification block, the pill and the verdict all read the
-  // shared tamper result, never the stored (valid) checks. Old sessions may have
-  // persisted the pre-KD-029 object shape. Only render response-derived rows.
+  // Old sessions may have persisted the pre-KD-029 object shape. Only render
+  // response-derived rows, and never a drand row for a receipt without a drand proof.
   const storedChecks = Array.isArray(entry.verifyChecks)
     ? entry.verifyChecks.filter((row) => hasDrandProof || row.id !== 'drand')
     : null;
-  const checks = broken && tampered ? receiptCheckRows(tampered.result, tampered.body) : storedChecks;
-  const pill = broken
-    ? { label: 'Tampered', tone: 'fail' as PillTone }
-    : statusPillForArtifact(entry.verifyStatus, mockArtifact);
-  const verifyDetailText = broken && tampered
-    ? tamperSummary(tampered.result, tampered.body)
-    : entry.verifyDetail;
-  const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
+  const pill = statusPillForArtifact(entry.verifyStatus, mockArtifact);
+  const kappaText = `${entry.kappa >= 0 ? '+' : ''}${entry.kappa.toFixed(2)}`;
   const signedKid = entry.sig?.kid ?? null;
 
-  // Shareable receipt JSON, the tampered body when broken (so copy/verify genuinely
-  // fail), else the canonical ReceiptV2 body, else the legacy subset.
-  const receiptJson = broken && tampered
-    ? JSON.stringify(tampered.body, null, 2)
-    : isReceiptVersion
-    ? JSON.stringify(buildReceiptBody(entry), null, 2)
+  // The original receipt JSON: the canonical ReceiptV2 body, else the legacy subset.
+  const receiptJson = isReceiptVersion
+    ? JSON.stringify(originalBody, null, 2)
     : JSON.stringify({
         id: entry.id,
         die: entry.die,
@@ -248,7 +247,16 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
   const cliVerifyOptions = isSignedLive
     ? { kind: 'server' as const, server: getApiBaseForCli() }
     : { kind: 'public-key' as const, publicKey: keyForSnippet };
-  const tamperRows = tamperResult ? receiptCheckRows(tamperResult, activeReceiptBody) : null;
+
+  // The copy's result is shown only while it still describes the text in the editor.
+  const copyResultBound =
+    ownCopy?.status === 'checked' && ownCopy.result && JSON.stringify(ownCopy.body, null, 2) === copyJson
+      ? ownCopy.result
+      : null;
+  const copyEditedSinceCheck =
+    ownCopy != null && ownCopy.status !== 'verifying' && JSON.stringify(ownCopy.body, null, 2) !== copyJson;
+  const copyAccepted = copyResultBound ? receiptVerifierAccepts(ownCopy!.body, copyResultBound) : null;
+  const copyIsUnchanged = copyJson === JSON.stringify(originalBody, null, 2);
 
   return (
     <div
@@ -263,37 +271,32 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
         <header className={css.header}>
           <div className={css.brand}>
             <span className={css.brandMark}>truerolls</span>
-            <span className={css.brandSub}>Receipt · {entry.v}</span>
+            <span className={css.brandSub}>Original receipt · {entry.v}</span>
           </div>
           <div className={css.headerRight}>
-            <span className={`${css.pillStatus} ${css[`tone_${pill.tone}`]}`}>{pill.label}</span>
+            <span className={`${css.pillStatus} ${css[`tone_${pill.tone}`]}`} data-receipt-status={pill.label}>
+              {pill.label}
+            </span>
             <button className={css.closeX} onClick={onClose} aria-label="Close receipt">✕</button>
           </div>
         </header>
 
         <div className={css.result}>
-          <span className={css.bigFace}>{view.face}</span>
+          <span className={css.bigFace}>{entry.face}</span>
           <div className={css.resultMeta}>
             <span className={css.dieKappa}>
-              {view.die} · κ {kappaText}
+              {entry.die} · κ {kappaText}
             </span>
-            <span className={css.subtle}>{broken ? 'tampered value' : 'face value'}</span>
+            <span className={css.subtle}>face value</span>
           </div>
         </div>
 
-        {/* Verifier checks, rendered 1:1 from the verifier response. */}
-        {checks && checks.length > 0 && (
+        {/* Verifier checks of the original, rendered 1:1 from the API response. */}
+        {storedChecks && storedChecks.length > 0 && (
           <section className={css.section}>
-            <div className={css.sectionLabel}>Verification</div>
-            <div className={css.checkList}>
-              {checks.map((row) => (
-                <div key={row.id} className={css.checkRow}>
-                  <Pip ok={row.ok} />
-                  <span className={css.checkLabel}>{row.label}</span>
-                </div>
-              ))}
-            </div>
-            {verifyDetailText && <div className={css.verifyDetail}>{verifyDetailText}</div>}
+            <div className={css.sectionLabel}>Checked by the TrueRolls API</div>
+            <CheckList rows={storedChecks} />
+            {entry.verifyDetail && <div className={css.verifyDetail}>{entry.verifyDetail}</div>}
           </section>
         )}
 
@@ -353,14 +356,25 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
           )}
         </dl>
 
-        {!checks && verifyDetailText && (
-          <div className={css.verifyDetail}>{verifyDetailText}</div>
+        {!storedChecks && entry.verifyDetail && (
+          <div className={css.verifyDetail}>{entry.verifyDetail}</div>
         )}
 
-        {/* Actions */}
+        {/* Actions on the original receipt */}
         <div className={css.actions}>
-          <button className={css.actionBtn} onClick={() => copyToClipboard(receiptJson, 'json')}>
-            {copiedField === 'json' ? 'Copied' : 'Copy receipt'}
+          {isReceiptVersion && (
+            <button className={`${css.actionBtn} ${css.actionPrimary}`} onClick={() => sendToVerify(receiptJson, 'original')}>
+              Verify this receipt
+            </button>
+          )}
+          <button
+            className={css.actionBtn}
+            onClick={() => download(receiptJson, receiptFilename(entry.id), 'Receipt')}
+          >
+            Download .json
+          </button>
+          <button className={css.actionBtn} onClick={() => copyToClipboard(receiptJson, 'Receipt')}>
+            Copy receipt
           </button>
           <button
             className={css.actionBtn}
@@ -368,30 +382,31 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
               const cmd = isReceiptVersion
                 ? offlineVerifyCommand(receiptJson, cliVerifyOptions)
                 : 'kd verify --input receipt.json';
-              copyToClipboard(cmd, 'cli');
+              copyToClipboard(cmd, 'Verify command');
             }}
           >
-            {copiedField === 'cli' ? 'Copied' : 'Copy verify command'}
-          </button>
-          <button
-            className={css.actionBtn}
-            onClick={() => copyToClipboard(`${location.origin}/#verify`, 'link')}
-          >
-            {copiedField === 'link' ? 'Copied' : 'Copy link'}
+            Copy verify command
           </button>
         </div>
+        <p
+          className={`${css.notice} ${notice?.tone === 'fail' ? css.noticeFail : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          {notice?.text ?? ''}
+        </p>
 
-        {/* ── Tamper demo, signed live receipts only ── */}
+        {/* ── Edited copy (demonstration), signed live receipts only ── */}
         {isSignedLive && (
-          <section className={css.tamperSection}>
-            <div className={css.tamperTitle}>Tamper demo</div>
+          <section className={css.tamperSection} aria-label="Edited copy demonstration">
+            <div className={css.tamperTitle}>Edited copy (demonstration)</div>
             <p className={css.tamperNote}>
-              Edit a copy of this signed receipt and re-verify it against the server.
-              Ed25519 signature verification catches changes to signed values. Deterministic
-              replay recomputes draw, face and metrics. For drand receipts, VALID also verifies
+              Change a signed value in a separate copy and check that copy with the API. The
+              signature is left as issued, so the edit should fail. The original receipt above,
+              its signature and its status do not change. For drand receipts, VALID also verifies
               the public drand seed provenance and the replay from that seed. (It does not yet
               prove an unfavourable completed roll could not have been withheld. That is the v2
-              protocol.) The original roll's status is never changed by this demo.
+              protocol.)
             </p>
 
             <div className={css.tamperBtnRow}>
@@ -409,60 +424,90 @@ export function TranscriptReceipt({ entry, onClose, onBreak, onUnbreak, mock }: 
             {editorOpen && (
               <textarea
                 className={css.tamperEditor}
-                value={tamperJson}
-                onChange={(e) => setTamperJson(e.target.value)}
+                value={copyJson}
+                onChange={(e) => setCopyJson(e.target.value)}
                 spellCheck={false}
-                aria-label="Tampered receipt JSON"
+                aria-label="Edited copy JSON"
                 rows={10}
               />
             )}
 
             <button
               className={css.tamperVerifyBtn}
-              onClick={reverifyTampered}
-              disabled={tamperBusy}
+              onClick={checkCopy}
+              disabled={ownCopy?.status === 'verifying'}
             >
-              {tamperBusy ? 'Verifying…' : 'Re-verify tampered receipt'}
+              {ownCopy?.status === 'verifying' ? 'Checking the edited copy…' : 'Check the edited copy'}
             </button>
+            {copyIsUnchanged && !ownCopy && (
+              <p className={css.tamperHint}>The copy is still identical to the original. Flip a value first.</p>
+            )}
 
-            {tamperError && <div className={css.tamperErrorBox}>{tamperError}</div>}
+            {copyInputError && <div className={css.tamperErrorBox}>{copyInputError}</div>}
+            {ownCopy?.status === 'error' && !copyEditedSinceCheck && (
+              <div className={css.tamperErrorBox}>{ownCopy.error}</div>
+            )}
+            {copyEditedSinceCheck && (
+              <p className={css.tamperHint}>The copy changed since its last check. Check it again.</p>
+            )}
 
-            {tamperResult && tamperRows && (
-              <div className={css.tamperResult}>
-                <div className={css.checkList}>
-                  {tamperRows.map((row) => (
-                    <div key={row.id} className={css.checkRow}>
-                      <Pip ok={row.ok} />
-                      <span className={css.checkLabel}>{row.label}</span>
-                    </div>
-                  ))}
+            {copyResultBound && (
+              <div className={css.tamperResult} data-edited-copy-verdict={copyAccepted ? 'valid' : 'invalid'}>
+                <div className={css.copyVerdict}>
+                  Edited copy: {copyAccepted ? 'VALID' : 'INVALID'}
                 </div>
-                {(tamperResult.errors ?? []).length > 0 && (
+                <CheckList rows={receiptCheckRows(copyResultBound, ownCopy!.body)} />
+                {(copyResultBound.errors ?? []).length > 0 && (
                   <ul className={css.tamperErrors}>
-                    {(tamperResult.errors ?? []).map((err, i) => (
+                    {(copyResultBound.errors ?? []).map((err, i) => (
                       <li key={i}>{err}</li>
                     ))}
                   </ul>
                 )}
-                <div className={css.tamperSummary}>{tamperSummary(tamperResult, activeReceiptBody)}</div>
+                <div className={css.tamperSummary}>
+                  {copyAccepted
+                    ? 'This copy still verifies, so nothing signed was changed.'
+                    : `${invalidSummary({ verdict: 'INVALID', ...copyResultBound }, ownCopy!.body)} This says nothing negative about the original receipt.`}
+                </div>
               </div>
             )}
 
+            {/* An unchanged copy is the original, so none of these hand it on as an
+                edited copy. The original's own copy, download and command are above. */}
             <div className={css.tamperBtnRow}>
               <button
                 className={css.actionBtn}
-                onClick={() => copyToClipboard(tamperJson, 'tamper-json')}
+                onClick={() => copyToClipboard(copyJson, 'Edited copy')}
+                disabled={copyIsUnchanged}
               >
-                {copiedField === 'tamper-json' ? 'Copied' : 'Copy tampered JSON'}
+                Copy edited copy
               </button>
               <button
                 className={css.actionBtn}
-                onClick={() =>
-                  copyToClipboard(offlineVerifyCommand(tamperJson, cliVerifyOptions), 'tamper-cli')
-                }
+                onClick={() => download(copyJson, receiptFilename(entry.id, '-edited-copy'), 'Edited copy')}
+                disabled={copyIsUnchanged}
               >
-                {copiedField === 'tamper-cli' ? 'Copied' : 'Copy offline command'}
+                Download edited copy
               </button>
+              <button
+                className={css.actionBtn}
+                onClick={() => sendToVerify(copyJson, 'edited-copy')}
+                disabled={copyIsUnchanged}
+              >
+                Verify edited copy in the browser
+              </button>
+              <button
+                className={css.actionBtn}
+                onClick={() => copyToClipboard(offlineVerifyCommand(copyJson, cliVerifyOptions), 'Command for the edited copy')}
+                disabled={copyIsUnchanged}
+              >
+                Copy command for the copy
+              </button>
+              {(ownCopy || !copyIsUnchanged) && (
+                <button className={css.actionBtn} onClick={discardCopy}>
+                  Discard edited copy
+                </button>
+              )}
             </div>
           </section>
         )}

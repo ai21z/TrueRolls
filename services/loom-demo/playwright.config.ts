@@ -10,7 +10,11 @@ export default defineConfig({
   testDir: './e2e',
   outputDir: '../../outputs/playwright-results',
   fullyParallel: false,
-  workers: process.env.CI ? 1 : undefined,
+  // Locally a quarter of the cores, not Playwright's default half: on a 24-core
+  // Windows host a new page took about 3 s alone and up to 30 s while twelve
+  // browsers started together, which timed tests out, and six workers finish the
+  // suite in the same wall time.
+  workers: process.env.CI ? 1 : '25%',
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI
@@ -62,7 +66,7 @@ export default defineConfig({
     },
     {
       name: 'production-mode-desktop',
-      testMatch: 'production-mode.spec.ts',
+      testMatch: /(production-mode|verdict-binding|beta-flows)\.spec\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },

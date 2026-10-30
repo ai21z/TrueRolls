@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import type { Die, ReceiptVerifyResponse, TranscriptEntry } from '../types/kd';
+import type { Die, EditedCopy, TranscriptEntry } from '../types/kd';
 import { KL_CAPS } from '../constants/caps';
-import { tamperedView } from '../api/receipt';
 import { isMockArtifact, transcriptRowVerdict } from '../api/trustPresentation';
 import { TranscriptReceipt } from './TranscriptReceipt';
 import css from './TranscriptRow.module.css';
@@ -9,8 +8,9 @@ import css from './TranscriptRow.module.css';
 interface Props {
   entry: TranscriptEntry;
   onVerify: (localId: number) => void;
-  onBreak?: (localId: number, body: Record<string, unknown>, result: ReceiptVerifyResponse) => void;
-  onUnbreak?: (localId: number) => void;
+  editedCopy: EditedCopy | null;
+  onVerifyEditedCopy?: (localId: number, body: Record<string, unknown>) => void;
+  onDiscardEditedCopy?: () => void;
   mock: boolean;
 }
 
@@ -52,21 +52,24 @@ function ReceiptIcon() {
   );
 }
 
-export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Props) {
+export function TranscriptRow({
+  entry,
+  onVerify,
+  editedCopy,
+  onVerifyEditedCopy,
+  onDiscardEditedCopy,
+  mock,
+}: Props) {
   const [showReceipt, setShowReceipt] = useState(false);
 
-  // A tampered die overrides the stored status everywhere: the break lives on the
-  // entry, so this row reads broken and shows the forged value until the edit is
-  // reverted. A tampered receipt stays broken, no path back to "Verified".
-  const tampered = entry.tampered ?? null;
-  const broken = !!tampered;
-  const view = tampered
-    ? tamperedView(tampered.body, { face: entry.face, kappa: entry.kappa, die: entry.die })
-    : { face: entry.face, kappa: entry.kappa, die: entry.die };
+  // The row always describes the original receipt. An edited demonstration copy
+  // is a separate artifact and never changes this row's value or status.
+  const view = { face: entry.face, kappa: entry.kappa, die: entry.die };
+  const hasEditedCopy = editedCopy?.localId === entry.localId;
 
   const mockArtifact = isMockArtifact(entry);
-  const isVerified = !broken && !mockArtifact && entry.verifyStatus === 'verified_server';
-  const isFailed = broken || entry.verifyStatus === 'mismatch' || entry.verifyStatus === 'error';
+  const isVerified = !mockArtifact && entry.verifyStatus === 'verified_server';
+  const isFailed = entry.verifyStatus === 'mismatch' || entry.verifyStatus === 'error';
 
   const rowClass = [
     css.row,
@@ -75,12 +78,8 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
   ].join(' ');
 
   const klCap = KL_CAPS[entry.die as Die] ?? KL_CAPS.d20;
-  const verdict = broken
-    ? { text: '✕ Tampered', cls: css.verdictMismatch }
-    : (() => {
-        const v = transcriptRowVerdict(entry.verifyStatus, mockArtifact);
-        return { text: v.text, cls: verdictClass(v.kind) };
-      })();
+  const rowVerdict = transcriptRowVerdict(entry.verifyStatus, mockArtifact);
+  const verdict = { text: rowVerdict.text, cls: verdictClass(rowVerdict.kind) };
   const kappaText = `${view.kappa >= 0 ? '+' : ''}${view.kappa.toFixed(2)}`;
 
   return (
@@ -97,7 +96,8 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
           {verdict.text && (
             <span
               className={`${css.verdict} ${verdict.cls}`}
-              title={broken ? 'Tampered: the receipt no longer matches its signature' : entry.verifyDetail}
+              title={entry.verifyDetail}
+              data-row-status={rowVerdict.kind}
             >
               {verdict.text}
             </span>
@@ -120,12 +120,12 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
             View receipt
           </button>
 
-          {!broken &&
-            (entry.verifyStatus === 'not_checked' || entry.verifyStatus === 'error') && (
-              <button className={css.verifyBtn} onClick={() => onVerify(entry.localId)}>
-                {entry.verifyStatus === 'error' ? 'Retry' : 'Verify'}
-              </button>
-            )}
+          {(entry.verifyStatus === 'not_checked' || entry.verifyStatus === 'error') && (
+            <button className={css.verifyBtn} onClick={() => onVerify(entry.localId)}>
+              {entry.verifyStatus === 'error' ? 'Check again' : 'Check with API'}
+            </button>
+          )}
+          {hasEditedCopy && <span className={css.copyTag}>edited copy open</span>}
         </div>
       </div>
 
@@ -133,8 +133,9 @@ export function TranscriptRow({ entry, onVerify, onBreak, onUnbreak, mock }: Pro
         <TranscriptReceipt
           entry={entry}
           onClose={() => setShowReceipt(false)}
-          onBreak={onBreak}
-          onUnbreak={onUnbreak}
+          editedCopy={editedCopy}
+          onVerifyEditedCopy={onVerifyEditedCopy}
+          onDiscardEditedCopy={onDiscardEditedCopy}
           mock={mock}
         />
       )}

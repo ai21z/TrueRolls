@@ -198,20 +198,28 @@ export function RollSigil({ receiptText, report, editable, onTamper }: RollSigil
     return { ...e, ...g, fork };
   });
 
+  // Version-specific: five bonds for a drand receipt, four for legacy.
   const nExpected = bondList.length;
   const nRun = bondList.filter((b) => cs[b] !== undefined).length;
   const nFail = bondList.filter((b) => cs[b] === false).length;
-  const allPass = nRun === nExpected && nFail === 0;
+  const nHold = bondList.filter((b) => cs[b] === true).length;
+  const nNotRun = nExpected - nRun;
 
-  const state: 'intact' | 'broken' | 'unsealed' = nRun === 0 ? 'unsealed' : allPass ? 'intact' : 'broken';
-  const word = state === 'unsealed' ? 'Unsealed' : state === 'intact' ? 'Intact' : 'Broken';
+  // A bond that was never checked is neither held nor severed, so a partial run
+  // with no failure reads "Incomplete", never "Broken".
+  const state: 'intact' | 'broken' | 'unsealed' =
+    nFail > 0 ? 'broken' : nRun === nExpected && nRun > 0 ? 'intact' : 'unsealed';
+  const word =
+    state === 'broken' ? 'Broken' : state === 'intact' ? 'Intact' : nRun === 0 ? 'Unsealed' : 'Incomplete';
   const rolled = parsed.face != null && parsed.die ? `${parsed.die} rolled ${parsed.face}. ` : '';
   const sub =
-    state === 'unsealed'
+    nRun === 0
       ? 'Verify a receipt to read its seal.'
       : state === 'intact'
         ? `${rolled}All ${nExpected} bonds hold. The seal is whole.`
-        : `${rolled}${nFail} of ${nExpected} bonds severed. The seal is cut.`;
+        : state === 'broken'
+          ? `${rolled}${nFail} of ${nExpected} bonds severed. The seal is cut.`
+          : `${rolled}${nHold} of ${nExpected} bonds hold; ${nNotRun} not checked.`;
 
   const kx = SEAL.x;
   const ky = SEAL.y;
@@ -245,8 +253,8 @@ export function RollSigil({ receiptText, report, editable, onTamper }: RollSigil
         role="group"
         aria-label={
           nRun === 0
-            ? 'Provenance graph of the receipt: facts of the roll bonded to a central seal, not yet verified.'
-            : `Provenance graph: ${4 - nFail} of 4 verification bonds tied into the seal${nFail ? `, ${nFail} severed by tampering` : ', the seal is whole'}.`
+            ? `Provenance graph of the receipt: facts of the roll bonded to a central seal by ${nExpected} verification bonds, not yet verified.`
+            : `Provenance graph: ${nHold} of ${nExpected} verification bonds hold${nFail ? `, ${nFail} severed` : ''}${nNotRun ? `, ${nNotRun} not checked` : ''}${state === 'intact' ? ', the seal is whole' : ''}.`
         }
         xmlns="http://www.w3.org/2000/svg"
       >

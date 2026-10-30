@@ -17,7 +17,7 @@
 
 .eyebrow {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--kd-accent);
@@ -25,7 +25,7 @@
 
 .sub {
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--kd-text-muted);
 }
 
@@ -61,7 +61,7 @@
 
 .k {
   font-family: var(--kd-font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--kd-accent);
 }
 
@@ -73,7 +73,7 @@
 
 .caption {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--kd-text-muted);
   margin: 3px 0 0;
 }
@@ -124,7 +124,7 @@
 
 .honestKey {
   font-family: var(--kd-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--kd-focal);
@@ -134,7 +134,7 @@
 .honestVal {
   flex: 1 1 220px;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--kd-text-secondary);
 }

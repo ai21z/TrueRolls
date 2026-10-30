@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { MotionConfig } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
+import { domAnimation, LazyMotion, MotionConfig } from 'framer-motion';
 import type { useKarmaState } from '../hooks/useKarmaState';
 import { Hero } from './sections/Hero';
 import { Playground } from './sections/Playground';
@@ -11,7 +11,16 @@ import { seedRng } from './system/seed';
 import { InkFrame } from './system/InkFrame';
 import { InkButton } from './system/InkButton';
 import { SiteSignature } from './system/SiteSignature';
+import { SampleVerdictCard } from './SampleVerdictCard';
+import { focusHeading, lastNavigation } from './useHashView';
 import css from './Landing.module.css';
+
+const CONNECTION_TAG = {
+  checking: 'REC · CHECKING',
+  live: 'REC · LIVE',
+  demo: 'REC · DEMO',
+  unavailable: 'REC · OFFLINE',
+} as const;
 
 // ── d20 (icosahedron, face-on) for the how-it-works diagram ──────────────────
 // The labelled front face is the Roll/Sign/Verify triangle. The rest of the die is
@@ -129,26 +138,53 @@ const STEPS = [
   },
 ];
 
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
 export function Landing({ state }: Props) {
   const proofRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const scrollTo = (el: HTMLElement | null) =>
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Moves the reader, not only the view: the section's heading takes focus, so the
+  // next Tab continues from that section instead of from the button.
+  const scrollTo = (el: HTMLElement | null) => {
+    el?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+    focusHeading(el?.querySelector<HTMLElement>('h2') ?? null);
+  };
+
+  // Compact menu (small screens): Escape closes it and returns focus to its button.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   // Deep-link: arriving with #play (e.g. the Verify page's Playground link)
   // scrolls to the playground once layout has settled.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // Back/Forward returns to the reader's own position instead (see useHashView).
+    const nav = lastNavigation();
+    if (nav.kind === 'traverse' && nav.restore !== null) return;
     if (window.location.hash === '#play' || window.location.hash === '#playground') {
       const t = setTimeout(() => {
-        playRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        playRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
       }, 80);
       return () => clearTimeout(t);
     }
   }, []);
 
   return (
+    <LazyMotion features={domAnimation} strict>
     <MotionConfig reducedMotion="user">
     <main className={css.page}>
       <ScrollAtmosphere />
@@ -165,12 +201,31 @@ export function Landing({ state }: Props) {
 
       <header className={css.nav}>
         <div className={css.navLeft}>
-          <span className={css.navAccession} aria-hidden="true">REC · LIVE</span>
+          <span className={css.navAccession} aria-hidden="true" data-connection={state.connection}>
+            {CONNECTION_TAG[state.connection]}
+          </span>
           <span className={css.brand}>
             true<span className={css.brandAccent}>rolls</span>
           </span>
         </div>
-        <div className={css.navLinks}>
+        <button
+          ref={menuButtonRef}
+          type="button"
+          className={css.menuBtn}
+          aria-expanded={menuOpen}
+          aria-controls="site-nav"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? 'Close' : 'Menu'}
+        </button>
+        <nav
+          id="site-nav"
+          aria-label="Main"
+          className={`${css.navLinks} ${menuOpen ? css.navOpen : ''}`}
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest('a, button')) setMenuOpen(false);
+          }}
+        >
           <a className={css.navLink} href="#verify">
             Verify
           </a>
@@ -183,7 +238,7 @@ export function Landing({ state }: Props) {
           <InkButton seed={51} className={css.navCta} onClick={() => scrollTo(playRef.current)}>
             Open playground
           </InkButton>
-        </div>
+        </nav>
       </header>
 
       <Hero
@@ -303,22 +358,7 @@ export function Landing({ state }: Props) {
             </Reveal>
 
             <Reveal delay={0.05} className={css.verifyGrid}>
-              <InkFrame seed={50} className={css.codeCard}>
-                <div className={css.codeHead}>
-                  <span>verify</span>
-                  <span>in your browser · wasm</span>
-                </div>
-                <pre className={css.codeBody}>
-{`receipt.json  →  checked locally; key discovery may use /.well-known
-
-`}<span className={css.codeOk}>{`✓ VALID
-  signature  OK   (Ed25519)
-  drand      OK   (BLS quicknet pulse)
-  sampling   OK   (draw_u64 replayed)
-  face       OK
-  metrics    OK   (α · KL · EV)`}</span>
-                </pre>
-              </InkFrame>
+              <SampleVerdictCard />
 
               <div className={css.trustList}>
                 <div className={css.trustItem}>
@@ -392,5 +432,6 @@ export function Landing({ state }: Props) {
       </footer>
     </main>
     </MotionConfig>
+    </LazyMotion>
   );
 }

@@ -47,6 +47,11 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
+/** The 3D object is a d20: only a d20 roll (or no roll yet) may show its numbers. */
+function showNumbersFor(die: string | null): boolean {
+  return die == null || die === 'd20';
+}
+
 /** Fill-the-parent wrapper styles. Inline so we touch no shared CSS. */
 const wrapperStyle: React.CSSProperties = {
   position: 'absolute',
@@ -56,7 +61,7 @@ const wrapperStyle: React.CSSProperties = {
   pointerEvents: 'none', // decorative, never intercept the hero UI
 };
 
-export function HeroCanvas({ phase, kappa = 0, face = null, className }: HeroCanvasProps) {
+export function HeroCanvas({ phase, kappa = 0, face = null, die = null, className }: HeroCanvasProps) {
   const reducedMotion = usePrefersReducedMotion();
   const k = Math.min(1, Math.max(0, kappa)); // clamp κ stance to 0..1
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -98,7 +103,13 @@ export function HeroCanvas({ phase, kappa = 0, face = null, className }: HeroCan
         }}
         style={{ width: '100%', height: '100%', display: 'block' }}
       >
-        <DieScene phase={phase} kappa={k} face={face} reducedMotion={reducedMotion} />
+        <DieScene
+          phase={phase}
+          kappa={k}
+          face={showNumbersFor(die) ? face : null}
+          showNumbers={showNumbersFor(die)}
+          reducedMotion={reducedMotion}
+        />
       </Canvas>
     </div>
   );

@@ -1,0 +1,108 @@
+/* Loading and failure states for a view that ships in its own chunk. */
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: var(--kd-maxw);
+  margin: 0 auto;
+  padding: 96px var(--kd-gutter) 64px;
+}
+
+.loading {
+  font-family: var(--kd-font-mono);
+  font-size: 14px;
+  color: var(--kd-text-secondary);
+  /* Fast loads finish before the text shows, so they never flash. */
+  animation: appear 0s linear 400ms both;
+}
+
+.loading + .home {
+  animation: appear 0s linear 400ms both;
+}
+
+@keyframes appear {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+
+.title {
+  font-family: var(--kd-font-display);
+  font-size: clamp(28px, 6vw, 44px);
+  font-weight: 400;
+  line-height: 1.15;
+  color: var(--kd-text);
+}
+
+.body {
+  max-width: 56ch;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--kd-text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+
+.primary,
+.secondary {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--kd-border-accent);
+  border-radius: var(--kd-radius);
+  background: var(--kd-surface-raised);
+  color: var(--kd-text);
+  font-family: var(--kd-font-mono);
+  font-size: 14px;
+}
+
+.primary:hover,
+.secondary:hover:not(:disabled) {
+  border-color: var(--kd-border-glow);
+  background: var(--kd-surface);
+}
+
+.secondary {
+  border-color: var(--kd-border);
+  background: transparent;
+}
+
+.secondary:disabled {
+  cursor: not-allowed;
+  color: var(--kd-text-muted);
+}
+
+.home {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-family: var(--kd-font-mono);
+  font-size: 14px;
+  color: var(--kd-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.reload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 56ch;
+  padding-top: 18px;
+  border-top: 1px solid var(--kd-border);
+}
+
+.note {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--kd-text-secondary);
+}

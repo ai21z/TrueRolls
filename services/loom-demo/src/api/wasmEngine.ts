@@ -54,6 +54,34 @@ interface WasmRollReplayPayload extends WasmDistributionPayload {
 let ready = false;
 let initPromise: Promise<void> | null = null;
 
+/** Observable engine lifecycle, so engine-dependent UI updates when the module
+ * resolves or fails instead of reading a one-shot flag during an earlier render. */
+export type KdCoreWasmStatus = 'idle' | 'loading' | 'ready' | 'failed';
+let status: KdCoreWasmStatus = 'idle';
+let lastError: string | null = null;
+const listeners = new Set<() => void>();
+
+function setStatus(next: KdCoreWasmStatus, error: string | null = null) {
+  status = next;
+  lastError = error;
+  for (const listener of listeners) listener();
+}
+
+export function getKdCoreWasmStatus(): KdCoreWasmStatus {
+  return status;
+}
+
+export function getKdCoreWasmError(): string | null {
+  return lastError;
+}
+
+export function subscribeKdCoreWasm(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 export function isKdCoreWasmReady(): boolean {
   return ready;
 }
@@ -68,12 +96,15 @@ export async function initKdCoreWasm(): Promise<void> {
     return;
   }
   if (!initPromise) {
+    setStatus('loading');
     initPromise = init({ module_or_path: kdCoreWasmUrl })
       .then(() => {
         ready = true;
+        setStatus('ready');
       })
       .catch((error: unknown) => {
         initPromise = null;
+        setStatus('failed', error instanceof Error ? error.message : String(error));
         throw error;
       });
   }

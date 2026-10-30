@@ -16,7 +16,7 @@
 
 .eyebrow {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--kd-text-muted);
@@ -24,7 +24,7 @@
 
 .verdict {
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
 }
@@ -43,7 +43,7 @@
 
 .scope {
   font-family: var(--kd-font-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: 0.02em;
   color: var(--kd-text-muted);
 }
@@ -115,7 +115,7 @@
 
 .label {
   font-family: var(--kd-font-body);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--kd-text);
   white-space: nowrap;
@@ -126,7 +126,7 @@
 .state {
   margin-left: auto;
   font-family: var(--kd-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -151,10 +151,10 @@
   /* Keep the state WORD visible, pass/fail must never be color-only (WCAG 1.4.1).
      Shrink it and let the label ellipsis instead. */
   .state {
-    font-size: 9px;
+    font-size: 12px;
     letter-spacing: 0.02em;
   }
   .label {
-    font-size: 11px;
+    font-size: 12px;
   }
 }

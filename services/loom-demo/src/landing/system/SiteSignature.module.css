@@ -10,7 +10,7 @@
   align-items: center;
   gap: 12px;
   font-family: var(--kd-font-body);
-  font-size: 13.5px;
+  font-size: 14px;
   letter-spacing: 0.02em;
   color: var(--kd-text-muted);
 }
@@ -45,6 +45,8 @@
 }
 
 .name {
+  display: inline-block;
+  padding: 4px 0;
   color: var(--kd-text-secondary);
   text-decoration: none;
   border-bottom: 1px solid transparent;

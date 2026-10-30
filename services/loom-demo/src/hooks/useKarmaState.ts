@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import type { Die, ReceiptVerifyResponse, TranscriptEntry, VerifyCheckRow, VerifyStatus } from '../types/kd';
+import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import type { Die, EditedCopy, TranscriptEntry, VerifyCheckRow, VerifyStatus } from '../types/kd';
 import {
   getClientMode,
   initClient,
@@ -7,8 +7,17 @@ import {
   postRoll,
   postVerify,
   postVerifyReceipt,
-  type ClientMode,
+  subscribeClientMode,
+  type RollProgress,
 } from '../api/client';
+import { describeRollFailure, type RollErrorView, type RollOrigin } from '../api/rollMessages';
+
+export type { RollErrorView, RollOrigin } from '../api/rollMessages';
+import {
+  getKdCoreWasmStatus,
+  initKdCoreWasm,
+  subscribeKdCoreWasm,
+} from '../api/wasmEngine';
 import { buildReceiptBody, hasDrandProof, receiptVerifierAccepts } from '../api/receipt';
 import { isMockArtifact, normalizePersistedVerifyStatus } from '../api/trustPresentation';
 
@@ -50,7 +59,11 @@ function normalizeEntry(r: unknown): TranscriptEntry | null {
     typeof e.kl === 'number' &&
     typeof e.ev === 'number'
   ) {
-    const entry = r as unknown as TranscriptEntry;
+    // Older sessions stored an edited demonstration copy on the entry itself
+    // (`tampered`). The original fields were never changed, so keep them and drop
+    // the copy; the original is re-verified before it shows a positive status.
+    const entry = { ...(r as unknown as TranscriptEntry & { tampered?: unknown }) };
+    delete entry.tampered;
     const verifyStatus = normalizePersistedVerifyStatus(entry.verifyStatus);
     return {
       ...entry,
@@ -89,6 +102,14 @@ function initialNextId(rolls: TranscriptEntry[]): number {
   return Math.max(...rolls.map((r) => r.localId)) + 1;
 }
 
+function clientModeSnapshot() {
+  return getClientMode();
+}
+
+function engineSnapshot() {
+  return getKdCoreWasmStatus();
+}
+
 export function useKarmaState() {
   const [die, setDie] = useState<Die>('d20');
   // Uniform by default: TrueRolls leads with a verifiable, fair (kappa = 0) die.
@@ -96,10 +117,16 @@ export function useKarmaState() {
   const [kappa, setKappa] = useState(0);
   const [rolls, setRolls] = useState<TranscriptEntry[]>(loadRolls);
   const [isRolling, setIsRolling] = useState(false);
-  const [rollStatus, setRollStatus] = useState<string | null>(null);
-  const [mode, setMode] = useState<ClientMode>('live');
-  const [ready, setReady] = useState(false);
-  const [rollError, setRollError] = useState<string | null>(null);
+  const [rollProgress, setRollProgress] = useState<RollProgress | null>(null);
+  const [rollOrigin, setRollOrigin] = useState<RollOrigin | null>(null);
+  const [rollError, setRollError] = useState<RollErrorView | null>(null);
+  // The roll the latest successful request produced, and which button asked for it.
+  const [lastRoll, setLastRoll] = useState<{ localId: number; origin: RollOrigin } | null>(null);
+  const rollInFlight = useRef(false);
+  const mode = useSyncExternalStore(subscribeClientMode, clientModeSnapshot, clientModeSnapshot);
+  const engine = useSyncExternalStore(subscribeKdCoreWasm, engineSnapshot, engineSnapshot);
+  const [editedCopy, setEditedCopy] = useState<EditedCopy | null>(null);
+  const editedCopyRequest = useRef(0);
   const nextId = useRef(initialNextId(loadRolls()));
 
   // Persist rolls to sessionStorage on change
@@ -107,39 +134,55 @@ export function useKarmaState() {
     saveRolls(rolls);
   }, [rolls]);
 
+  // Both dependencies start loading at once; neither blocks the page shell.
   useEffect(() => {
-    initClient().then((initialMode) => {
-      setMode(initialMode);
-      setReady(true);
+    void initClient();
+    initKdCoreWasm().catch((err: unknown) => {
+      console.error('[kd] kd-core wasm engine failed to initialize:', err);
     });
   }, []);
 
-  // A fresh roll is a new entry. It never alters earlier dice. A die broken by a
-  // tamper stays broken (its `tampered` artifact lives on its own entry).
-  const roll = useCallback(async () => {
-    setIsRolling(true);
-    setRollStatus('Fetching public drand beacon…');
-    setRollError(null);
-    try {
-      setRollStatus('Waiting for verified drand target round…');
-      const res = await postRoll(die, kappa);
-      const entry: TranscriptEntry = {
-        ...res,
-        localId: nextId.current++,
-        verifyStatus: 'not_checked',
-      };
-      setRolls((prev) => [entry, ...prev]);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Roll failed';
-      console.warn('[kd] roll failed:', msg);
-      setRollError(msg);
-    } finally {
-      // A roll re-probes an unavailable API, so the connection state may have changed.
-      setMode(getClientMode());
-      setIsRolling(false);
-      setRollStatus(null);
-    }
-  }, [die, kappa]);
+  const retryEngine = useCallback(() => {
+    initKdCoreWasm().catch((err: unknown) => {
+      console.error('[kd] kd-core wasm engine failed to initialize:', err);
+    });
+  }, []);
+
+  // A fresh roll is a new entry. It never alters earlier dice. One roll at a time:
+  // a second activation while one is pending (from either button) is ignored, so a
+  // double click can never send a hidden second request.
+  const roll = useCallback(
+    async (origin: RollOrigin = 'playground') => {
+      if (rollInFlight.current) return;
+      rollInFlight.current = true;
+      setIsRolling(true);
+      setRollOrigin(origin);
+      setRollProgress(null);
+      setRollError(null);
+      // The last roll is the one the latest request returned: none until this one
+      // does, so a failure never brings back an earlier result as its outcome.
+      setLastRoll(null);
+      try {
+        const res = await postRoll(die, kappa, setRollProgress);
+        const entry: TranscriptEntry = {
+          ...res,
+          localId: nextId.current++,
+          verifyStatus: 'not_checked',
+        };
+        setRolls((prev) => [entry, ...prev]);
+        setLastRoll({ localId: entry.localId, origin });
+      } catch (err) {
+        const view = describeRollFailure(err, origin);
+        console.warn('[kd] roll failed:', view.detail ?? view.message);
+        setRollError(view);
+      } finally {
+        rollInFlight.current = false;
+        setIsRolling(false);
+        setRollProgress(null);
+      }
+    },
+    [die, kappa],
+  );
 
   const verify = useCallback(async (localId: number) => {
     setRolls((prev) =>
@@ -243,7 +286,11 @@ export function useKarmaState() {
     }
   }, [rolls]);
 
+  // Clears this tab's local list only. Receipts the API stored, and files the user
+  // downloaded, are unaffected.
   const clearHistory = useCallback(() => {
+    editedCopyRequest.current += 1;
+    setEditedCopy(null);
     setRolls([]);
   }, []);
 
@@ -251,29 +298,29 @@ export function useKarmaState() {
     setRollError(null);
   }, []);
 
-  // Record that a die was broken by a tamper: store the forged body + the verifier's
-  // real failing result ON the entry, so every surface (hero, seed, transcript, modal)
-  // renders the same broken artifact AND it survives re-rolls and reloads. The roll's
-  // pristine fields are untouched. Reverting the edit clears `tampered`.
-  const markTampered = useCallback(
-    (localId: number, body: Record<string, unknown>, result: ReceiptVerifyResponse) => {
-      setRolls((prev) =>
-        prev.map((r) => (r.localId === localId ? { ...r, tampered: { body, result } } : r)),
-      );
-    },
-    [],
-  );
+  // Verify an edited demonstration copy of one receipt. The original entry is never
+  // touched. Only the newest request may land, and only while its copy is still the
+  // one on screen, so a late response cannot attach to a newer copy or roll.
+  const verifyEditedCopy = useCallback(async (localId: number, body: Record<string, unknown>) => {
+    const requestId = ++editedCopyRequest.current;
+    setEditedCopy({ localId, body, requestId, status: 'verifying', result: null, error: null });
+    let next: Pick<EditedCopy, 'status' | 'result' | 'error'>;
+    try {
+      const result = await postVerifyReceipt(body);
+      next = { status: 'checked', result, error: null };
+    } catch {
+      next = {
+        status: 'error',
+        result: null,
+        error: 'The edited copy could not be checked because the verification request failed.',
+      };
+    }
+    setEditedCopy((prev) => (prev && prev.requestId === requestId ? { ...prev, ...next } : prev));
+  }, []);
 
-  // Reverting a tamper back to a passing receipt restores that one die.
-  const clearTamper = useCallback((localId: number) => {
-    setRolls((prev) =>
-      prev.map((r) => {
-        if (r.localId !== localId) return r;
-        const next = { ...r };
-        delete next.tampered;
-        return next;
-      }),
-    );
+  const discardEditedCopy = useCallback(() => {
+    editedCopyRequest.current += 1;
+    setEditedCopy(null);
   }, []);
 
   return {
@@ -281,16 +328,21 @@ export function useKarmaState() {
     kappa, setKappa,
     rolls,
     isRolling,
-    rollStatus,
+    rollProgress,
+    rollOrigin,
+    lastRoll,
+    connection: mode,
+    engine,
+    retryEngine,
     mock: mode === 'demo' || isMockMode(),
     apiUnavailable: mode === 'unavailable',
-    ready,
     roll,
     rollError,
     clearRollError,
     verify,
     clearHistory,
-    markTampered,
-    clearTamper,
+    editedCopy,
+    verifyEditedCopy,
+    discardEditedCopy,
   };
 }

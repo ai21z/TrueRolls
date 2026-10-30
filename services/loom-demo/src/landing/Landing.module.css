@@ -1,7 +1,6 @@
 .page {
   min-height: 100vh;
   width: 100%;
-  overflow-x: hidden;
 }
 
 .mockBanner {
@@ -9,7 +8,7 @@
   border-bottom: 1px solid var(--kd-border-accent);
   color: var(--kd-accent);
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   padding: 7px 16px;
 }
@@ -25,6 +24,13 @@
   padding: 14px var(--kd-gutter);
   background: rgba(10, 10, 11, 0.96);
   border-bottom: 1px solid var(--kd-border);
+}
+
+/* Scrolling to a focused control stops below the sticky bar instead of under
+   it. The bar's own controls are always in view, so they are left out: with the
+   margin, focusing one would scroll the page. */
+.page :is(a, button, input, select, textarea, [tabindex]):not(.nav *) {
+  scroll-margin-top: 84px;
 }
 
 /* the head-rule: a second inset hairline, the engraved double register edge */
@@ -48,11 +54,10 @@
 /* the brand catalogued as a specimen: a quiet accession tag in its margin */
 .navAccession {
   font-family: var(--kd-font-mono);
-  font-size: 9.5px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--kd-text-muted);
-  opacity: 0.6;
 }
 
 .brand {
@@ -79,7 +84,7 @@
   border-bottom: 1px solid transparent;
   color: var(--kd-text-secondary);
   font-family: var(--kd-font-body);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: color var(--kd-duration), border-color var(--kd-duration);
 }
@@ -95,7 +100,7 @@
   background: transparent;
   color: var(--kd-text);
   font-family: var(--kd-font-body);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: background var(--kd-duration);
 }
@@ -104,23 +109,71 @@
   background: var(--kd-surface);
 }
 
-/* Keep the nav (brand + Verify + Docs + CTA) from clipping on small phones. */
-@media (max-width: 480px) {
+.menuBtn {
+  display: none;
+}
+
+.navCta:focus-visible,
+.navLink:focus-visible,
+.menuBtn:focus-visible {
+  outline: 2px solid var(--kd-accent);
+  outline-offset: 2px;
+}
+
+/* Small screens: the links fold into a disclosure under a Menu button, so the
+   header fits at 320px without clipping or hiding a route. */
+@media (max-width: 640px) {
   .nav {
     gap: 8px;
-    padding: 12px var(--kd-gutter);
+    padding: 10px var(--kd-gutter);
+  }
+
+  .menuBtn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--kd-border-glow);
+    border-radius: var(--kd-radius-sm);
+    background: transparent;
+    color: var(--kd-text);
+    font-family: var(--kd-font-body);
+    font-size: 14px;
+    cursor: pointer;
   }
 
   .navLinks {
-    gap: 4px;
+    display: none;
   }
 
-  .navLink {
-    padding: 6px 9px;
+  .navLinks.navOpen {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 6px var(--kd-gutter) 14px;
+    background: rgba(10, 10, 11, 0.98);
+    border-bottom: 1px solid var(--kd-border);
   }
 
-  .navCta {
-    padding: 6px 12px;
+  .navOpen .navLink {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 4px;
+    font-size: 15px;
+    border-bottom: 1px solid var(--kd-border);
+  }
+
+  .navOpen .navCta {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 10px;
+    font-size: 15px;
   }
 }
 
@@ -140,7 +193,7 @@
   align-items: center;
   gap: 10px;
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--kd-accent);
@@ -280,7 +333,7 @@
 
 .stepNum {
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--kd-text-muted);
@@ -413,7 +466,7 @@
   border: 1px solid var(--kd-border-accent);
   color: var(--kd-text);
   font-family: var(--kd-font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   letter-spacing: 0.03em;
   white-space: nowrap;
   transition: background var(--kd-duration), color var(--kd-duration);
@@ -488,7 +541,7 @@
   padding: 11px 16px;
   border-bottom: 1px solid var(--kd-border);
   font-family: var(--kd-font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--kd-text-muted);
 }
 
@@ -496,7 +549,7 @@
   margin: 0;
   padding: 16px;
   font-family: var(--kd-font-mono);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--kd-text-secondary);
   white-space: pre-wrap;
@@ -505,6 +558,18 @@
 
 .codeOk {
   color: var(--kd-ember);
+}
+
+.codeFail {
+  color: var(--kd-fail-text);
+}
+
+.codeNote {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--kd-font-body);
+  font-size: 14px;
+  color: var(--kd-text-muted);
 }
 
 .trustList {
@@ -543,7 +608,7 @@
 .honest {
   margin-top: 22px;
   font-family: var(--kd-font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.7;
   color: var(--kd-text-muted);
   border-left: 2px solid var(--kd-border-glow);
@@ -607,13 +672,13 @@
 }
 
 .footerNote {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--kd-text-muted);
 }
 
 .footerField {
   font-family: var(--kd-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--kd-text-muted);
@@ -628,7 +693,7 @@
 
 .footerStamp {
   font-family: var(--kd-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--kd-text-muted);

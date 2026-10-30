@@ -45,7 +45,7 @@
 
 .brandSub {
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--kd-text-muted);
 }
 
@@ -60,7 +60,7 @@
   align-items: center;
   padding: 4px 11px;
   border-radius: var(--kd-radius-pill);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   border: 1px solid transparent;
@@ -100,7 +100,7 @@
   border-radius: var(--kd-radius-sm);
   background: transparent;
   color: var(--kd-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   transition: color var(--kd-duration), background var(--kd-duration);
 }
 
@@ -134,12 +134,12 @@
 
 .dieKappa {
   font-family: var(--kd-font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--kd-text-secondary);
 }
 
 .subtle {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--kd-text-muted);
 }
 
@@ -148,7 +148,7 @@
 }
 
 .sectionLabel {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--kd-text-muted);
   margin-bottom: 10px;
@@ -174,18 +174,47 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--kd-radius-sm);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
+/* State reads three ways, never colour alone: the word, the cell shape, the fill. */
 .pipOk {
-  color: var(--kd-ember);
-  background: var(--kd-ember-dim);
+  background: var(--kd-ember);
+  border: 1px solid var(--kd-ember);
 }
 
 .pipFail {
-  color: var(--kd-fail);
-  background: var(--kd-fail-dim);
+  position: relative;
+  background: transparent;
+  border: 1.5px solid var(--kd-fail-text);
+}
+
+.pipFail::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--kd-fail-text);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.checkWord {
+  margin-left: auto;
+  font-family: var(--kd-font-mono);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.checkOk .checkWord {
+  color: var(--kd-ember);
+}
+
+.checkFail .checkWord {
+  color: var(--kd-fail-text);
 }
 
 .checkLabel {
@@ -194,7 +223,7 @@
 }
 
 .verifyDetail {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--kd-text-muted);
   line-height: 1.55;
   margin-top: 10px;
@@ -220,7 +249,7 @@
 }
 
 .metricLabel {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--kd-text-muted);
   white-space: nowrap;
 }
@@ -249,13 +278,13 @@
 }
 
 .metaRow dt {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--kd-text-muted);
   flex-shrink: 0;
 }
 
 .metaRow dd {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--kd-text-secondary);
   text-align: right;
   min-width: 0;
@@ -273,7 +302,40 @@
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+.actionPrimary {
+  flex-basis: 100%;
+  border-color: var(--kd-border-accent);
+  color: var(--kd-text);
+}
+
+.notice {
+  min-height: 1.4em;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--kd-text-secondary);
+}
+
+.noticeFail {
+  color: var(--kd-fail-text);
+}
+
+.tamperHint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--kd-text-muted);
+}
+
+.copyVerdict {
+  font-family: var(--kd-font-mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--kd-text);
 }
 
 .actionBtn {
@@ -284,16 +346,21 @@
   background: transparent;
   color: var(--kd-text-secondary);
   font-family: var(--kd-font-body);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   transition: border-color var(--kd-duration), background var(--kd-duration), color var(--kd-duration);
 }
 
-.actionBtn:hover {
+.actionBtn:hover:not(:disabled) {
   border-color: var(--kd-border-glow);
   background: var(--kd-surface-raised);
   color: var(--kd-text);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ── Tamper demo ── */
@@ -307,13 +374,13 @@
 }
 
 .tamperTitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--kd-text);
 }
 
 .tamperNote {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--kd-text-muted);
 }
@@ -333,7 +400,7 @@
   background: transparent;
   color: var(--kd-text-secondary);
   font-family: var(--kd-font-body);
-  font-size: 12px;
+  font-size: 13px;
   transition: border-color var(--kd-duration), color var(--kd-duration);
 }
 
@@ -350,7 +417,7 @@
   border: 1px solid var(--kd-border);
   border-radius: var(--kd-radius);
   font-family: var(--kd-font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   padding: 10px;
   resize: vertical;
@@ -364,7 +431,7 @@
   background: var(--kd-accent);
   color: var(--kd-bg);
   font-family: var(--kd-font-body);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   transition: filter var(--kd-duration);
 }
@@ -380,9 +447,9 @@
 
 .tamperErrorBox {
   font-family: var(--kd-font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
-  color: var(--kd-fail);
+  color: var(--kd-fail-text);
   border: 1px solid rgba(181, 71, 77, 0.30);
   border-radius: var(--kd-radius);
   padding: 9px;
@@ -403,7 +470,7 @@
   margin: 0;
   padding-left: 16px;
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--kd-fail);
 }
@@ -413,7 +480,7 @@
 }
 
 .tamperSummary {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
   color: var(--kd-text-secondary);
   border-top: 1px dashed var(--kd-border);

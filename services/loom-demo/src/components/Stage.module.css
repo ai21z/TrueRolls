@@ -61,11 +61,6 @@
   transition: fill var(--kd-duration) var(--kd-ease);
 }
 
-.seedBroken .seedEyebrow {
-  fill: var(--nec-void);
-  opacity: 0.85;
-}
-
 .seedRim {
   fill: none;
   stroke: #1c1611;
@@ -78,23 +73,8 @@
   stroke: var(--kd-accent);
 }
 
-.seedBroken .seedRim {
-  stroke: var(--nec-void);
-  opacity: 0.95;
-}
-
 .seedRoots {
   transition: opacity var(--kd-duration) var(--kd-ease);
-}
-
-.seedScar {
-  fill: none;
-  stroke: var(--nec-void);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.92;
-  animation: fadeUp 0.4s var(--kd-ease) forwards;
 }
 
 .seedFace {
@@ -104,10 +84,6 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   transition: fill var(--kd-duration) var(--kd-ease);
-}
-
-.seedFaceBroken {
-  fill: #d98a8d;
 }
 
 .seedFaceNew {
@@ -123,8 +99,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .seedFaceNew,
-  .seedScar {
+  .seedFaceNew {
     animation: none;
   }
 }
@@ -158,7 +133,7 @@
 }
 
 .metaLabel {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   letter-spacing: 0.01em;
   color: var(--kd-text-muted);
@@ -190,7 +165,7 @@
   padding: 5px 14px;
   border-radius: var(--kd-radius-sm);
   font-family: var(--kd-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   letter-spacing: 0.01em;
 }
@@ -252,6 +227,7 @@
   align-items: flex-end;
   gap: 2px;
   height: 60px;
+  flex-shrink: 0;
   max-width: 340px;
   width: 100%;
   padding: 0 4px;
@@ -270,32 +246,28 @@
   background: var(--kd-accent);
 }
 
-.rollError {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--kd-fail);
-  background: var(--kd-fail-dim);
-  border: 1px solid rgba(181, 71, 77, 0.28);
-  border-radius: var(--kd-radius);
-  padding: 7px 16px;
+/* Reserved under the Roll button: progress while pending, the error after a
+   failure. A fixed minimum keeps the stage from jumping between phases. */
+.rollSlot {
+  width: 100%;
+  max-width: 420px;
+  min-height: 74px;
+}
+
+.engineNote {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--kd-text-secondary);
   text-align: center;
-  animation: fadeUp 0.3s var(--kd-ease) forwards;
 }
 
-.rollErrorDismiss {
-  flex: none;
+.engineRetry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--kd-accent);
   font: inherit;
-  color: var(--kd-fail);
-  background: transparent;
-  border: 1px solid rgba(181, 71, 77, 0.4);
-  border-radius: var(--kd-radius);
-  padding: 2px 8px;
+  text-decoration: underline;
   cursor: pointer;
-}
-
-.rollErrorDismiss:hover {
-  background: rgba(181, 71, 77, 0.14);
 }

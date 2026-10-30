@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { focusHeading, lastNavigation, pushViewEntry } from '../useHashView';
 import { InkFrame } from '../system/InkFrame';
 import { SiteSignature } from '../system/SiteSignature';
 import css from './Docs.module.css';
@@ -85,6 +86,19 @@ function CodeBlock({ label, right, children }: CodeBlockProps) {
   );
 }
 
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+/** Go to a docs section like a link would: update the deep link, scroll, and move
+ * focus to the section heading so keyboard and screen-reader users land there too. */
+function goToSection(id: string) {
+  pushViewEntry(`#docs-${id}`);
+  const section = document.getElementById(id);
+  section?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+  focusHeading(section?.querySelector<HTMLElement>('h1, h2') ?? null);
+}
+
 export function Docs() {
   const active = useActiveSection(TOC.map((t) => t.id));
 
@@ -92,8 +106,12 @@ export function Docs() {
   // "threat model" link, or a copied/new-tab TOC link) scrolls to that section.
   useEffect(() => {
     const scrollToHash = () => {
+      // Back/Forward to a section entry returns to the reader's own position,
+      // restored by the router, not to the section's top.
+      const nav = lastNavigation();
+      if (nav.kind === 'traverse' && nav.restore !== null) return;
       const m = window.location.hash.match(/^#\/?docs-(.+)$/);
-      if (m) document.getElementById(m[1])?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (m) document.getElementById(m[1])?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     };
     const t = setTimeout(scrollToHash, 60);
     window.addEventListener('hashchange', scrollToHash);
@@ -129,9 +147,7 @@ export function Docs() {
                   className={active === t.id ? css.tocLinkActive : css.tocLink}
                   onClick={(e) => {
                     e.preventDefault();
-                    document
-                      .getElementById(t.id)
-                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    goToSection(t.id);
                   }}
                 >
                   {t.label}
@@ -162,9 +178,7 @@ export function Docs() {
                 href="#docs-threat-model"
                 onClick={(e) => {
                   e.preventDefault();
-                  document
-                    .getElementById('threat-model')
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  goToSection('threat-model');
                 }}
               >
                 what's proven

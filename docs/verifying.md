@@ -27,11 +27,23 @@ The signature covers every signed field: `die`, `kappa`, `face`, the metrics, dr
 
 The TrueRolls site ships the verifier compiled to WebAssembly. The full verdict runs locally in the page: Ed25519 signature, drand proof, seed replay, face, and metric caps. The receipt and key are never uploaded.
 
-1. Open the verifier page and paste or drop a receipt JSON file.
-2. Provide the issuer key. The page resolves it automatically when possible from `/.well-known/truerolls-keys.json` by matching `sig.kid` and applying key status. Otherwise you can paste a single public key manually for a raw audit.
-3. Read `VALID`, `INVALID`, or `UNVERIFIABLE` and the per-check rows.
+1. Open the verifier page and paste a receipt, upload a `.json` file, or use **Verify this receipt** on a roll in the playground. That hands the exact issued receipt to the verifier in the same browser tab (session storage, no URL parameter, expires after ten minutes). It confers no key trust.
+2. Provide the issuer key. The page resolves it automatically when possible from `/.well-known/truerolls-keys.json` by matching `sig.kid` and applying key status. Otherwise you can paste a single public key manually for a raw audit; the page then labels the key as manual, with key-status checks bypassed. If the key set cannot be fetched in time, the page says so and offers a retry instead of waiting.
+3. Read `NOT CHECKED`, `VALID`, `INVALID`, or `UNVERIFIABLE` and the per-check rows, each marked pass, fail, or not run. Any edit to the receipt or key clears the verdict until you verify again.
 
-The page also lets you tamper with fields and watch the verdict break.
+The verifier opens empty. The bundled samples (a drand receipt, a legacy control, and an invalid-drand control) load only from their buttons and are labelled as samples signed with the public test key. Malformed input is reported as an input problem (empty, not JSON, not an object, or an unsupported version) before any key lookup.
+
+The page also lets you edit a signed value and watch the verdict break.
+
+### Saving receipts and the edited-copy demonstration
+
+In the playground, a roll's receipt can be downloaded as `.json`, copied, or sent to the verifier. These always use the original issued receipt. The playground's quick check (and the hero's Verified label) comes from the TrueRolls API's `POST /v1/verify`; verify the downloaded file in the browser or with the CLI to check it yourself.
+
+The tamper demonstration works on a separate, labelled **edited copy**. The signature is left as issued, so a changed value fails. An `INVALID` edited copy says nothing about the original receipt, whose bytes, signature, and status are unchanged. The edited copy is not saved; discard it or reload the page to remove it.
+
+**Clear local history** removes the rolls from this browser tab's list after a confirmation. It does not delete receipts the API stored, and it does not affect files you downloaded. The page cannot restore a cleared list, so download receipts you want to keep.
+
+If a roll fails, the page says whether the roll request was never sent (API or drand beacon unreachable) or whether its outcome is unknown (the request may have reached the API, so a receipt may exist). Rolling again always creates a new, separate roll; the page never repeats a roll request on its own.
 
 ## Verify with the CLI
 

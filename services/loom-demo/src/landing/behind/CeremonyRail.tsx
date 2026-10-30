@@ -385,7 +385,6 @@ export function CeremonyRail({ parsed, report, onReExamine }: CeremonyRailProps)
             <button
               type="button"
               className={css.btn}
-              aria-pressed={stepIndex < 0}
               onClick={togglePlay}
             >
               {stepIndex < 0 ? '❚❚ Pause' : '▶ Play'}

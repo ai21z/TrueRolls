@@ -3,16 +3,17 @@ import css from './EntropyNet.module.css';
 
 /**
  * Ambient "entropy net", a calm, very-low-presence fractal mesh painted behind
- * the whole site. It is a standing design reminder that TrueRolls rolls are not
- * yet bound to a true, unpredictable entropy source (commit-reveal + client seed
- * → drand beacon, the roadmap). Purely decorative:
+ * the landing page. Purely decorative atmosphere: it is drawn with Math.random
+ * and encodes no roll, beacon or receipt data. Rolls themselves are seeded from
+ * the public drand beacon; nothing here represents that.
  *
  * - fixed, pointer-events: none, z-index below all content (shows through the
  *   transparent page surfaces, hidden behind opaque cards).
  * - multi-scale nodes (fractal density) with gentle signals that cascade between
  *   neighbours and fade.
- * - throttled to ~30fps, paused when the tab is hidden, and rendered as a single
- *   static frame under prefers-reduced-motion.
+ * - throttled to ~30fps and animated only while the first viewport is on screen
+ *   and the tab is visible; otherwise the loop stops on a static frame. Under
+ *   prefers-reduced-motion it is a single static frame.
  *
  * Presence stays low, felt, not seen, but each ignition detonates as a bright
  * core flash that swells the ball, chaining down the cascade, with a rare
@@ -201,8 +202,20 @@ export function EntropyNet() {
       raf = requestAnimationFrame(loop);
       if (now - last < FRAME) return;
       last = now;
-      if (document.hidden) return;
       draw(true);
+    };
+
+    // Unattended work stops: animate only while the hero viewport is visible and
+    // the tab is in the foreground, so scrolling away or switching tabs idles it.
+    const shouldAnimate = () =>
+      !reduce && !document.hidden && window.scrollY < window.innerHeight;
+    const sync = () => {
+      if (shouldAnimate()) {
+        if (!raf) raf = requestAnimationFrame(loop);
+      } else if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
     };
 
     const onResize = () => {
@@ -218,15 +231,17 @@ export function EntropyNet() {
     // (and so the net is present even if rAF is throttled while backgrounded).
     draw(false);
     window.addEventListener('resize', onResize);
-
-    if (!reduce) {
-      raf = requestAnimationFrame(loop);
-    }
+    window.addEventListener('scroll', sync, { passive: true });
+    document.addEventListener('visibilitychange', sync);
+    sync();
 
     return () => {
       cancelAnimationFrame(raf);
+      raf = 0;
       window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', sync);
+      document.removeEventListener('visibilitychange', sync);
     };
   }, []);
 
