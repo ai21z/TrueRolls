@@ -1,7 +1,9 @@
 # Public Demo Operations
 
 This runbook is for a budgeted, anonymous TrueRolls public demo. It is not partner authentication,
-a contractual SLA, strict witnessed fairness, or mature production key custody.
+a contractual SLA, strict witnessed fairness, or mature production key custody. For the invite-only
+beta hosted from one PC, and the requirements it deliberately relaxes, see
+[Home-PC Closed Beta](home-pc-beta.md).
 
 ## Release Boundary
 

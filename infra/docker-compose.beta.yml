@@ -1,0 +1,172 @@
+# Home-PC closed beta: kd-api reached only through a Cloudflare Tunnel.
+#
+# No service publishes a host port. Postgres, Redis and MinIO sit on an internal network with no
+# route out; kd-api joins a second network for drand, and cloudflared uses that one for its outbound
+# tunnel. Every secret comes from the operator's env file, which lives outside the repository and is
+# created by scripts/beta-secrets.ps1. See docs/how-to/home-pc-beta.md for the full procedure.
+#
+#   docker compose -f infra/docker-compose.beta.yml --env-file <beta.env> up -d
+#
+# cloudflared is in the `tunnel` profile, enabled by COMPOSE_PROFILES=tunnel in the env file once the
+# tunnel token has been pasted there. Without it the stack runs with no public path at all.
+
+name: truerolls-beta
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kd_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set POSTGRES_ADMIN_PASSWORD in the beta env file}
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=trust
+      # Read once by beta/postgres-init on first start to create the API's non-superuser role.
+      KD_DB_APP_PASSWORD: ${KD_DB_APP_PASSWORD:?set KD_DB_APP_PASSWORD in the beta env file}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./beta/postgres-init:/docker-entrypoint-initdb.d:ro
+    networks: [backend]
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kd_admin -d kd -h 127.0.0.1"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    restart: unless-stopped
+    # noeviction: the global mint cap and roll locks live here, so memory pressure must surface as
+    # an error rather than silently dropping cap state.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in the beta env file}
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  minio:
+    image: truerolls-minio:test-fixture
+    build: ./minio-test
+    pull_policy: build
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in the beta env file}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the beta env file}
+      MINIO_BROWSER: "off"
+    volumes:
+      - minio-data:/data
+    networks: [backend]
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  minio-init:
+    image: truerolls-minio:test-fixture
+    build: ./minio-test
+    pull_policy: build
+    entrypoint: ["/bin/sh", "/init/minio-init.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      KD_S3_ACCESS_KEY: ${KD_S3_ACCESS_KEY:?set KD_S3_ACCESS_KEY in the beta env file}
+      KD_S3_SECRET_KEY: ${KD_S3_SECRET_KEY:?set KD_S3_SECRET_KEY in the beta env file}
+    volumes:
+      - ./beta/minio-init.sh:/init/minio-init.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [backend]
+    logging: *logging
+    restart: "no"
+
+  api:
+    # A locally built tag, never pulled: build it from the exact commit that passed CI.
+    image: ${KD_API_IMAGE:?set KD_API_IMAGE in the beta env file}
+    pull_policy: never
+    restart: unless-stopped
+    <<: *hardening
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      DATABASE_URL: postgres://kd_app:${KD_DB_APP_PASSWORD}@postgres:5432/kd
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: kd-transcripts
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${KD_S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${KD_S3_SECRET_KEY}
+      KD_ENV: prod
+      KD_SIGNING_ED25519_SECRET: ${KD_SIGNING_ED25519_SECRET:?set KD_SIGNING_ED25519_SECRET in the beta env file}
+      KD_SIGNING_KID: ${KD_SIGNING_KID:?set KD_SIGNING_KID in the beta env file}
+      # Requests arrive only through the tunnel, where Cloudflare's edge sets CF-Connecting-IP.
+      KD_TRUSTED_PROXY: cloudflare
+      # Per-IP bound: burst 5 + ceil(3600 / 10) = 365 attempts per window, below the cap.
+      KD_ROLL_RL_PERIOD_SECS: 10
+      KD_ROLL_RL_BURST: 5
+      KD_ROLL_GLOBAL_CAP: ${KD_ROLL_GLOBAL_CAP:-1000}
+      KD_ROLL_GLOBAL_CAP_WINDOW_SECS: 3600
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [backend, egress]
+    logging: *logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
+    profiles: [tunnel]
+    restart: unless-stopped
+    <<: *hardening
+    read_only: true
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [egress]
+    logging: *logging
+
+networks:
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

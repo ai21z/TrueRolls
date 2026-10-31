@@ -108,3 +108,20 @@ pwsh -File scripts/backup-restore-rehearsal.ps1
 ```
 
 This is a local controlled rehearsal, not a production backup command.
+
+## `beta-secrets.ps1` / `beta-keyset.ps1` - home-PC closed beta
+
+`beta-secrets.ps1` writes the beta env file outside the repository
+(default `%LOCALAPPDATA%\TrueRolls\beta\beta.env`), readable only by the current user, with a fresh
+signing seed and service credentials. It prints no secret and never overwrites an existing file.
+
+`beta-keyset.ps1` copies the running beta API's `/.well-known/truerolls-keys.json` into the site
+build, and with `-Check -Against <file or URL>` compares a published copy with the API's key set.
+
+```powershell
+pwsh -File scripts/beta-secrets.ps1
+pwsh -File scripts/beta-keyset.ps1
+pwsh -File scripts/beta-keyset.ps1 -Check -Against .\truerolls-keys.json
+```
+
+See [Home-PC Closed Beta](../docs/how-to/home-pc-beta.md).
