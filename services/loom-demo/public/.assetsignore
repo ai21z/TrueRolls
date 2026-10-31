@@ -1,0 +1,2 @@
+# Not uploaded to the Worker: the Vite build manifest is only for scripts/bundle-report.mjs.
+.vite

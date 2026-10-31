@@ -9,6 +9,7 @@
     "fixtures:check": "node ../../scripts/generate-browser-fixtures.mjs --check",
     "bundle:check": "node ../../scripts/bundle-report.mjs",
     "build": "tsc -b && vite build",
+    "build:beta": "tsc -b && vite build --mode closed-beta",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",

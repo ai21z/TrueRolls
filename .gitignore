@@ -12,6 +12,9 @@ coverage/
 .env
 .env.local
 .env.*.local
+# Home-PC beta secrets belong outside the repo (scripts/beta-secrets.ps1); ignored in case of a copy.
+beta.env
+.env.beta
 
 # IDE
 .idea/
