@@ -5,8 +5,8 @@
 
 .DESCRIPTION
   Generates everything infra/docker-compose.beta.yml needs (the Ed25519 receipt signing seed and
-  the Postgres, Redis and MinIO credentials) and writes it to a file outside the repository that
-  only the current user can read. Prints no secret.
+  the Postgres, Redis and MinIO credentials) and writes it to a private file, outside the repository
+  by default, that only the current user can read. Prints no secret.
 
   TUNNEL_TOKEN and COMPOSE_PROFILES stay empty. Once the Access application and the tunnel's
   "Protect with Access" setting exist, paste the tunnel token yourself, then set
@@ -15,6 +15,9 @@
 
   An existing file is never replaced: its seed may already sign published receipts. Change keys
   with docs/how-to/key-rotation.md instead.
+
+  -AllowRepositoryLocalStorage permits only .local-work/private-beta/ after checking this repo's
+  local Git exclusion and root Docker exclusion. A local copy is not an offline backup.
 
 .EXAMPLE
   pwsh -File scripts/beta-secrets.ps1
@@ -25,16 +28,14 @@
 param(
   [string]$Path = (Join-Path $env:LOCALAPPDATA 'TrueRolls\beta\beta.env'),
   [string]$Kid = ('trb-' + (Get-Date -AsUTC -Format 'yyyy-MM')),
-  [string]$ApiImage
+  [string]$ApiImage,
+  [switch]$AllowRepositoryLocalStorage
 )
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$Target = [IO.Path]::GetFullPath($Path)
-
-if ($Target.StartsWith($RepoRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-  throw "Refusing to write secrets inside the repository: $Target"
-}
+Import-Module (Join-Path $PSScriptRoot 'lib/beta-ops.psm1') -Force -DisableNameChecking
+$Target = Assert-BetaStoragePath $Path $RepoRoot -AllowRepositoryLocalStorage:$AllowRepositoryLocalStorage
 if (Test-Path -LiteralPath $Target) {
   throw "Refusing to overwrite $Target. Its seed may already sign receipts; rotate with docs/how-to/key-rotation.md."
 }

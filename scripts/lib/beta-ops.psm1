@@ -7,22 +7,62 @@ function Assert-BetaRestoreProject {
   }
 }
 
-function Assert-BetaBackupPath {
-  param([string]$Path, [string]$RepoRoot)
+function Assert-BetaStoragePath {
+  param([string]$Path, [string]$RepoRoot, [switch]$AllowRepositoryLocalStorage)
   $full = [IO.Path]::GetFullPath($Path)
   $repo = [IO.Path]::GetFullPath($RepoRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
   $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
   if ($full.Equals($repo, $comparison) -or $full.StartsWith($repo + [IO.Path]::DirectorySeparatorChar, $comparison)) {
-    throw 'Backup directory must be outside the repository and its Docker build context.'
+    $private = Join-Path $repo '.local-work/private-beta'
+    if (-not $AllowRepositoryLocalStorage -or
+        -not $full.StartsWith($private + [IO.Path]::DirectorySeparatorChar, $comparison)) {
+      throw 'Repository-local storage requires -AllowRepositoryLocalStorage and a path under .local-work/private-beta/.'
+    }
+    $relative = [IO.Path]::GetRelativePath($repo, $full).Replace([IO.Path]::DirectorySeparatorChar, [char]'/')
+    if (-not $relative.StartsWith('.local-work/private-beta/', [StringComparison]::Ordinal)) {
+      throw 'Private storage directory casing must match the case-sensitive Docker exclusion.'
+    }
+    $gitRoot = (& git -C $repo rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not [IO.Path]::GetFullPath($gitRoot).Equals($repo, $comparison)) {
+      throw 'Private storage requires the actual repository root.'
+    }
+    $excludePath = (& git -C $repo rev-parse --git-path info/exclude 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the local Git exclusion file.' }
+    $excludePath = [IO.Path]::GetFullPath($excludePath, $repo)
+    if (-not (Test-Path -LiteralPath $excludePath) -or
+        -not @((Get-Content -LiteralPath $excludePath) | Where-Object { $_.Trim() -ceq '/.local-work/' }).Count) {
+      throw 'Add /.local-work/ to this repository''s .git/info/exclude before storing private files.'
+    }
+    & git -C $repo check-ignore --no-index --quiet -- $relative
+    if ($LASTEXITCODE -ne 0) { throw 'Private storage path is not effectively Git-excluded.' }
+    $tracked = @(& git -C $repo ls-files -- '.local-work/private-beta/' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $tracked.Count -gt 0) { throw 'Private storage contains tracked files.' }
+    $dockerIgnore = Join-Path $repo '.dockerignore'
+    if (-not (Test-Path -LiteralPath $dockerIgnore) -or
+        (Test-Path -LiteralPath (Join-Path $repo 'Dockerfile.dockerignore'))) {
+      throw 'Private storage requires the reviewed root .dockerignore with no Dockerfile-specific override.'
+    }
+    $rules = @((Get-Content -LiteralPath $dockerIgnore) | ForEach-Object { $_.Trim() } |
+      Where-Object { $_ -and -not $_.StartsWith('#') })
+    if (@($rules | Where-Object { $_.StartsWith('!') }).Count -gt 0 -or
+        -not @($rules | Where-Object { $_ -ceq '.local-work/' -or $_ -ceq '/.local-work/' }).Count) {
+      throw 'Private storage requires a .local-work/ Docker exclusion without negated rules; review changed patterns first.'
+    }
   }
-  if (Test-Path -LiteralPath $full) { throw 'Backup directory already exists; refusing to overwrite it.' }
   $ancestor = [IO.DirectoryInfo]::new($full).Parent
   while ($null -ne $ancestor) {
     if ($ancestor.Exists -and ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-      throw 'Backup path must not traverse a symlink or junction.'
+      throw 'Private storage path must not traverse a symlink or junction.'
     }
     $ancestor = $ancestor.Parent
   }
+  $full
+}
+
+function Assert-BetaBackupPath {
+  param([string]$Path, [string]$RepoRoot, [switch]$AllowRepositoryLocalStorage)
+  $full = Assert-BetaStoragePath $Path $RepoRoot -AllowRepositoryLocalStorage:$AllowRepositoryLocalStorage
+  if (Test-Path -LiteralPath $full) { throw 'Backup directory already exists; refusing to overwrite it.' }
   $full
 }
 
@@ -127,5 +167,5 @@ function Assert-BetaOwnedResource {
   }
 }
 
-Export-ModuleMember -Function Assert-BetaRestoreProject, Assert-BetaBackupPath, New-BetaPrivateDirectory,
+Export-ModuleMember -Function Assert-BetaRestoreProject, Assert-BetaStoragePath, Assert-BetaBackupPath, New-BetaPrivateDirectory,
   Assert-BetaPrivateFile, ConvertTo-BetaRestoreModel, Assert-BetaOwnedResource

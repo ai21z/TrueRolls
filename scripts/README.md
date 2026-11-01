@@ -111,7 +111,7 @@ This is a local controlled rehearsal, not a production backup command.
 
 ## `beta-secrets.ps1` / `beta-keyset.ps1` - home-PC closed beta
 
-`beta-secrets.ps1` writes the beta env file outside the repository
+`beta-secrets.ps1` writes the beta env file outside the repository by default
 (default `%LOCALAPPDATA%\TrueRolls\beta\beta.env`), readable only by the current user, with a fresh
 signing seed and service credentials. It prints no secret and never overwrites an existing file.
 
@@ -131,13 +131,20 @@ See [Home-PC Closed Beta](../docs/how-to/home-pc-beta.md).
 Backs up an existing beta source without deleting its volumes. A running source API requires
 `-ConfirmSourcePause`; its prior running state is restored even if backup fails. Backups contain
 the env file, key set, database and transcripts, and require a new owner-only directory outside
-the repository. The owner must make a protected offline copy separately.
+the repository by default. The owner must make a protected offline copy separately.
 
 ```powershell
 pwsh -NoProfile -File scripts/tests/beta-ops.tests.ps1
 pwsh -File scripts/beta-backup-restore.ps1 -ConfirmSourcePause `
   -BackupDirectory "$env:LOCALAPPDATA\TrueRolls\beta-backups\<new-unique-directory>"
 ```
+
+The explicit `-AllowRepositoryLocalStorage` mode permits secrets and new backup directories only
+under `.local-work/private-beta/`. Both this clone's `.git/info/exclude` and the root Docker
+exclusion must cover `.local-work/`; tracked private files, Git exceptions, Docker negations and
+Dockerfile-specific ignore overrides fail closed. All other repository-local locations remain
+forbidden. See [Home-PC Closed Beta](../docs/how-to/home-pc-beta.md#optional-repository-local-storage)
+for the exact local commands. These copies are not offline backups or protection against disk loss.
 
 Restore resources use a unique project, immutable source image IDs and new volumes/networks.
 No host ports or Tunnel service are present. Cleanup checks project labels and resource names;

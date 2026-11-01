@@ -70,11 +70,45 @@ Check $true 'matching resource ownership accepted'
 Reject { Assert-BetaOwnedResource 'truerolls-beta_postgres-data' $project $project } 'foreign resource name refused'
 Reject { Assert-BetaOwnedResource "${project}_postgres-data" 'truerolls-beta' $project } 'foreign project label refused'
 
-$tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
-$private = Join-Path $tempParent ('truerolls-beta-ops-tests-' + [Guid]::NewGuid().ToString('N'))
-Assert-BetaBackupPath $private $repo | Out-Null
+$testParent = Join-Path $repo '.local-work'
+$fixture = Join-Path $testParent ('beta-storage-tests-' + [Guid]::NewGuid().ToString('N'))
+New-BetaPrivateDirectory $fixture
 try {
+  & git -C $fixture init --quiet
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize storage test fixture.' }
+  $info = Join-Path $fixture '.git/info/exclude'
+  $dockerIgnore = Join-Path $fixture '.dockerignore'
+  $dockerSpecific = Join-Path $fixture 'Dockerfile.dockerignore'
+  [IO.File]::WriteAllText($info, "/.local-work/`n")
+  [IO.File]::WriteAllText($dockerIgnore, ".local-work/`n")
+  $private = Join-Path $fixture '.local-work/private-beta/permissions'
+  Reject { Assert-BetaStoragePath $private $fixture } 'local storage still requires explicit opt-in'
+  $allowed = Assert-BetaStoragePath $private $fixture -AllowRepositoryLocalStorage
+  Check ($allowed -eq [IO.Path]::GetFullPath($private)) 'explicit Git and Docker excluded local storage accepted'
+  Reject { Assert-BetaStoragePath (Join-Path $fixture 'outputs/private') $fixture -AllowRepositoryLocalStorage } 'opt-in does not allow arbitrary repository folders'
+  Reject { Assert-BetaStoragePath (Join-Path $fixture '.local-work/private-beta-elsewhere/file') $fixture -AllowRepositoryLocalStorage } 'similar private folder prefix refused'
+  Reject { Assert-BetaStoragePath (Join-Path $fixture '.LOCAL-WORK/private-beta/file') $fixture -AllowRepositoryLocalStorage } 'case-mismatched Docker exclusion refused'
+  Reject { Assert-BetaStoragePath (Join-Path $fixture '.local-work/private-beta/../../escape') $fixture -AllowRepositoryLocalStorage } 'local storage traversal refused'
+  Reject { Assert-BetaStoragePath $private (Split-Path $fixture -Parent) -AllowRepositoryLocalStorage } 'non-repository root refused'
+  [IO.File]::WriteAllText($info, '')
+  [IO.File]::WriteAllText((Join-Path $fixture '.gitignore'), "/.local-work/`n")
+  Reject { Assert-BetaStoragePath $private $fixture -AllowRepositoryLocalStorage } 'gitignore alone cannot replace local info exclusion'
+  [IO.File]::WriteAllText($info, "/.local-work/`n")
+  [IO.File]::WriteAllText((Join-Path $fixture '.gitignore'), "!/.local-work/`n")
+  Reject { Assert-BetaStoragePath $private $fixture -AllowRepositoryLocalStorage } 'ineffective Git exclusion refused'
+  [IO.File]::WriteAllText((Join-Path $fixture '.gitignore'), '')
+  [IO.File]::WriteAllText($dockerIgnore, "target/`n")
+  Reject { Assert-BetaStoragePath $private $fixture -AllowRepositoryLocalStorage } 'missing Docker exclusion refused'
+  [IO.File]::WriteAllText($dockerIgnore, ".local-work/`n!.local-work/private-beta/`n")
+  Reject { Assert-BetaStoragePath $private $fixture -AllowRepositoryLocalStorage } 'negated Docker rules require review'
+  [IO.File]::WriteAllText($dockerIgnore, ".local-work/`n")
+  [IO.File]::WriteAllText($dockerSpecific, ".local-work/`n")
+  Reject { Assert-BetaStoragePath $private $fixture -AllowRepositoryLocalStorage } 'Dockerfile-specific ignore overrides require review'
+  Remove-Item -LiteralPath $dockerSpecific
+  Assert-BetaBackupPath $private $fixture -AllowRepositoryLocalStorage | Out-Null
+  Check $true 'new local backup directory accepted with explicit opt-in'
   New-BetaPrivateDirectory $private
+  Reject { Assert-BetaBackupPath $private $fixture -AllowRepositoryLocalStorage } 'local backup cannot overwrite an existing directory'
   Reject { New-BetaPrivateDirectory $private } 'private directory cannot overwrite an existing path'
   $file = Join-Path $private 'fixture.txt'
   [IO.File]::WriteAllText($file, 'fixture')
@@ -90,10 +124,39 @@ try {
     [IO.File]::SetUnixFileMode($file, [IO.UnixFileMode]420)
   }
   Reject { Assert-BetaPrivateFile $file } 'shared fixture refused'
+  $scripts = Join-Path $fixture 'scripts'
+  New-Item -ItemType Directory -Path (Join-Path $scripts 'lib') | Out-Null
+  Copy-Item -LiteralPath (Join-Path $repo 'scripts/beta-secrets.ps1') -Destination $scripts
+  Copy-Item -LiteralPath (Join-Path $repo 'scripts/lib/beta-ops.psm1') -Destination (Join-Path $scripts 'lib')
+  $generator = Join-Path $scripts 'beta-secrets.ps1'
+  $envPath = Join-Path $fixture '.local-work/private-beta/issuer/beta.env'
+  Reject { & $generator -Path $envPath -ApiImage 'truerolls-kd-api:storage-fixture' } 'secret generator refuses repository-local default'
+  Check (-not (Test-Path -LiteralPath $envPath)) 'refused generator creates no credential file'
+  $generatorOutput = @(& $generator -Path $envPath -ApiImage 'truerolls-kd-api:storage-fixture' -Kid 'trb-storage-fixture' -AllowRepositoryLocalStorage *>&1) | Out-String
+  Assert-BetaPrivateFile $envPath
+  Check $true 'explicit local secret generation keeps owner-only permissions'
+  $values = @{}
+  foreach ($line in Get-Content -LiteralPath $envPath) {
+    if ($line -and -not $line.StartsWith('#')) { $pair = $line.Split('=', 2); $values[$pair[0]] = $pair[1] }
+  }
+  Check ($values.KD_SIGNING_ED25519_SECRET -cmatch '^[a-f0-9]{64}$') 'disposable signing seed has expected encoding'
+  $printedSecrets = @($values.Keys | Where-Object {
+    $_ -match 'SECRET|PASSWORD' -and $values[$_] -and $generatorOutput.Contains($values[$_])
+  })
+  Check ($printedSecrets.Count -eq 0) 'secret generator output contains no credential values'
+  Check ($values.TUNNEL_TOKEN -eq '' -and $values.COMPOSE_PROFILES -eq '') 'local credential generation never activates a tunnel'
+  $beforeEnv = (Get-FileHash -LiteralPath $envPath).Hash
+  Reject { & $generator -Path $envPath -ApiImage 'truerolls-kd-api:storage-fixture' -AllowRepositoryLocalStorage } 'local secret generator cannot overwrite credentials'
+  Check ((Get-FileHash -LiteralPath $envPath).Hash -ceq $beforeEnv) 'refused overwrite leaves credentials byte-identical'
+  $tracked = Join-Path $fixture '.local-work/private-beta/tracked-public-fixture.txt'
+  [IO.File]::WriteAllText($tracked, 'public test fixture, not a credential')
+  & git -C $fixture add --force -- '.local-work/private-beta/tracked-public-fixture.txt'
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot prepare tracked-file rejection test.' }
+  Reject { Assert-BetaStoragePath (Join-Path $fixture '.local-work/private-beta/new-file') $fixture -AllowRepositoryLocalStorage } 'tracked files in private storage refused'
 } finally {
-  $resolved = (Resolve-Path -LiteralPath $private).Path
-  if (-not $resolved.StartsWith($tempParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
-      [IO.Path]::GetFileName($resolved) -notmatch '^truerolls-beta-ops-tests-[a-f0-9]{32}$') {
+  $resolved = (Resolve-Path -LiteralPath $fixture).Path
+  if (-not $resolved.StartsWith($testParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+      [IO.Path]::GetFileName($resolved) -notmatch '^beta-storage-tests-[a-f0-9]{32}$') {
     throw 'Unsafe test cleanup path.'
   }
   Remove-Item -LiteralPath $resolved -Recurse -Force

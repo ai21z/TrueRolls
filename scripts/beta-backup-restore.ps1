@@ -6,7 +6,8 @@
   The source must already exist. This script never deletes source containers, volumes or objects.
   -ConfirmSourcePause is required to pause a running source API. Its prior running state is restored
   even if backup fails. Backup files contain secrets and stay in a new owner-only directory outside
-  the repository. They are not an offline backup until the owner moves a protected copy offline.
+  the repository by default. -AllowRepositoryLocalStorage permits only the checked, Git/Docker-excluded
+  .local-work/private-beta/ subtree. Neither location is offline until a protected copy is moved offline.
 
   Restoration uses the running source containers' immutable image IDs, new volumes and networks,
   no published ports and no cloudflared service. Only label-checked restore resources are deleted.
@@ -21,7 +22,8 @@ param(
   [string]$SourceProject = 'truerolls-beta',
   [string]$RestoreProject = ('truerolls-beta-restore-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)),
   [string]$KeySetFile,
-  [switch]$ConfirmSourcePause
+  [switch]$ConfirmSourcePause,
+  [switch]$AllowRepositoryLocalStorage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,7 +33,8 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $composeFile = Join-Path $repo 'infra/docker-compose.beta.yml'
 if ($SourceProject -cnotmatch '\Atruerolls-beta(?:-[a-z0-9-]+)?\z') { throw 'Unexpected source project name.' }
 Assert-BetaRestoreProject $RestoreProject $SourceProject
-$backup = Assert-BetaBackupPath $BackupDirectory $repo
+$backup = Assert-BetaBackupPath $BackupDirectory $repo -AllowRepositoryLocalStorage:$AllowRepositoryLocalStorage
+Assert-BetaStoragePath $EnvFile $repo -AllowRepositoryLocalStorage:$AllowRepositoryLocalStorage | Out-Null
 Assert-BetaPrivateFile $EnvFile
 $envSha256 = (Get-FileHash -LiteralPath $EnvFile -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceArgs = @('compose', '-p', $SourceProject, '-f', $composeFile, '--env-file', $EnvFile)

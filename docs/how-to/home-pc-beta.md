@@ -44,7 +44,7 @@ cloudflared (outbound only, validates the Access token) -> api:8080 -> postgres,
 | --- | --- |
 | Postgres over TLS with server identity verification | Plain TCP on the internal Docker network of a single host |
 | S3 over HTTPS, managed storage | The repository's MinIO test fixture, over HTTP on the internal network |
-| Secret store for the signing seed | Env file outside the repository, readable only by the owner's Windows account |
+| Secret store for the signing seed | Owner-only env file outside the repository by default; explicit checked local-storage mode below |
 | High availability | One instance; down whenever the PC, Docker Desktop or the uplink is down |
 | Provider alerts, log retention | `docker compose logs` and Cloudflare analytics; json-file logs capped at 5 x 10 MB per container |
 
@@ -93,6 +93,29 @@ pwsh -File scripts/beta-secrets.ps1
 This writes `%LOCALAPPDATA%\TrueRolls\beta\beta.env`, readable only by you, and refuses to overwrite
 an existing file. Back the file up offline: losing the seed forces a key rotation, and anyone holding
 it can sign receipts as the beta issuer.
+
+#### Optional repository-local storage
+
+If the owner requires all beta files under the project, the only supported subtree is
+`.local-work/private-beta/`. It must be excluded by `/.local-work/` in this clone's
+`.git/info/exclude` and by `.local-work/` in the root `.dockerignore`. Do not add these files to
+tracked `.gitignore` exceptions, the site build, public fixtures, or deployment artifacts.
+The scripts refuse tracked private files, ineffective Git exclusions, negated Docker rules and
+a Dockerfile-specific ignore override. Other in-repository secret/backup locations remain forbidden.
+
+```powershell
+$BetaEnv = Join-Path $PWD '.local-work/private-beta/issuer/beta.env'
+pwsh -File scripts/beta-secrets.ps1 -Path $BetaEnv -AllowRepositoryLocalStorage
+```
+
+Pass this same `-EnvFile $BetaEnv` to `beta-keyset.ps1` and `beta-backup-restore.ps1`; do not use
+their default outside-repository env path. Backups in this subtree also require the explicit
+`-AllowRepositoryLocalStorage` switch. Keep the directory owner-only and use only the reviewed
+root Dockerfile/context; alternative build/archive/upload paths need their own exclusion review.
+
+Git/Docker exclusions are not encryption, protection against forced Git staging, or a backup.
+A recovery copy in the project on the same disk is local-only, not offline or independent of
+disk loss. The offline recovery gate remains pending until a protected copy exists elsewhere.
 
 ### 3. API image
 
@@ -221,9 +244,18 @@ and object snapshot, then restores its prior running state even on failure. If t
 already stopped, pass `-KeySetFile <saved issuer key set>`; it will remain stopped afterward.
 
 Backups include the env file and issuer key set, so they must stay outside the repository and build
-context. A new backup directory gets owner-only access; an existing directory is never overwritten.
+context by default, or use the explicitly checked repository-local mode above. A new backup directory
+gets owner-only access; an existing directory is never overwritten.
 These local permissions are not disk encryption or an offline backup. The owner must retain a
 protected offline copy of the secrets and recovery data.
+
+For repository-local recovery copies:
+
+```powershell
+pwsh -File scripts/beta-backup-restore.ps1 -EnvFile $BetaEnv -ConfirmSourcePause `
+  -BackupDirectory (Join-Path $PWD '.local-work/private-beta/backups/<new-unique-directory>') `
+  -AllowRepositoryLocalStorage
+```
 
 Restoration uses a unique `truerolls-beta-restore-<12 hex>` project, immutable source image IDs,
 new volumes and networks, no host ports, and no cloudflared service regardless of inherited profiles
