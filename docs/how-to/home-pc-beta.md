@@ -16,7 +16,8 @@ Cloudflare edge
   |-- beta.truerolls.dev/livez    -> no Worker -> Cloudflare Tunnel
   |-- beta.truerolls.dev/healthz  -> no Worker -> Cloudflare Tunnel
   v
-cloudflared (outbound only) -> api:8080 -> postgres, redis, minio    Compose project truerolls-beta
+cloudflared (outbound only, validates the Access token) -> api:8080 -> postgres, redis, minio
+                                                         Compose project truerolls-beta
 ```
 
 - One hostname serves the site and the API, so the site is built with `VITE_API_URL` empty
@@ -28,7 +29,14 @@ cloudflared (outbound only) -> api:8080 -> postgres, redis, minio    Compose pro
   route out. kd-api also joins an egress network for drand; cloudflared uses only that one.
 - kd-api runs with `KD_ENV=prod` and `KD_TRUSTED_PROXY=cloudflare`: it takes the client IP from
   `CF-Connecting-IP`, which only Cloudflare's edge can set because the tunnel is the API's only
-  entry point. A request without that header is refused.
+  entry point. A request without that header is refused. That header is for rate limiting, not
+  authentication.
+- Access is the only authentication, and the API does not check Access tokens itself. cloudflared
+  checks them instead ("Protect with Access" on the tunnel route), so a request that reaches the
+  tunnel without passing Access, for example through a misconfigured route, is not forwarded.
+- Minting is limited per client IP and by one global cap per hour shared by all testers
+  (`KD_ROLL_GLOBAL_CAP`, default 1000). These protect against abuse; they are not per-tester
+  budgets, because the API never learns which tester is calling.
 
 ## Deliberate Deviations
 
@@ -109,14 +117,20 @@ pwsh -File scripts/beta-keyset.ps1
 
 ### 6. Cloudflare
 
-You do these steps yourself, signed in to your own account.
+You do these steps yourself, signed in to your own account. Keep this order: until the Access
+application exists, anything published on the hostname is open to the whole Internet.
 
-1. Zero Trust > Networks > Tunnels: create a remotely managed tunnel `truerolls-beta` with public
-   hostname `beta.truerolls.dev` and service `http://api:8080`. Paste its token into `TUNNEL_TOKEN` in
-   the env file, set `COMPOSE_PROFILES=tunnel`, and run `docker @Beta up -d --wait` again.
-2. Zero Trust > Access > Applications: a self-hosted application for the whole hostname
+1. Zero Trust > Access > Applications: create a self-hosted application for the whole hostname
    `beta.truerolls.dev`, login method one-time PIN, one Allow policy "Include: Emails" listing the
-   testers, session duration 24 hours.
+   testers, session duration 24 hours. Note the application's Audience (AUD) tag and your Zero Trust
+   team name; step 2 needs both.
+2. Zero Trust > Networks > Tunnels: create a remotely managed tunnel `truerolls-beta`, and add the
+   public hostname route `beta.truerolls.dev` with service `http://api:8080`. Under the route's
+   Additional application settings, turn on "Protect with Access" with that team name and AUD tag,
+   so cloudflared drops any request without a valid Access token. Then paste the tunnel token into
+   `TUNNEL_TOKEN` in the env file, set `COMPOSE_PROFILES=tunnel`, and run
+   `docker @Beta up -d --wait` again. Before going on, confirm that a signed-out request to
+   `https://beta.truerolls.dev/livez` is sent to the Access login.
 3. Workers: deploy `services/loom-demo` with Wrangler (`wrangler.jsonc` there). In the zone's Workers
    Routes, add `beta.truerolls.dev/v1/*`, `beta.truerolls.dev/livez` and `beta.truerolls.dev/healthz`
    with Worker "None"; these more specific routes send API traffic past the Worker to the tunnel.
@@ -128,7 +142,7 @@ You do these steps yourself, signed in to your own account.
 | Gate | Check |
 | --- | --- |
 | G1 routing | An `/assets/` file comes from the Worker; `/livez` reaches the API; an unknown path gets the site |
-| G2 Access | A signed-out request goes to the Access login; an email not on the list is refused |
+| G2 Access | A signed-out request goes to the Access login; an email not on the list is refused; the tunnel route shows "Protect with Access" on, and a signed-in tester can still roll |
 | G3 client IP | API logs show your public IP, not a Cloudflare address |
 | G4 roll | A live roll returns a `truerolls-drand-1` receipt that the browser verifies |
 | G5 key set | `scripts/beta-keyset.ps1 -Check -Against <file saved from the browser>` reports MATCH |

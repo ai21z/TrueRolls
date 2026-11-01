@@ -8,8 +8,9 @@
   the Postgres, Redis and MinIO credentials) and writes it to a file outside the repository that
   only the current user can read. Prints no secret.
 
-  TUNNEL_TOKEN and COMPOSE_PROFILES stay empty: paste the tunnel token from Cloudflare Zero Trust
-  yourself, then set COMPOSE_PROFILES=tunnel. The public key is published later from the running
+  TUNNEL_TOKEN and COMPOSE_PROFILES stay empty. Once the Access application and the tunnel's
+  "Protect with Access" setting exist, paste the tunnel token yourself, then set
+  COMPOSE_PROFILES=tunnel. The public key is published later from the running
   API by scripts/beta-keyset.ps1, so this script never derives or prints it.
 
   An existing file is never replaced: its seed may already sign published receipts. Change keys
@@ -83,7 +84,7 @@ $lines = @(
   'KD_S3_ACCESS_KEY=kd-api'
   "KD_S3_SECRET_KEY=$(New-Hex 20)"
   'KD_ROLL_GLOBAL_CAP=1000'
-  '# Paste the tunnel token, then set COMPOSE_PROFILES=tunnel to start cloudflared.'
+  '# After Access and "Protect with Access" are set up, paste the tunnel token, then set COMPOSE_PROFILES=tunnel.'
   'TUNNEL_TOKEN='
   'COMPOSE_PROFILES='
 )
