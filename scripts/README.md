@@ -125,3 +125,22 @@ pwsh -File scripts/beta-keyset.ps1 -Check -Against .\truerolls-keys.json
 ```
 
 See [Home-PC Closed Beta](../docs/how-to/home-pc-beta.md).
+
+## `beta-backup-restore.ps1` - protected backup and isolated beta restore
+
+Backs up an existing beta source without deleting its volumes. A running source API requires
+`-ConfirmSourcePause`; its prior running state is restored even if backup fails. Backups contain
+the env file, key set, database and transcripts, and require a new owner-only directory outside
+the repository. The owner must make a protected offline copy separately.
+
+```powershell
+pwsh -NoProfile -File scripts/tests/beta-ops.tests.ps1
+pwsh -File scripts/beta-backup-restore.ps1 -ConfirmSourcePause `
+  -BackupDirectory "$env:LOCALAPPDATA\TrueRolls\beta-backups\<new-unique-directory>"
+```
+
+Restore resources use a unique project, immutable source image IDs and new volumes/networks.
+No host ports or Tunnel service are present. Cleanup checks project labels and resource names;
+it never deletes source volumes. Database row/sequence fingerprints, object names/SHA-256 hashes
+and the restored issuer key set must match. A stopped source API needs `-KeySetFile` and stays
+stopped. This rehearsal does not authorize overwriting the real beta during disaster recovery.

@@ -1,8 +1,9 @@
 // Home-PC closed beta: an assets-only Worker serving the built site on beta.truerolls.dev.
 //
-// The API is not here. Routes for /v1/*, /livez and /healthz are set to "no Worker" in the
+// The API is not here. Routes for /v1/*, /livez* and /healthz* are set to "no Worker" in the
 // dashboard, so those requests skip this Worker and reach the Cloudflare Tunnel directly; the
-// more specific route wins. See docs/how-to/home-pc-beta.md.
+// more specific route wins. Trailing stars cover query strings as well as path suffixes;
+// unsupported health paths must return the API's 404. See docs/how-to/home-pc-beta.md.
 //
 // Deploy only `pnpm build:beta` output with the key set added by scripts/beta-keyset.ps1.
 {

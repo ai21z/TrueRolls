@@ -111,10 +111,22 @@ export function getApiBaseForCli(): string {
 
 // Liveness only: /livez does no backend I/O, so every page load does not touch the
 // database, Redis, or object storage.
+export async function isApiLivenessResponse(res: Response): Promise<boolean> {
+  const contentType = res.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+  if (!res.ok || contentType !== 'application/json') return false;
+  try {
+    const body: unknown = await res.json();
+    return typeof body === 'object' && body !== null && !Array.isArray(body)
+      && 'status' in body && body.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
 async function probeApi(): Promise<boolean> {
   try {
     const res = await fetch(BASE + '/livez', { signal: AbortSignal.timeout(3000) });
-    return res.ok;
+    return await isApiLivenessResponse(res);
   } catch {
     return false;
   }

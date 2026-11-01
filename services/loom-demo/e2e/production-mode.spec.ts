@@ -52,3 +52,18 @@ test('unreachable API shows unavailable state and never simulates a receipt', as
   await expect(page.getByRole('alert')).toHaveCount(1);
   await expect(page.locator('[data-trust-label]')).toHaveCount(0);
 });
+
+test('HTML 200 at the liveness route is not a live API', async ({ page }) => {
+  await page.route('**/api/livez', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/html',
+    body: '<!doctype html><html><body>Site or login fallback</body></html>',
+  }));
+  await page.goto('/');
+  await expect(page.locator('[data-api-state="unavailable"]')).toBeVisible();
+  await expect(page.getByText('API unavailable', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Roll a die', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'TrueRolls' }).getByRole('alert'))
+    .toContainText('No roll request was sent.');
+  await expect(page.locator('[data-trust-label]')).toHaveCount(0);
+});

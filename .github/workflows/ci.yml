@@ -15,6 +15,15 @@ env:
   SQLX_OFFLINE: "true"
 
 jobs:
+  beta-ops:
+    name: "[D] Beta backup isolation guards"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Test beta restore guards without Docker or credentials
+        shell: pwsh
+        run: ./scripts/tests/beta-ops.tests.ps1
+
   rust:
     name: "[D] Rust fmt, clippy, tests, goldens"
     runs-on: ubuntu-24.04
@@ -94,6 +103,9 @@ jobs:
       - name: Check browser fixtures match committed goldens
         run: corepack pnpm -C services/loom-demo fixtures:check
 
+      - name: Check patched glob APIs and lint rule canaries
+        run: corepack pnpm -C services/loom-demo dependency:check
+
       - name: Build
         run: corepack pnpm -C services/loom-demo build
 
@@ -155,8 +167,8 @@ jobs:
 
       # No --audit-level: pnpm's default (low) fails on every severity, matching cargo-audit. An
       # exception is a per-CVE --ignore here plus a written entry in the policy.
-      - name: pnpm production audit (every severity fails)
-        run: corepack pnpm -C services/loom-demo audit --prod
+      - name: pnpm full dependency audit (every severity fails)
+        run: corepack pnpm -C services/loom-demo audit
 
   integration-controlled:
     name: "[C] Local-stack health and verify integration"

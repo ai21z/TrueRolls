@@ -8,8 +8,10 @@
     "fixtures:generate": "node ../../scripts/generate-browser-fixtures.mjs",
     "fixtures:check": "node ../../scripts/generate-browser-fixtures.mjs --check",
     "bundle:check": "node ../../scripts/bundle-report.mjs",
+    "dependency:check": "node --test ../../scripts/dependency-guards.mjs",
     "build": "tsc -b && vite build",
     "build:beta": "tsc -b && vite build --mode closed-beta",
+    "beta:dry-run": "wrangler deploy --dry-run --no-autoconfig --outdir ../../outputs/beta-worker-dry-run",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
@@ -28,19 +30,20 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.12.1",
-    "@eslint/js": "^9.33.0",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "1.61.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/three": "^0.184.1",
-    "@vitejs/plugin-react": "^5.0.0",
-    "eslint": "^9.33.0",
-    "eslint-plugin-react-hooks": "^5.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2",
-    "vitest": "^4.1.9"
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12",
+    "wrangler": "4.156.0"
   }
 }

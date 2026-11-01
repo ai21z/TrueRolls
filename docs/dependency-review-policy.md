@@ -31,7 +31,9 @@ cargo update --dry-run
 cargo tree --locked --workspace --all-features
 cargo audit --json
 corepack pnpm -C services/loom-demo audit --prod --json
+corepack pnpm -C services/loom-demo audit --json
 corepack pnpm -C services/loom-demo install --frozen-lockfile
+corepack pnpm -C services/loom-demo dependency:check
 ```
 
 Dependency updates must preserve `Cargo.lock` and `pnpm-lock.yaml` reviewability. Goldens and
@@ -78,7 +80,7 @@ The `[X] Supply-chain advisories` job runs nightly and on every push:
 
 ```bash
 cargo audit --deny unsound --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0253
-corepack pnpm -C services/loom-demo audit --prod
+corepack pnpm -C services/loom-demo audit
 ```
 
 Any new vulnerability or unsoundness advisory fails the job, at any severity: cargo-audit has no
@@ -86,10 +88,33 @@ severity floor, and pnpm audit runs at its default level (`low`). Yanked lockfil
 reported but do not fail it. An advisory-database or registry outage fails the job and is recorded
 as an external blocker, never converted to PASS.
 
-The pnpm gate covers production dependencies only (`--prod`), the code shipped to browsers. Build
-and test tooling in `devDependencies` is reviewed under this policy but not gated in CI. A pnpm
-exception is a per-CVE `--ignore` on that command plus a written entry here; an advisory without a
-CVE is resolved with a version override instead (as with `fflate` in `pnpm-workspace.yaml`).
+The pnpm gate covers production and development dependencies. Production-only audit remains a
+useful exposure check, but it cannot replace the full gate: build/test tools run on developer
+machines and CI. A pnpm exception requires a per-CVE `--ignore` plus owner-approved written
+rationale here. Prefer a compatible patched release or reviewed override to an exception.
+
+## UI Tooling Compatibility Guards
+
+Vite stays on the patched 7.3 line and Vitest on 4.1; this is not a migration to their newer major
+versions. ESLint 10 removes the legacy ESLint 9 dependency paths through `@eslint/eslintrc`,
+`js-yaml` and callable minimatch 3. The compatible React Hooks plugin retains the previous
+`rules-of-hooks: error` and `exhaustive-deps: warn` checks. Enabling React Compiler's additional
+rules is separate work, not an implicit change to the project's lint policy.
+
+`pnpm-workspace.yaml` overrides minimatch 10 requests to 11.0.3 for
+[GHSA-g3hv-75wg-m249](https://github.com/isaacs/minimatch/security/advisories/GHSA-g3hv-75wg-m249).
+This crosses a major version and is not assumed universally compatible. The installed callers
+use the named/class API; CI checks each consumer's resolution, glob behavior, source/generated
+file coverage, and lint-violation canaries with `dependency:check`. Do not apply the override to
+callable minimatch 3. Re-evaluate or remove it when upstream packages accept a patched release.
+
+A second narrow override refreshes Babel's compatible Browserslist 4 dependency, covering
+[GHSA-c83g-rgw3-j3cx](https://github.com/advisories/GHSA-c83g-rgw3-j3cx) and
+[GHSA-73wf-gq98-2v4g](https://github.com/advisories/GHSA-73wf-gq98-2v4g). Its transitive baseline
+mapping database is refreshed with it. The existing fflate security override remains unchanged.
+
+These packages are build/test tooling, not minting, sampling or receipt-verification primitives.
+Passing their audit does not certify the application or remove the need for receipt/browser gates.
 
 ## Current UI Dependency Notice
 

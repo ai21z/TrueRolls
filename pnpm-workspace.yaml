@@ -7,3 +7,10 @@ overrides:
   # GHSA-px8p-9vwx-vf98: fflate <0.6.11 can loop forever on malformed ZIP64 in unzipSync.
   # Reached only via @react-three/drei > three-stdlib; pinned to the fixed 0.6 release.
   'fflate@>=0.6.0 <0.6.11': 0.6.11
+  # GHSA-g3hv-75wg-m249: ESLint and typescript-eslint accept minimatch 10,
+  # whose optimizationLevel=2 expansion is fixed in 11. Named/class API parity
+  # is checked by scripts/dependency-guards.mjs; never apply this to callable v3.
+  'minimatch@>=10.0.0 <11.0.1': 11.0.3
+  # Babel's existing compatible tree otherwise retains the vulnerable lock entry.
+  # Covers GHSA-c83g-rgw3-j3cx / GHSA-73wf-gq98-2v4g and its mapping dependency.
+  'browserslist@>=4.0.0 <4.29.5': 4.29.5

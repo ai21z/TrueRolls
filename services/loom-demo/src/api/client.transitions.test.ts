@@ -35,7 +35,7 @@ function stubFetch() {
       if (reply === 'down') throw new TypeError('Failed to fetch');
       if (reply === 'truncated') return new Response('{"id":"r1","fa', { status: 201 });
       const body = reply === 201 ? JSON.stringify({ id: 'r1' }) : JSON.stringify({ status: 'ok' });
-      return new Response(body, { status: reply });
+      return new Response(body, { status: reply, headers: { 'Content-Type': 'application/json' } });
     }),
   );
 }
