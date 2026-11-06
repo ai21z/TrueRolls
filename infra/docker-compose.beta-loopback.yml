@@ -1,0 +1,7 @@
+# Native-connector overlay for docker-compose.beta.yml (docs/how-to/home-pc-beta.md).
+# Publishes the API on the loopback interface only, for a cloudflared running on the Windows host.
+# Every `up` of the beta stack must include this file, or the API loses its only entry point.
+services:
+  api:
+    ports:
+      - "127.0.0.1:18080:8080"

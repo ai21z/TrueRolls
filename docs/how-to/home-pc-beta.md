@@ -16,21 +16,35 @@ Cloudflare edge
   |-- beta.truerolls.dev/livez*   -> no Worker -> Cloudflare Tunnel
   |-- beta.truerolls.dev/healthz* -> no Worker -> Cloudflare Tunnel
   v
-cloudflared (outbound only, validates the Access token) -> api:8080 -> postgres, redis, minio
-                                                         Compose project truerolls-beta
+cloudflared (outbound only, validates the Access token)
+  |-- Docker connector:  container on the egress network -> http://api:8080
+  |-- native connector:  Windows process on the host     -> http://127.0.0.1:18080
+  v
+api -> postgres, redis, minio                              Compose project truerolls-beta
 ```
+
+Choose one connector mode and run only that one:
+
+- **Docker connector** (default): the `tunnel` Compose profile, no host ports at all.
+- **Native connector**: `cloudflared.exe` on the Windows host, with the API published on loopback
+  only through `infra/docker-compose.beta-loopback.yml`. Use it when the PC's network path blocks
+  the Tunnel's outbound port 7844 for containers, for example a VPN client that can exclude a
+  single executable but not Docker's traffic. The running beta uses this mode.
 
 - One hostname serves the site and the API, so the site is built with `VITE_API_URL` empty
   (`pnpm build:beta`). The Access cookie covers both, and the API's anonymous, credential-less CORS
   model is unchanged.
 - `/.well-known/truerolls-keys.json` is a static asset of the site, copied from the running API by
   `scripts/beta-keyset.ps1`. Receipts stay verifiable in the browser while the PC is off.
-- No container publishes a host port. Postgres, Redis and MinIO are on an internal network with no
-  route out. kd-api also joins an egress network for drand; cloudflared uses only that one.
+- Postgres, Redis and MinIO never publish a host port and sit on an internal network with no route
+  out. kd-api also joins an egress network for drand; the Docker connector uses only that one. In
+  Docker-connector mode no container publishes a host port; in native mode only the API does, on
+  `127.0.0.1:18080`.
 - kd-api runs with `KD_ENV=prod` and `KD_TRUSTED_PROXY=cloudflare`: it takes the client IP from
-  `CF-Connecting-IP`, which only Cloudflare's edge can set because the tunnel is the API's only
-  entry point. A request without that header is refused. That header is for rate limiting, not
-  authentication.
+  `CF-Connecting-IP`. A request without that header is refused. That header is for rate limiting,
+  not authentication. In Docker-connector mode only Cloudflare's edge can set it, because the
+  tunnel is the API's only entry point. In native mode any process on the PC can reach the
+  loopback port and set any value; see the deviations table.
 - Access is the only authentication, and the API does not check Access tokens itself. cloudflared
   checks them instead ("Protect with Access" on the tunnel route), so a request that reaches the
   tunnel without passing Access, for example through a misconfigured route, is not forwarded.
@@ -47,11 +61,13 @@ cloudflared (outbound only, validates the Access token) -> api:8080 -> postgres,
 | Secret store for the signing seed | Owner-only env file outside the repository by default; explicit checked local-storage mode below |
 | High availability | One instance; down whenever the PC, Docker Desktop or the uplink is down |
 | Provider alerts, log retention | `docker compose logs` and Cloudflare analytics; json-file logs capped at 5 x 10 MB per container |
+| Origin reachable only through the authenticated Tunnel | Native mode only: the API also listens on `127.0.0.1:18080`, so local processes on this PC bypass Access and can choose their `CF-Connecting-IP`; the global mint cap still applies. Nothing outside the PC can reach it |
+| Connector inside the hardened container profile | Native mode only: `cloudflared.exe` runs as the signed-in user, without the container's read-only filesystem or dropped capabilities. Pin it by the release asset's SHA-256 |
 
 Least privilege still holds where it is cheap: kd-api connects to Postgres as `kd_app`, which owns
 only the `kd` database, and to MinIO as `kd-api`, which can list the transcript bucket and get,
-put and delete objects in it. kd-api and cloudflared run with a read-only filesystem, no Linux
-capabilities and `no-new-privileges`.
+put and delete objects in it. kd-api and the Docker connector run with a read-only filesystem, no
+Linux capabilities and `no-new-privileges`.
 
 The tester CLI path (`kd verify --server`) hits the Access login; browser verification is the
 supported path for the beta.
@@ -79,8 +95,10 @@ acceptance with the deployment evidence; a successful `--version` run is not a s
 
 ### 1. PC
 
-- Docker Desktop: Settings > General > "Start Docker Desktop when you sign in" on. After an unattended
-  reboot the API stays down until you sign in; the site keeps loading and verifying receipts.
+- Docker Desktop must start at sign-in: either its own Settings > General > "Start Docker Desktop
+  when you sign in" (also check that Windows Settings > Apps > Startup has not disabled it), or the
+  sign-in task in [Autostart](#autostart). After an unattended reboot the API stays down until you
+  sign in; the site keeps loading and verifying receipts.
 - Sleep and hibernate on AC: never. Windows Update active hours cover your testing hours.
 - BitLocker on the system drive is recommended: the signing seed lives on it.
 
@@ -137,13 +155,26 @@ tag. Record `docker image inspect --format '{{.Id}}' <tag>` with each deployment
 ```powershell
 $BetaEnv = "$env:LOCALAPPDATA\TrueRolls\beta\beta.env"
 $Beta = @('compose', '-f', 'infra/docker-compose.beta.yml', '--env-file', $BetaEnv)
+```
+
+In native-connector mode, add the loopback overlay instead, and use this `$Beta` for every
+command in this runbook. An `up` without the overlay recreates the API with no host port, which
+cuts the native connector off from the origin:
+
+```powershell
+$Beta = @('compose', '-f', 'infra/docker-compose.beta.yml',
+  '-f', 'infra/docker-compose.beta-loopback.yml', '--env-file', $BetaEnv)
+```
+
+```powershell
 docker @Beta up -d --wait
 docker @Beta ps
 docker @Beta exec -T api curl -fsS http://127.0.0.1:8080/healthz
 ```
 
 `/healthz` returns HTTP 200 even when degraded; accept only a body with `"status":"ok"`.
-With `COMPOSE_PROFILES` empty, cloudflared does not start and nothing is reachable from outside.
+With `COMPOSE_PROFILES` empty, the Docker connector does not start. Until a connector runs, nothing
+is reachable from outside the PC.
 
 ### 5. Site build and key set
 
@@ -172,12 +203,14 @@ application exists, anything published on the hostname is open to the whole Inte
    testers, session duration 24 hours. Note the application's Audience (AUD) tag and your Zero Trust
    team name; step 2 needs both.
 2. Zero Trust > Networks > Tunnels: create a remotely managed tunnel `truerolls-beta`, and add the
-   public hostname route `beta.truerolls.dev` with service `http://api:8080`. Under the route's
-   Additional application settings, turn on "Protect with Access" with that team name and AUD tag,
-   so cloudflared drops any request without a valid Access token. Then paste the tunnel token into
-   `TUNNEL_TOKEN` in the env file, set `COMPOSE_PROFILES=tunnel`, and run
-   `docker @Beta up -d --wait` again. Before going on, confirm that a signed-out request to
-   `https://beta.truerolls.dev/livez` is sent to the Access login.
+   public hostname route `beta.truerolls.dev` with service `http://api:8080` (Docker connector) or
+   `http://127.0.0.1:18080` (native connector). Under the route's Additional application settings,
+   turn on "Protect with Access" with that team name and AUD tag, so cloudflared drops any request
+   without a valid Access token. Then paste the tunnel token into `TUNNEL_TOKEN` in the env file
+   and start the connector: for the Docker connector, set `COMPOSE_PROFILES=tunnel` and run
+   `docker @Beta up -d --wait` again; for the native connector, keep `COMPOSE_PROFILES` empty and
+   follow [Native connector](#native-connector). Before going on, confirm that a signed-out request
+   to `https://beta.truerolls.dev/livez` is sent to the Access login.
 3. Workers: deploy `services/loom-demo` with Wrangler (`wrangler.jsonc` there). In the zone's Workers
    Routes, add `beta.truerolls.dev/v1/*`, `beta.truerolls.dev/livez*` and `beta.truerolls.dev/healthz*`
    with Worker "None"; these more specific routes send API traffic past the Worker to the tunnel.
@@ -187,6 +220,55 @@ application exists, anything published on the hostname is open to the whole Inte
 Workers Routes match the query string as well as the path, so the trailing stars are deliberate.
 The health prefixes also match paths such as `/livez-extra`; those must reach an API 404, not the
 site fallback. See [Cloudflare route matching](https://developers.cloudflare.com/workers/configuration/routing/routes/#matching-behavior).
+
+### Native connector
+
+Only for native-connector mode. Never run it alongside the Docker connector.
+
+1. Download the Windows amd64 `cloudflared.exe` of the release you reviewed from Cloudflare's GitHub
+   releases, and compare its SHA-256 with the release asset digest before first use. Keep it in an
+   owner-only directory outside the build context, such as `%LOCALAPPDATA%\TrueRolls\beta\tools\`
+   or the checked `.local-work/private-beta/` subtree.
+2. If a VPN client blocks port 7844, exclude only that executable from the VPN. Do not exclude
+   Docker, the browser, or other applications.
+3. Run it as the signed-in user in a dedicated pwsh window, with the token taken from the env file
+   into the process environment, never on the command line. The token stays in that window's
+   environment until you close it:
+
+   ```powershell
+   $env:TUNNEL_TOKEN = (Select-String -LiteralPath $BetaEnv -Pattern '^TUNNEL_TOKEN=(.+)$').
+     Matches[0].Groups[1].Value
+   $env:TUNNEL_TRANSPORT_PROTOCOL = 'http2'; $env:TUNNEL_LOG_OUTPUT = 'json'
+   & <path>\cloudflared.exe tunnel --no-autoupdate run
+   ```
+
+   `http2` uses TCP 7844 and avoids UDP paths that filter QUIC. Before trusting a new connector,
+   check its log: at least one `Registered tunnel connection` and an `Updated to new configuration`
+   whose ingress is exactly `beta.truerolls.dev` -> `http://127.0.0.1:18080` with
+   `access.required` true, your team name and the one AUD tag, followed by an `http_status:404`
+   catch-all. Stop it if the received ingress differs.
+
+#### Autostart
+
+For G7, a per-user scheduled task (at sign-in, no stored password, not elevated) runs a supervisor
+that:
+
+- starts Docker Desktop if its engine is not running, and lets the containers return through their
+  own `restart: unless-stopped` policy. It never runs `compose up`;
+- waits until the API container runs the recorded image ID, publishes exactly
+  `127.0.0.1:18080`, no other beta container publishes a port, the Docker connector is not running,
+  and `/healthz` reports `"status":"ok"`. An API you stopped on purpose stays stopped, and the
+  connector waits for it;
+- adopts a running native connector or starts one as above, checks the received ingress, and
+  restarts the connector if it exits, backing off on repeated quick failures;
+- honours a stop file in the private subtree: while it exists, the supervisor stops the connector
+  and refuses to start it. A failed safety check writes that file with its reason;
+- changes no VPN, Docker, Cloudflare or Windows setting.
+
+Run the task's interpreter under `conhost.exe --headless`. A merely hidden console can be handed
+to Windows Terminal as a visible window, and closing that window kills the supervisor. Under
+`conhost` Task Scheduler ends only the host, so the supervisor must exit when its host process
+ends. Recovery needs a sign-in: after an unattended reboot the API stays down until then.
 
 ### 7. Acceptance
 
@@ -198,7 +280,7 @@ site fallback. See [Cloudflare route matching](https://developers.cloudflare.com
 | G4 roll | A live roll returns a `truerolls-drand-1` receipt that the browser verifies |
 | G5 key set | The signed-in browser receives key-set JSON, not HTML. `scripts/beta-keyset.ps1 -Check -Against <saved file>` reports semantic MATCH for kid, algorithm, public key and status. For exact artifact equality, separately compare the SHA-256 of the saved file and `dist/.well-known/truerolls-keys.json` |
 | G6 PC off | With `docker @Beta stop api`, the site loads, shows the API as unavailable, and an old receipt still verifies |
-| G7 reboot | After a reboot and sign-in, the stack is healthy within 3 minutes with no commands |
+| G7 reboot | After a reboot and sign-in, the stack and the connector are healthy within 3 minutes with no commands, and in native mode the supervisor task is still running |
 | G8 refusal | The production profile refuses the published test signer with this configuration |
 | G9 remote CI | The deployed commit has green remote CI |
 
@@ -211,13 +293,16 @@ docker @Beta stop
 docker @Beta up -d --wait
 ```
 
-`restart: unless-stopped` brings the containers back when Docker Desktop starts. `docker @Beta down`
-removes the containers but keeps the data volumes. Never add `-v` unless you intend to delete every
-receipt and transcript.
+`restart: unless-stopped` brings the containers back when Docker Desktop starts, with their port
+bindings unchanged. `docker @Beta stop` and `start` keep the containers; `up` recreates any whose
+configuration changed, which is why native mode's `$Beta` must always include the loopback overlay.
+`docker @Beta down` removes the containers but keeps the data volumes. Never add `-v` unless you
+intend to delete every receipt and transcript.
 
 To deploy a new commit: build and tag its image (step 3), set `KD_API_IMAGE`, run
 `docker @Beta up -d --wait`, then rebuild the site and key set (step 5) and redeploy the Worker.
-Roll back by pointing `KD_API_IMAGE` at the previous tag.
+In native mode, update the image ID the supervisor accepts before the `up`, or it will refuse the
+new API and leave the connector stopped. Roll back by pointing `KD_API_IMAGE` at the previous tag.
 
 ## Keys
 
@@ -225,7 +310,8 @@ The beta uses the single-key `KD_SIGNING_ED25519_SECRET` / `KD_SIGNING_KID` pair
 revoking means moving to `KD_SIGNING_KEYS` as [Key Rotation And Revocation](key-rotation.md)
 describes, which replaces those two variables in `infra/docker-compose.beta.yml`, and then
 republishing the static key set with `scripts/beta-keyset.ps1`. On suspected compromise, stop
-minting first: `docker @Beta stop cloudflared api`.
+minting first: `docker @Beta stop cloudflared api`. In native mode, create the supervisor's stop file
+(which stops `cloudflared.exe` and keeps it stopped across reboots), then `docker @Beta stop api`.
 
 ## Backups
 
@@ -240,7 +326,9 @@ pwsh -File scripts/beta-backup-restore.ps1 -ConfirmSourcePause `
 ```
 
 The source stack must already exist. The backup command pauses its API while taking the database
-and object snapshot, then restores its prior running state even on failure. If the source API is
+and object snapshot, then restores its prior running state even on failure. It stops and starts the
+existing API container rather than recreating it, so native mode's loopback binding survives; the
+connector stays up and its API requests fail until the API is back. If the source API is
 already stopped, pass `-KeySetFile <saved issuer key set>`; it will remain stopped afterward.
 
 Backups include the env file and issuer key set, so they must stay outside the repository and build
